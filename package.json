@@ -13,10 +13,12 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1137.0",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "dotenv": "^18.0.1",
     "next": "^15.5.2",
+    "pdf-lib": "^1.17.1",
     "pg": "^8.23.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
