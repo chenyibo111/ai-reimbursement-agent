@@ -1,0 +1,145 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ClaimStatus {
+  DRAFT
+  PROCESSING
+  NEEDS_INFORMATION
+  AWAITING_CONFIRMATION
+  SUBMITTED
+}
+
+enum FieldSource {
+  EXTRACTED
+  USER_ENTERED
+  SYSTEM_CALCULATED
+}
+
+enum ReceiptStatus {
+  PENDING
+  EXTRACTING
+  EXTRACTED
+  FAILED
+}
+
+enum ValidationSeverity {
+  BLOCKING
+  WARNING
+}
+
+model Employee {
+  id          String       @id
+  displayName String
+  department  String?
+  feishuUserId String?     @unique
+  createdAt   DateTime     @default(now())
+  claims      ClaimDraft[]
+}
+
+model ClaimDraft {
+  id                String             @id @default(cuid())
+  employeeId        String
+  employee          Employee           @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  status            ClaimStatus        @default(DRAFT)
+  purpose           String?
+  version           Int                @default(0)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  receipts          Receipt[]
+  expenseItems      ExpenseItem[]
+  clarifications    Clarification[]
+  validationResults ValidationResult[]
+  submissions       SubmissionSnapshot[]
+  auditEvents       AuditEvent[]
+
+  @@index([employeeId, status])
+}
+
+model Receipt {
+  id                  String        @id @default(cuid())
+  claimId             String
+  claim               ClaimDraft    @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  objectKey           String        @unique
+  contentHash         String
+  mimeType            String
+  status              ReceiptStatus @default(PENDING)
+  receiptType         String?
+  extractionPayload   Json?
+  extractionVersion   String?
+  createdAt           DateTime      @default(now())
+  expenseItem         ExpenseItem?
+
+  @@index([claimId, contentHash])
+}
+
+model ExpenseItem {
+  id                String      @id @default(cuid())
+  claimId           String
+  claim             ClaimDraft  @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  receiptId         String?     @unique
+  receipt           Receipt?    @relation(fields: [receiptId], references: [id], onDelete: SetNull)
+  amountCents       Int
+  amountSource      FieldSource
+  issuedOn          DateTime?
+  issuedOnSource    FieldSource?
+  invoiceNumber     String?
+  invoiceSource     FieldSource?
+  expenseCategory   String?
+  participants      String?
+  projectCode       String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+}
+
+model Clarification {
+  id          String     @id @default(cuid())
+  claimId     String
+  claim       ClaimDraft @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  field       String
+  prompt      String
+  answer      String?
+  resolvedAt  DateTime?
+  createdAt   DateTime   @default(now())
+}
+
+model ValidationResult {
+  id          String             @id @default(cuid())
+  claimId     String
+  claim       ClaimDraft         @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  code        String
+  severity    ValidationSeverity
+  message     String
+  ruleVersion String
+  resolvedAt  DateTime?
+  createdAt   DateTime           @default(now())
+
+  @@index([claimId, severity])
+}
+
+model SubmissionSnapshot {
+  id               String     @id @default(cuid())
+  claimId          String
+  claim            ClaimDraft @relation(fields: [claimId], references: [id], onDelete: Restrict)
+  claimVersion     Int
+  submissionNumber String     @unique
+  payload          Json
+  submittedAt      DateTime   @default(now())
+}
+
+model AuditEvent {
+  id        String     @id @default(cuid())
+  claimId   String
+  claim     ClaimDraft @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  actorId   String
+  type      String
+  payload   Json
+  createdAt DateTime   @default(now())
+
+  @@index([claimId, createdAt])
+}
