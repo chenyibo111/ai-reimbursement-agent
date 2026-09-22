@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@/generated/prisma/client";
+import type { ClaimSummary } from "@/src/application/get-claim-summary";
 import type { Claim, ClaimStatus } from "@/src/domain/claim";
 
 export type CreateClaimDraft = {
@@ -47,6 +48,32 @@ export class PrismaClaimRepository {
     }
 
     return this.getByIdOrThrow(id);
+  }
+
+  async toSummary(id: string): Promise<ClaimSummary> {
+    const draft = await this.prisma.claimDraft.findUnique({
+      where: { id },
+      include: {
+        receipts: true,
+        expenseItems: true,
+        validationResults: true,
+      },
+    });
+    if (!draft) {
+      throw new Error("claim not found");
+    }
+
+    return {
+      id: draft.id,
+      employeeId: draft.employeeId,
+      status: draft.status,
+      version: draft.version,
+      purpose: draft.purpose,
+      totalAmountCents: draft.expenseItems.reduce((total, item) => total + item.amountCents, 0),
+      receipts: draft.receipts,
+      expenseItems: draft.expenseItems,
+      validationResults: draft.validationResults,
+    };
   }
 }
 
