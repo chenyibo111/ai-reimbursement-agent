@@ -16,3 +16,14 @@ it("rejects production mode without a model provider", () => {
     }),
   ).toThrow("MODEL_PROVIDER is required in production");
 });
+
+it("rejects production mode without Feishu OAuth credentials", () => {
+  expect(() =>
+    loadConfig({
+      NODE_ENV: "production",
+      RECEIPT_EXTRACTION_PROVIDER: "fixture",
+      MODEL_PROVIDER: "fixture",
+      SESSION_SECRET: "session-secret",
+    }),
+  ).toThrow("FEISHU_APP_ID is required in production");
+});
