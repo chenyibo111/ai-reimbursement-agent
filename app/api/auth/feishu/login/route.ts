@@ -13,8 +13,10 @@ export async function GET(request: Request) {
 
   const state = createOAuthState();
   const authorizeUrl = new URL("https://accounts.feishu.cn/open-apis/authen/v1/authorize");
-  authorizeUrl.searchParams.set("app_id", appId);
+  authorizeUrl.searchParams.set("client_id", appId);
+  authorizeUrl.searchParams.set("response_type", "code");
   authorizeUrl.searchParams.set("redirect_uri", redirectUri);
+  authorizeUrl.searchParams.set("scope", "contact:user.base:readonly");
   authorizeUrl.searchParams.set("state", state);
 
   const response = NextResponse.redirect(authorizeUrl);
