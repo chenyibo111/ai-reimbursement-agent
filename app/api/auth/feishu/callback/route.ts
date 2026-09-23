@@ -3,7 +3,7 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { authenticateFeishuUser } from "@/src/application/authenticate-feishu-user";
-import { createFeishuOAuthClient } from "@/src/infrastructure/auth/feishu-oauth";
+import { createFeishuOAuthClient, FeishuOAuthError } from "@/src/infrastructure/auth/feishu-oauth";
 import { createPrismaClient } from "@/src/infrastructure/prisma/client";
 import { clearOAuthStateCookie, getCookie, oauthStateCookieName, sessionCookie } from "@/src/server/auth-cookies";
 
@@ -42,7 +42,15 @@ export async function GET(request: Request) {
     response.headers.append("Set-Cookie", clearOAuthStateCookie(isProduction()));
     response.headers.append("Set-Cookie", sessionCookie(employee.id, sessionSecret, isProduction()));
     return response;
-  } catch {
+  } catch (error) {
+    if (error instanceof FeishuOAuthError) {
+      console.error("[feishu-oauth] authentication failed", {
+        stage: error.stage,
+        providerCode: error.providerCode,
+      });
+      return callbackError(request, `feishu_${error.stage}_failed`, 502, error.providerCode);
+    }
+    console.error("[feishu-oauth] authentication failed", { stage: "local" });
     return callbackError(request, "authentication_failed", 502);
   }
 }
@@ -67,8 +75,11 @@ function getPrisma() {
   return createPrismaClient(connectionString);
 }
 
-function callbackError(request: Request, reason: string, status: number) {
-  const response = NextResponse.json({ error: reason }, { status });
+function callbackError(request: Request, reason: string, status: number, providerCode?: string | number) {
+  const response = NextResponse.json({
+    error: reason,
+    ...(isProduction() || providerCode === undefined ? {} : { providerCode }),
+  }, { status });
   response.headers.append("Set-Cookie", clearOAuthStateCookie(isProduction()));
   return response;
 }
