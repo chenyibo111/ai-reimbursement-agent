@@ -26,8 +26,9 @@ export async function POST(request: Request, context: { params: Promise<{ claimI
       const claims = new PrismaClaimRepository(prisma);
       const claim = await claims.getByIdOrThrow(claimId);
       if (claim.employeeId !== actorId) return NextResponse.json({ error: "forbidden" }, { status: 403 });
-      const expense = await prisma.expenseItem.findFirst({ where: { id: expenseItemId, claimId }, select: { id: true } });
+      const expense = await prisma.expenseItem.findFirst({ where: { id: expenseItemId, claimId }, select: { id: true, receipt: { select: { extractionPayload: true } } } });
       if (!expense) return NextResponse.json({ error: "expense item not found" }, { status: 404 });
+      if (!requiresConfirmation(expense.receipt?.extractionPayload, field)) return NextResponse.json({ error: "field does not require confirmation" }, { status: 400 });
       const updatedClaim = await claims.updateDraft(claimId, expectedVersion, {});
       const expenseValue = value as string | number;
       const updated = await prisma.expenseItem.updateMany({ where: { id: expenseItemId, claimId }, data: expensePatch(field, expenseValue) });
@@ -52,6 +53,14 @@ function expensePatch(field: "invoiceNumber" | "issuedOn" | "totalAmountCents", 
   if (field === "invoiceNumber") return { invoiceNumber: value as string, invoiceSource: "USER_ENTERED" as const };
   if (field === "issuedOn") return { issuedOn: new Date(value as string), issuedOnSource: "USER_ENTERED" as const };
   return { amountCents: value as number, amountSource: "USER_ENTERED" as const };
+}
+
+function requiresConfirmation(payload: unknown, field: "invoiceNumber" | "issuedOn" | "totalAmountCents"): boolean {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
+  const extracted = (payload as Record<string, unknown>)[field];
+  if (!extracted || typeof extracted !== "object" || Array.isArray(extracted)) return false;
+  const candidate = extracted as Record<string, unknown>;
+  return candidate.source === "EXTRACTED" && typeof candidate.confidence === "number" && candidate.confidence < 0.9;
 }
 
 function getPrisma() {

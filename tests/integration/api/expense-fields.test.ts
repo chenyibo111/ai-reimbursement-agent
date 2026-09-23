@@ -14,7 +14,8 @@ afterAll(async () => prisma.$disconnect());
 it("confirms a targeted invoice number and marks it USER_ENTERED", async () => {
   await prisma.employee.create({ data: { id: "employee-1", displayName: "测试员工" } });
   const claim = await prisma.claimDraft.create({ data: { employeeId: "employee-1" } });
-  const expense = await prisma.expenseItem.create({ data: { claimId: claim.id, amountCents: 38600, amountSource: "EXTRACTED", invoiceNumber: "LOW-CONFIDENCE", invoiceSource: "EXTRACTED" } });
+  const receipt = await prisma.receipt.create({ data: { claimId: claim.id, objectKey: "claims/confirmable", contentHash: "confirmable-hash", mimeType: "application/pdf", extractionPayload: { invoiceNumber: { value: "LOW-CONFIDENCE", confidence: 0.62, source: "EXTRACTED" } } } });
+  const expense = await prisma.expenseItem.create({ data: { claimId: claim.id, receiptId: receipt.id, amountCents: 38600, amountSource: "EXTRACTED", invoiceNumber: "LOW-CONFIDENCE", invoiceSource: "EXTRACTED" } });
   const token = createSessionToken("employee-1", process.env.SESSION_SECRET!);
   const response = await POST(
     new Request(`http://localhost/api/claims/${claim.id}/fields`, { method: "POST", headers: { "content-type": "application/json", cookie: `reimbursement_session=${token}` }, body: JSON.stringify({ field: "invoiceNumber", value: "INV-2026-001", expenseItemId: expense.id, expectedVersion: 0 }) }),
@@ -36,5 +37,17 @@ it("does not advance the claim version when the targeted expense item is absent"
   );
 
   expect(response.status).toBe(404);
+  await expect(prisma.claimDraft.findUniqueOrThrow({ where: { id: claim.id } })).resolves.toMatchObject({ version: 0 });
+});
+
+it("rejects confirmation of a high-confidence extracted field", async () => {
+  await prisma.employee.create({ data: { id: "employee-1", displayName: "测试员工" } });
+  const claim = await prisma.claimDraft.create({ data: { employeeId: "employee-1" } });
+  const receipt = await prisma.receipt.create({ data: { claimId: claim.id, objectKey: "claims/high-confidence", contentHash: "high-confidence-hash", mimeType: "application/pdf", extractionPayload: { invoiceNumber: { value: "INV-001", confidence: 0.99, source: "EXTRACTED" } } } });
+  const expense = await prisma.expenseItem.create({ data: { claimId: claim.id, receiptId: receipt.id, amountCents: 38600, amountSource: "EXTRACTED", invoiceNumber: "INV-001", invoiceSource: "EXTRACTED" } });
+  const token = createSessionToken("employee-1", process.env.SESSION_SECRET!);
+  const response = await POST(new Request(`http://localhost/api/claims/${claim.id}/fields`, { method: "POST", headers: { "content-type": "application/json", cookie: `reimbursement_session=${token}` }, body: JSON.stringify({ field: "invoiceNumber", value: "INV-CHANGED", expenseItemId: expense.id, expectedVersion: 0 }) }), { params: Promise.resolve({ claimId: claim.id }) });
+
+  expect(response.status).toBe(400);
   await expect(prisma.claimDraft.findUniqueOrThrow({ where: { id: claim.id } })).resolves.toMatchObject({ version: 0 });
 });
