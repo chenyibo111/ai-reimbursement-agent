@@ -10,6 +10,7 @@ test("shows the authenticated employee a clear starting point for a new reimburs
 
   await expect(page).toHaveURL(/\/claims\/[a-z0-9]+$/);
   await expect(page.getByRole("heading", { name: "报销工作台" })).toBeVisible();
+  await expect(page.locator('input[type="file"][aria-label="上传票据"]')).toBeAttached();
 });
 
 test("lets an employee complete a missing reimbursement purpose from the workspace", async ({ page }) => {

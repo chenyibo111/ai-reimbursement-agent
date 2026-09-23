@@ -37,7 +37,7 @@ export function ReceiptUpload({ claimId, onComplete }: Props) {
     <section aria-labelledby="receipt-upload-title">
       <div className="section-heading"><div><p className="eyebrow">票据</p><h2 id="receipt-upload-title">上传票据</h2></div></div>
       <div className="upload-zone">
-        <input ref={inputRef} id="receipt-file" className="sr-only" type="file" accept="image/jpeg,image/png,application/pdf" onChange={(event) => void upload(event.target.files?.[0])} />
+        <input ref={inputRef} id="receipt-file" className="sr-only" type="file" aria-label="上传票据" accept="image/jpeg,image/png,application/pdf" onChange={(event) => void upload(event.target.files?.[0])} />
         <p><strong>将发票或报销凭证放在这里</strong><br />系统会先完成安全检查，再提取金额、日期和票据号码。</p>
         <button type="button" className="button-outline" onClick={() => inputRef.current?.click()} disabled={isUploading}>{isUploading ? "处理中…" : "选择票据文件"}</button>
         <p role="status" className={message.includes("失败") ? "notice-error" : "hint"}>{message}</p>
