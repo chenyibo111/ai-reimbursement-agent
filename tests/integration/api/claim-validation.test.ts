@@ -52,3 +52,17 @@ it("clears a low-confidence confirmation requirement after the employee confirms
   expect(response.status).toBe(200);
   await expect(response.json()).resolves.toEqual(expect.objectContaining({ issues: expect.not.arrayContaining([{ code: "CONFIRM_INVOICE_NUMBER", severity: "BLOCKING" }]) }));
 });
+
+it("keeps an unmatched low-confidence receipt blocking even when another receipt has an expense item", async () => {
+  await prisma.employee.create({ data: { id: "employee-1", displayName: "测试员工" } });
+  const claim = await prisma.claimDraft.create({ data: { employeeId: "employee-1", purpose: "客户拜访" } });
+  const validReceipt = await prisma.receipt.create({ data: { claimId: claim.id, objectKey: "claims/valid-receipt", contentHash: "valid-receipt-hash", mimeType: "application/pdf", status: "EXTRACTED", extractionPayload: { invoiceNumber: { value: "INV-OK", confidence: 0.99, source: "EXTRACTED" } } } });
+  await prisma.expenseItem.create({ data: { claimId: claim.id, receiptId: validReceipt.id, amountCents: 38600, amountSource: "EXTRACTED" } });
+  await prisma.receipt.create({ data: { claimId: claim.id, objectKey: "claims/unmatched-low-confidence", contentHash: "unmatched-low-confidence-hash", mimeType: "application/pdf", status: "EXTRACTED", extractionPayload: { invoiceNumber: { value: "INV-NEEDS-CONFIRM", confidence: 0.5, source: "EXTRACTED" } } } });
+  const token = createSessionToken("employee-1", process.env.SESSION_SECRET!);
+
+  const response = await GET(new Request(`http://localhost/api/claims/${claim.id}/validate`, { headers: { cookie: `reimbursement_session=${token}` } }), { params: Promise.resolve({ claimId: claim.id }) });
+
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual(expect.objectContaining({ issues: expect.arrayContaining([{ code: "CONFIRM_INVOICE_NUMBER", severity: "BLOCKING" }]) }));
+});

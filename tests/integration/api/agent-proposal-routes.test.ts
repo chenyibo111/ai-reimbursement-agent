@@ -43,6 +43,16 @@ it("expires sibling suggestions after one is resolved and records the field upda
   await expect(prisma.auditEvent.findFirstOrThrow({ where: { claimId: claim.id, type: "CLAIM_FIELD_UPDATED" } })).resolves.toMatchObject({ payload: expect.objectContaining({ field: "purpose", source: "USER_ENTERED" }) });
 });
 
+it("persists expiration when a pending suggestion is resolved after the draft changes", async () => {
+  const { claim, proposal, cookie } = await pendingPurposeProposal();
+  await prisma.claimDraft.update({ where: { id: claim.id }, data: { purpose: "手动更新", version: 1 } });
+
+  const response = await accept(new Request(`http://localhost/api/claims/${claim.id}/agent-proposals/${proposal.id}/accept`, { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ expectedVersion: 0 }) }), { params: Promise.resolve({ claimId: claim.id, proposalId: proposal.id }) });
+
+  expect(response.status).toBe(409);
+  await expect(prisma.agentFieldProposal.findUniqueOrThrow({ where: { id: proposal.id } })).resolves.toMatchObject({ status: "EXPIRED", resolvedAt: expect.any(Date) });
+});
+
 async function pendingPurposeProposal() {
   await prisma.employee.create({ data: { id: "employee-1", displayName: "测试员工" } });
   const claim = await prisma.claimDraft.create({ data: { employeeId: "employee-1" } });

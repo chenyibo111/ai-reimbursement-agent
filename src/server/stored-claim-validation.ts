@@ -30,6 +30,16 @@ function confirmedOrExtractedFields(expenseItems: Parameters<typeof validateStor
       if (!existing || (candidate.source === "EXTRACTED" && candidate.confidence < existing.confidence)) fields[name] = candidate;
     }
   }
+  const matchedReceiptIds = new Set(expenseItems.flatMap((item) => item.receiptId ? [item.receiptId] : []));
+  for (const receipt of receipts) {
+    if (matchedReceiptIds.has(receipt.id)) continue;
+    for (const name of ["totalAmountCents", "issuedOn", "invoiceNumber"] as const) {
+      const candidate = extractedField(receipt.extractionPayload, name);
+      if (!candidate) continue;
+      const existing = fields[name];
+      if (!existing || (candidate.source === "EXTRACTED" && candidate.confidence < existing.confidence)) fields[name] = candidate;
+    }
+  }
   return fields;
 }
 

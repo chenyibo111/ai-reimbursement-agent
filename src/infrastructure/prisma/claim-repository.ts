@@ -94,15 +94,13 @@ export class PrismaClaimRepository {
   }
 
   async resolveAgentProposal(input: { actorId: string; claimId: string; proposalId: string; action: "ACCEPT" | "REJECT"; expectedVersion: number }) {
-    return this.prisma.$transaction(async (tx) => {
+    try {
+      return await this.prisma.$transaction(async (tx) => {
       const claim = await tx.claimDraft.findUnique({ where: { id: input.claimId } });
       if (!claim) throw new Error("claim not found");
       if (claim.employeeId !== input.actorId) throw new Error("forbidden");
       const proposal = await tx.agentFieldProposal.findFirst({ where: { id: input.proposalId, claimId: input.claimId } });
       if (!proposal) throw new Error("proposal not found");
-      if (proposal.status === "PENDING" && proposal.claimVersion < claim.version) {
-        await tx.agentFieldProposal.updateMany({ where: { claimId: input.claimId, status: "PENDING", claimVersion: { lt: claim.version } }, data: { status: "EXPIRED", resolvedAt: new Date() } });
-      }
       if (claim.status !== "DRAFT" || proposal.status !== "PENDING" || proposal.claimVersion !== input.expectedVersion || claim.version !== input.expectedVersion) throw new Error("version conflict");
 
       const patch = input.action === "ACCEPT" && proposal.targetRef === "claim" ? proposalPatch(proposal) : {};
@@ -118,7 +116,17 @@ export class PrismaClaimRepository {
       await tx.auditEvent.create({ data: { claimId: input.claimId, actorId: input.actorId, type: input.action === "ACCEPT" ? "AGENT_FIELD_ACCEPTED" : "AGENT_FIELD_REJECTED", payload: { proposalId: proposal.id, field: proposal.field } } });
       if (input.action === "ACCEPT") await tx.auditEvent.create({ data: { claimId: input.claimId, actorId: input.actorId, type: "CLAIM_FIELD_UPDATED", payload: { field: proposal.field, expenseItemId: proposal.expenseItemId, source: "USER_ENTERED", value: proposal.value } } });
       return { proposal: { id: resolved.id, status: resolved.status }, version: input.expectedVersion + 1 };
-    });
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message === "version conflict") await this.expireStaleProposals(input.claimId);
+      throw error;
+    }
+  }
+
+  private async expireStaleProposals(claimId: string) {
+    const claim = await this.prisma.claimDraft.findUnique({ where: { id: claimId }, select: { version: true } });
+    if (!claim) return;
+    await this.prisma.agentFieldProposal.updateMany({ where: { claimId, status: "PENDING", claimVersion: { lt: claim.version } }, data: { status: "EXPIRED", resolvedAt: new Date() } });
   }
 }
 
