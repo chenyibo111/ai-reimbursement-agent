@@ -34,6 +34,8 @@ export type AgentProposal = {
   target: string;
   field: "purpose" | "invoiceNumber" | "issuedOn" | "totalAmountCents";
   displayValue: string;
+  targetLabel: string;
+  currentValue: string;
   reason: string;
   status: "PENDING" | "ACCEPTED" | "REJECTED" | "EXPIRED";
   claimVersion: number;

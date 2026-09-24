@@ -69,14 +69,14 @@ export class OpenAiCompatibleChatModel implements ChatModel {
 
     if (!response.ok) throw new ChatModelError("AI 服务暂不可用，请稍后重试。", "UNAVAILABLE");
 
-    let payload: { choices?: Array<{ message?: { content?: unknown } }> };
+    let payload: unknown;
     try {
-      payload = await response.json() as { choices?: Array<{ message?: { content?: unknown } }> };
+      payload = await response.json();
     } catch {
       throw new ChatModelError("AI 返回内容无法识别，请稍后重试。", "INVALID_RESPONSE");
     }
 
-    const content = payload.choices?.[0]?.message?.content;
+    const content = isChatCompletionEnvelope(payload) ? payload.choices?.[0]?.message?.content : undefined;
     if (typeof content !== "string") throw new ChatModelError("AI 返回内容无法识别，请稍后重试。", "INVALID_RESPONSE");
     try {
       return JSON.parse(content) as unknown;
@@ -84,4 +84,8 @@ export class OpenAiCompatibleChatModel implements ChatModel {
       throw new ChatModelError("AI 返回内容无法识别，请稍后重试。", "INVALID_RESPONSE");
     }
   }
+}
+
+function isChatCompletionEnvelope(payload: unknown): payload is { choices?: Array<{ message?: { content?: unknown } }> } {
+  return Boolean(payload) && typeof payload === "object" && !Array.isArray(payload);
 }

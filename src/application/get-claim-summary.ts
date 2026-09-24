@@ -16,6 +16,8 @@ export type ClaimSummary = {
     target: string;
     field: string;
     displayValue: string;
+    targetLabel: string;
+    currentValue: string;
     reason: string;
     status: "PENDING" | "ACCEPTED" | "REJECTED" | "EXPIRED";
     claimVersion: number;

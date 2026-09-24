@@ -11,7 +11,7 @@ export async function GET(request: Request, context: { params: Promise<{ claimId
     const actorId = getSessionActorId(request);
     const { claimId } = await context.params;
     const prisma = getPrisma();
-    const claim = await prisma.claimDraft.findUnique({ where: { id: claimId }, include: { receipts: { select: { extractionPayload: true } }, expenseItems: true, validationResults: { where: { code: { in: ["DUPLICATE_FILE", "DUPLICATE_INVOICE"] }, resolvedAt: null } } } });
+    const claim = await prisma.claimDraft.findUnique({ where: { id: claimId }, include: { receipts: { select: { id: true, extractionPayload: true } }, expenseItems: true, validationResults: { where: { code: { in: ["DUPLICATE_FILE", "DUPLICATE_INVOICE"] }, resolvedAt: null } } } });
     if (!claim) throw new Error("claim not found");
     if (claim.employeeId !== actorId) throw new Error("forbidden");
     const issues = validateStoredClaim(claim);

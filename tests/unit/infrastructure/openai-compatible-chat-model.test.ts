@@ -30,6 +30,7 @@ describe("OpenAiCompatibleChatModel", () => {
   it.each([
     ["unauthorized", new Response("provider detail", { status: 401 })],
     ["empty choices", new Response(JSON.stringify({ choices: [] }), { status: 200 })],
+    ["null envelope", new Response("null", { status: 200, headers: { "content-type": "application/json" } })],
     ["non-json content", new Response(JSON.stringify({ choices: [{ message: { content: "not json" } }] }), { status: 200 })],
   ])("returns a safe typed error for %s", async (_case, response) => {
     const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "top-secret", fetchImpl: vi.fn().mockResolvedValue(response) });

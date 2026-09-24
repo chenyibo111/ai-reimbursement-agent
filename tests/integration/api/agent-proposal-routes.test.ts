@@ -32,6 +32,17 @@ it("rejects without changing the draft and prevents stale confirmation", async (
   expect(stale.status).toBe(409);
 });
 
+it("expires sibling suggestions after one is resolved and records the field update", async () => {
+  const { claim, proposal, cookie } = await pendingPurposeProposal();
+  const sibling = await prisma.agentFieldProposal.create({ data: { claimId: claim.id, targetRef: "claim", field: "purpose", value: "客户拜访餐饮", reason: "另一项建议", claimVersion: 0 } });
+
+  const response = await accept(new Request(`http://localhost/api/claims/${claim.id}/agent-proposals/${proposal.id}/accept`, { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ expectedVersion: 0 }) }), { params: Promise.resolve({ claimId: claim.id, proposalId: proposal.id }) });
+
+  expect(response.status).toBe(200);
+  await expect(prisma.agentFieldProposal.findUniqueOrThrow({ where: { id: sibling.id } })).resolves.toMatchObject({ status: "EXPIRED", resolvedAt: expect.any(Date) });
+  await expect(prisma.auditEvent.findFirstOrThrow({ where: { claimId: claim.id, type: "CLAIM_FIELD_UPDATED" } })).resolves.toMatchObject({ payload: expect.objectContaining({ field: "purpose", source: "USER_ENTERED" }) });
+});
+
 async function pendingPurposeProposal() {
   await prisma.employee.create({ data: { id: "employee-1", displayName: "测试员工" } });
   const claim = await prisma.claimDraft.create({ data: { employeeId: "employee-1" } });
