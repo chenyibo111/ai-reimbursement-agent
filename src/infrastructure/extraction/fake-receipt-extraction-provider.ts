@@ -3,6 +3,7 @@ import type { ReceiptExtractionProvider } from "@/src/infrastructure/extraction/
 export class FakeReceiptExtractionProvider implements ReceiptExtractionProvider {
   async extract(): Promise<Awaited<ReturnType<ReceiptExtractionProvider["extract"]>>> {
     return {
+      modelVersion: "fixture-v1",
       receiptType: "VAT_INVOICE",
       invoiceNumber: { value: "FIXTURE-INVOICE", confidence: 0.99, source: "EXTRACTED" },
       issuedOn: { value: "2026-09-20", confidence: 0.99, source: "EXTRACTED" },

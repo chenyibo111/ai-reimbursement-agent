@@ -22,7 +22,7 @@ export type UploadReceiptInput = {
 export type UploadReceiptDeps = {
   claims: { getByIdOrThrow(id: string): Promise<{ employeeId: string }> };
   receipts: { create(input: Receipt): Promise<Receipt> };
-  store: ObjectStore;
+  store: Pick<ObjectStore, "put">;
   scanner: FileSafetyScanner;
   audit: AuditEventWriter;
 };

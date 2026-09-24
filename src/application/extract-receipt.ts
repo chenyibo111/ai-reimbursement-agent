@@ -24,6 +24,7 @@ export type ExtractReceiptDeps = {
   receipts: {
     getByIdOrThrow(id: string, claimId: string): Promise<StoredReceipt>;
     markExtracted(input: { receiptId: string; extraction: ReceiptExtraction; payload: ReceiptExtraction }): Promise<void>;
+    markFailed(input: { receiptId: string }): Promise<void>;
     hasDuplicateContentHash(input: { receiptId: string; contentHash: string }): Promise<boolean>;
     hasSubmittedInvoiceNumber(input: { employeeId: string; receiptId: string; invoiceNumber: string }): Promise<boolean>;
   };
@@ -37,7 +38,13 @@ export async function extractReceipt(input: ExtractReceiptInput, deps: ExtractRe
   const claim = await deps.claims.getByIdOrThrow(input.claimId);
   assertClaimOwner(input.actorId, claim);
   const receipt = await deps.receipts.getByIdOrThrow(input.receiptId, input.claimId);
-  const extraction = await deps.provider.extract({ objectKey: receipt.objectKey, mimeType: receipt.mimeType });
+  let extraction: ReceiptExtraction;
+  try {
+    extraction = await deps.provider.extract({ objectKey: receipt.objectKey, mimeType: receipt.mimeType });
+  } catch (error) {
+    await deps.receipts.markFailed({ receiptId: receipt.id });
+    throw error;
+  }
   await deps.receipts.markExtracted({ receiptId: receipt.id, extraction, payload: extraction });
 
   const issues: ExtractionValidationIssue[] = [];

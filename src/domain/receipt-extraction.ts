@@ -5,6 +5,7 @@ export type ExtractedField = {
 };
 
 export type ReceiptExtraction = {
+  modelVersion?: string;
   receiptType: string;
   invoiceNumber: ExtractedField;
   issuedOn: ExtractedField;

@@ -17,6 +17,10 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     throw new Error("RECEIPT_EXTRACTION_PROVIDER is required in production");
   }
 
+  if (isProduction && env.RECEIPT_EXTRACTION_PROVIDER === "fixture") {
+    throw new Error("fixture provider is not allowed in production");
+  }
+
   if (isProduction && !env.MODEL_PROVIDER) {
     throw new Error("MODEL_PROVIDER is required in production");
   }

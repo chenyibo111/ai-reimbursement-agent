@@ -13,6 +13,7 @@ it("does not double count a matching upload with a duplicate content hash", asyn
           id: "receipt-2", claimId: "claim-1", employeeId: "employee-1", objectKey: "claims/claim-1/receipt-2", mimeType: "application/pdf", contentHash: "same-hash",
         }),
         markExtracted: async (input) => { saved.payload = input.payload; },
+        markFailed: async () => undefined,
         hasDuplicateContentHash: async () => true,
         hasSubmittedInvoiceNumber: async () => false,
       },
@@ -27,6 +28,34 @@ it("does not double count a matching upload with a duplicate content hash", asyn
   expect(saved.payload).toEqual(expect.objectContaining({ receiptType: "VAT_INVOICE" }));
   expect(saved.expense).toBeUndefined();
   expect(saved.validation).toEqual(expect.objectContaining({ code: "DUPLICATE_FILE", severity: "BLOCKING" }));
+});
+
+it("marks the retained receipt as failed when OCR is unavailable", async () => {
+  let failedReceiptId: string | undefined;
+
+  await expect(
+    extractReceipt(
+      { actorId: "employee-1", claimId: "claim-1", receiptId: "receipt-1" },
+      {
+        claims: { getByIdOrThrow: async () => ({ employeeId: "employee-1" }) },
+        receipts: {
+          getByIdOrThrow: async () => ({
+            id: "receipt-1", claimId: "claim-1", employeeId: "employee-1", objectKey: "claims/claim-1/receipt-1", mimeType: "image/png", contentHash: "hash",
+          }),
+          markExtracted: async () => undefined,
+          markFailed: async ({ receiptId }) => { failedReceiptId = receiptId; },
+          hasDuplicateContentHash: async () => false,
+          hasSubmittedInvoiceNumber: async () => false,
+        },
+        expenses: { create: async () => undefined },
+        validations: { create: async () => undefined },
+        provider: { extract: async () => { throw new Error("OCR service request failed"); } },
+        audit: { append: async () => undefined },
+      },
+    ),
+  ).rejects.toThrow("OCR service request failed");
+
+  expect(failedReceiptId).toBe("receipt-1");
 });
 
 function fixtureExtraction() {

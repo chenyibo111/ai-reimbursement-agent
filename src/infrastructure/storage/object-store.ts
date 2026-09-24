@@ -1,7 +1,8 @@
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 
 export type ObjectStore = {
   put(input: { key: string; bytes: Uint8Array; mimeType: string }): Promise<void>;
+  get(input: { key: string }): Promise<Uint8Array>;
 };
 
 export type S3ObjectStoreConfig = {
@@ -32,6 +33,12 @@ export function createS3ObjectStore(config: S3ObjectStoreConfig): ObjectStore {
           ContentType: input.mimeType,
         }),
       );
+    },
+    async get(input) {
+      const response = await client.send(new GetObjectCommand({ Bucket: config.bucket, Key: input.key }));
+      const body = response.Body as { transformToByteArray?: () => Promise<Uint8Array> } | undefined;
+      if (!body?.transformToByteArray) throw new Error("stored object body is missing");
+      return body.transformToByteArray();
     },
   };
 }
