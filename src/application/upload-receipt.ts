@@ -46,6 +46,7 @@ export async function uploadReceipt(input: UploadReceiptInput, deps: UploadRecei
     id,
     claimId: input.claimId,
     objectKey,
+    originalFilename: input.filename,
     contentHash,
     mimeType: input.mimeType,
     status: "PENDING",

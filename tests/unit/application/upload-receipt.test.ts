@@ -38,7 +38,7 @@ it("stores a clean PDF under a private claim prefix and records its hash", async
 
   expect(calls.stored).toBe(1);
   expect(calls.keys[0]).toMatch(/^claims\/claim-1\/receipts\/[\w-]+\/[a-f0-9]{64}$/);
-  expect(receipt).toMatchObject({ claimId: "claim-1", status: "PENDING" });
+  expect(receipt).toMatchObject({ claimId: "claim-1", status: "PENDING", originalFilename: "invoice.pdf" });
   expect(receipt.contentHash).toHaveLength(64);
 });
 
@@ -85,6 +85,7 @@ function createDeps(calls: { stored: number; created: number; scanned: number; k
         objectKey: string;
         contentHash: string;
         mimeType: string;
+        originalFilename: string;
         status: "PENDING";
       }) => {
         calls.created += 1;

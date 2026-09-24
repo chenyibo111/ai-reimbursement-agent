@@ -10,6 +10,7 @@ export class PrismaReceiptRepository {
       id: receipt.id,
       claimId: receipt.claimId,
       objectKey: receipt.objectKey,
+      originalFilename: receipt.originalFilename ?? "",
       contentHash: receipt.contentHash,
       mimeType: receipt.mimeType,
       status: receipt.status,

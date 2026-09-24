@@ -66,6 +66,7 @@ model Receipt {
   claimId             String
   claim               ClaimDraft    @relation(fields: [claimId], references: [id], onDelete: Cascade)
   objectKey           String        @unique
+  originalFilename    String?
   contentHash         String
   mimeType            String
   status              ReceiptStatus @default(PENDING)

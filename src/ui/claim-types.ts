@@ -3,6 +3,7 @@ export type ClaimReceipt = {
   status: string;
   receiptType: string | null;
   extractionPayload: Record<string, unknown> | null;
+  originalFilename?: string | null;
 };
 
 export type ExpenseItem = {
@@ -32,6 +33,27 @@ export type ConfirmableExpenseField = "invoiceNumber" | "issuedOn" | "totalAmoun
 
 export function formatMoney(cents: number) {
   return new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY" }).format(cents / 100);
+}
+
+export function receiptDisplayName(receipt: Pick<ClaimReceipt, "id" | "originalFilename">) {
+  return receipt.originalFilename?.trim() || `票据 #${receipt.id.slice(-6).toUpperCase()}`;
+}
+
+export function receiptStatusLabel(status: string) {
+  return ({
+    PENDING: "等待识别",
+    EXTRACTING: "正在识别",
+    EXTRACTED: "已识别",
+    FAILED: "识别失败",
+  } as Record<string, string>)[status] ?? "处理中";
+}
+
+export function extractedReceiptField(receipt: ClaimReceipt, fieldName: ConfirmableExpenseField) {
+  const candidate = receipt.extractionPayload?.[fieldName];
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
+  const field = candidate as { value?: unknown; confidence?: unknown };
+  if (typeof field.value !== "string" && typeof field.value !== "number") return null;
+  return { value: field.value, confidence: typeof field.confidence === "number" ? field.confidence : null };
 }
 
 export function lowConfidenceAmount(receipt: ClaimReceipt | undefined) {
