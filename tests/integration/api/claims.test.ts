@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
 
 import { GET } from "@/app/api/claims/[claimId]/route";
-import { POST } from "@/app/api/claims/route";
+import { GET as listClaims, POST } from "@/app/api/claims/route";
 import { createSessionToken } from "@/src/server/session";
 import { createPrismaClient } from "@/src/infrastructure/prisma/client";
 
@@ -77,4 +77,15 @@ it("returns a summary only to the claim owner", async () => {
   expect(ownerResponse.status).toBe(200);
   await expect(ownerResponse.json()).resolves.toMatchObject({ id: draft.id, totalAmountCents: 38600 });
   expect(otherResponse.status).toBe(403);
+});
+
+it("lists only the authenticated employee's claims", async () => {
+  const own = await prisma.claimDraft.create({ data: { employeeId: "session-employee", purpose: "客户拜访" } });
+  await prisma.claimDraft.create({ data: { employeeId: "forged-employee", purpose: "不应可见" } });
+  const token = createSessionToken("session-employee", process.env.SESSION_SECRET!);
+
+  const response = await listClaims(new Request("http://localhost/api/claims?query=%E5%AE%A2%E6%88%B7", { headers: { cookie: `reimbursement_session=${token}` } }));
+
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toMatchObject({ items: [expect.objectContaining({ id: own.id, purpose: "客户拜访" })], total: 1 });
 });

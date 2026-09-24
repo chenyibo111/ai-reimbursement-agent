@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { ClaimChat } from "@/src/ui/claim-chat";
@@ -14,6 +15,7 @@ import styles from "./page.module.css";
 type Preview = { token: string; purpose: string; totalAmountCents: number; receiptCount: number; issues: ValidationIssue[] };
 
 export default function ClaimPage({ params }: { params: Promise<{ claimId: string }> }) {
+  const router = useRouter();
   const [claimId, setClaimId] = useState<string | null>(null);
   const [claim, setClaim] = useState<ClaimSummary | null>(null);
   const [issues, setIssues] = useState<ValidationIssue[]>([]);
@@ -80,14 +82,14 @@ export default function ClaimPage({ params }: { params: Promise<{ claimId: strin
   async function submit(token: string) {
     if (!claim) return;
     setError(null);
-    try { const response = await fetch(`/api/claims/${claim.id}/submit`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirmationToken: token }) }); const payload = await response.json() as { submissionNumber?: string; error?: string }; if (!response.ok || !payload.submissionNumber) throw new Error(payload.error || "提交失败，请重新生成确认摘要。"); setSubmittedNumber(payload.submissionNumber); await refresh(); }
+    try { const response = await fetch(`/api/claims/${claim.id}/submit`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirmationToken: token }) }); const payload = await response.json() as { submissionNumber?: string; error?: string }; if (!response.ok || !payload.submissionNumber) throw new Error(payload.error || "提交失败，请重新生成确认摘要。"); setSubmittedNumber(payload.submissionNumber); router.replace(`/claims/${claim.id}/detail`); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "提交失败，请重新生成确认摘要。"); }
   }
 
   return (
     <main className={styles.page}>
       <header className={styles.header}>
-        <Link className={styles.brand} href="/claims/new">AI 报销 <span>Agent</span></Link>
+        <Link className={styles.brand} href="/claims">AI 报销 <span>Agent</span></Link>
         <span className={styles.draftMark}>{claim?.status === "SUBMITTED" ? "已提交" : "报销草稿"}</span>
       </header>
       {isLoading ? <div className={styles.loading} role="status">正在读取报销草稿…</div> : !claim ? <div className={styles.error} role="alert"><h1>暂时无法打开报销草稿</h1><p>{error || "当前草稿不可用。"}</p><button type="button" className="button-outline" onClick={() => void refresh()}>重新加载</button></div> : <div className={styles.layout}>
