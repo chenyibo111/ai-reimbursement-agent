@@ -26,6 +26,19 @@ it("uses a labelled CNY total as integer cents", async () => {
   });
 });
 
+it("uses the value following a separately recognized parenthesized small-total label", async () => {
+  const provider = new PaddleReceiptExtractionProvider({
+    extract: async () => ({
+      modelVersion: "paddle-test",
+      pages: [{ text: "价税合计（大写）\n壹佰零贰圆肆角贰分\n(小写) ¥102.42", confidence: 0.97 }],
+    }),
+  });
+
+  await expect(provider.extract({ objectKey: "claims/c", mimeType: "application/pdf" })).resolves.toMatchObject({
+    totalAmountCents: { value: 10242, confidence: 0.97 },
+  });
+});
+
 it("rejects the fixture provider in production", () => {
   expect(() => createReceiptExtractionProvider({ provider: "fixture", environment: "production" })).toThrow(
     "fixture provider is not allowed",

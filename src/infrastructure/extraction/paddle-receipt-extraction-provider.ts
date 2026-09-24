@@ -12,7 +12,7 @@ export class PaddleReceiptExtractionProvider implements ReceiptExtractionProvide
     const confidence = result.pages.length ? Math.min(...result.pages.map((page) => page.confidence)) : 0;
     const invoiceNumber = labeled(text, /发票(?:号码|号)[：:\s]*([A-Z0-9-]{6,})/i);
     const issuedOn = date(labeled(text, /开票日期[：:\s]*([0-9年月日./-]{8,})/));
-    const total = money(labeled(text, /(?:价税合计(?:（小写）)?|合计金额)[：:\s￥¥]*([0-9,]+(?:\.\d{1,2})?)/));
+    const total = money(labeled(text, /(?:价税合计(?:（小写）)?|合计金额|[（(]小写[）)])[：:\s￥¥]*([0-9,]+(?:\.\d{1,2})?)/));
     const tax = money(labeled(text, /(?:合计税额|税额)[：:\s￥¥]*([0-9,]+(?:\.\d{1,2})?)/));
     const seller = labeled(text, /销售方(?:名称)?[：:\s]*([^\n]{2,80})/);
     return {
