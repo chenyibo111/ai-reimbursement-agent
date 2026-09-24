@@ -90,6 +90,42 @@ export class PrismaClaimRepository {
       })),
     };
   }
+
+  async resolveAgentProposal(input: { actorId: string; claimId: string; proposalId: string; action: "ACCEPT" | "REJECT"; expectedVersion: number }) {
+    return this.prisma.$transaction(async (tx) => {
+      const claim = await tx.claimDraft.findUnique({ where: { id: input.claimId } });
+      if (!claim) throw new Error("claim not found");
+      if (claim.employeeId !== input.actorId) throw new Error("forbidden");
+      const proposal = await tx.agentFieldProposal.findFirst({ where: { id: input.proposalId, claimId: input.claimId } });
+      if (!proposal) throw new Error("proposal not found");
+      if (claim.status !== "DRAFT" || proposal.status !== "PENDING" || proposal.claimVersion !== input.expectedVersion || claim.version !== input.expectedVersion) throw new Error("version conflict");
+
+      const patch = input.action === "ACCEPT" && proposal.targetRef === "claim" ? proposalPatch(proposal) : {};
+      const expenseUpdate = input.action === "ACCEPT" && proposal.expenseItemId ? expensePatch(proposal) : undefined;
+      const updated = await tx.claimDraft.updateMany({ where: { id: input.claimId, version: input.expectedVersion, status: "DRAFT" }, data: { ...patch, version: { increment: 1 } } });
+      if (updated.count !== 1) throw new Error("version conflict");
+      if (input.action === "ACCEPT" && proposal.expenseItemId && expenseUpdate) {
+        const item = await tx.expenseItem.updateMany({ where: { id: proposal.expenseItemId, claimId: input.claimId }, data: expenseUpdate });
+        if (item.count !== 1) throw new Error("proposal not found");
+      }
+      const resolved = await tx.agentFieldProposal.update({ where: { id: proposal.id }, data: { status: input.action === "ACCEPT" ? "ACCEPTED" : "REJECTED", resolvedAt: new Date() } });
+      await tx.auditEvent.create({ data: { claimId: input.claimId, actorId: input.actorId, type: input.action === "ACCEPT" ? "AGENT_FIELD_ACCEPTED" : "AGENT_FIELD_REJECTED", payload: { proposalId: proposal.id, field: proposal.field } } });
+      return { proposal: { id: resolved.id, status: resolved.status }, version: input.expectedVersion + 1 };
+    });
+  }
+}
+
+function proposalPatch(proposal: { targetRef: string; field: string; value: unknown }) {
+  if (proposal.targetRef !== "claim" || proposal.field !== "purpose" || typeof proposal.value !== "string" || !proposal.value.trim()) throw new Error("invalid proposal");
+  return { purpose: proposal.value.trim() };
+}
+
+function expensePatch(proposal: { targetRef: string; field: string; value: unknown }) {
+  if (!/^expense-[1-9]\d*$/.test(proposal.targetRef)) throw new Error("invalid proposal");
+  if (proposal.field === "invoiceNumber" && typeof proposal.value === "string") return { invoiceNumber: proposal.value, invoiceSource: "USER_ENTERED" as const };
+  if (proposal.field === "issuedOn" && typeof proposal.value === "string") return { issuedOn: new Date(proposal.value), issuedOnSource: "USER_ENTERED" as const };
+  if (proposal.field === "totalAmountCents" && typeof proposal.value === "number" && Number.isInteger(proposal.value)) return { amountCents: proposal.value, amountSource: "USER_ENTERED" as const };
+  throw new Error("invalid proposal");
 }
 
 function toClaim(draft: {
