@@ -17,13 +17,27 @@
 Copy-Item .env.example .env.local
 docker compose up -d postgres minio clamav
 npm install
-npm exec prisma generate --config prisma7.config.ts
+npx prisma generate --config prisma7.config.ts
 npm run dev
 ```
 
 本机 Windows 若阻止 Prisma 原生迁移引擎，请在 Linux 容器中执行迁移；仓库内已提交 `prisma/migrations/`，应用环境可直接使用这些迁移。
 
 本地服务端口：PostgreSQL `5433`、MinIO API `9000`、MinIO Console `9001`、ClamAV `3310`。
+
+## AI 报销 Agent 模型配置
+
+本地默认 `MODEL_PROVIDER="fixture"`，只用于开发和自动测试。接入 OpenAI-compatible 服务时，在未提交的 `.env.local` 中设置以下值，然后重启 `npm run dev`：
+
+```dotenv
+MODEL_PROVIDER="openai-compatible"
+MODEL_BASE_URL="https://<provider>/v1"
+MODEL_NAME="<model-name>"
+MODEL_PROVIDER_API_KEY="<secret>"
+MODEL_TIMEOUT_MS="20000"
+```
+
+`MODEL_BASE_URL` 应以兼容 Chat Completions 的 `/v1` 为结尾。服务端只会发送当前消息、脱敏后的草稿摘要和校验项；密钥不会发送到浏览器或写入日志。模型不可用时，员工仍可通过工作台直接补齐字段。
 
 ## 验证
 

@@ -41,3 +41,31 @@ it("rejects fixture extraction in production even when all required settings exi
     }),
   ).toThrow("fixture provider is not allowed in production");
 });
+
+it("requires complete OpenAI-compatible model configuration in production", () => {
+  expect(() =>
+    loadConfig({
+      NODE_ENV: "production",
+      RECEIPT_EXTRACTION_PROVIDER: "paddleocr",
+      MODEL_PROVIDER: "openai-compatible",
+      SESSION_SECRET: "session-secret",
+      FEISHU_APP_ID: "app-id",
+      FEISHU_APP_SECRET: "app-secret",
+      FEISHU_REDIRECT_URI: "https://example.test/callback",
+    }),
+  ).toThrow("MODEL_BASE_URL is required for openai-compatible");
+});
+
+it("rejects fixture model provider in production", () => {
+  expect(() =>
+    loadConfig({
+      NODE_ENV: "production",
+      RECEIPT_EXTRACTION_PROVIDER: "paddleocr",
+      MODEL_PROVIDER: "fixture",
+      SESSION_SECRET: "session-secret",
+      FEISHU_APP_ID: "app-id",
+      FEISHU_APP_SECRET: "app-secret",
+      FEISHU_REDIRECT_URI: "https://example.test/callback",
+    }),
+  ).toThrow("fixture model provider is not allowed in production");
+});
