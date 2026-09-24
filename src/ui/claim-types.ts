@@ -31,6 +31,10 @@ export type ClaimSummary = {
 export type ValidationIssue = { code: string; severity: "BLOCKING" | "WARNING"; message: string };
 export type ConfirmableExpenseField = "invoiceNumber" | "issuedOn" | "totalAmountCents";
 
+export function hasBlockingValidation(issues: ValidationIssue[]) {
+  return issues.some((issue) => issue.severity === "BLOCKING");
+}
+
 export function formatMoney(cents: number) {
   return new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY" }).format(cents / 100);
 }

@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 
-import { extractedReceiptField, lowConfidenceField, receiptDisplayName, receiptStatusLabel, type ClaimReceipt } from "@/src/ui/claim-types";
+import { extractedReceiptField, hasBlockingValidation, lowConfidenceField, receiptDisplayName, receiptStatusLabel, type ClaimReceipt } from "@/src/ui/claim-types";
 
 const receipt: ClaimReceipt = {
   id: "receipt-1",
@@ -28,4 +28,9 @@ it("gives each uploaded receipt a stable name and a readable recognition status"
 it("reads recognized values and confidence without inventing values for missing fields", () => {
   expect(extractedReceiptField(receipt, "invoiceNumber")).toEqual({ value: "INV-001", confidence: 0.88 });
   expect(extractedReceiptField(receipt, "totalAmountCents")).toBeNull();
+});
+
+it("marks a submission as blocked only when the server reports a blocking validation", () => {
+  expect(hasBlockingValidation([{ code: "DUPLICATE_RECEIPT", severity: "BLOCKING", message: "发现重复票据" }])).toBe(true);
+  expect(hasBlockingValidation([{ code: "MANUAL_REVIEW", severity: "WARNING", message: "建议核对" }])).toBe(false);
 });

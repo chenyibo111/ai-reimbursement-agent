@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { ClaimChat } from "@/src/ui/claim-chat";
-import { type ClaimSummary, type ConfirmableExpenseField, type ExpenseItem, formatMoney, type ValidationIssue } from "@/src/ui/claim-types";
+import { type ClaimSummary, type ConfirmableExpenseField, type ExpenseItem, formatMoney, hasBlockingValidation, type ValidationIssue } from "@/src/ui/claim-types";
 import { ExpenseTable } from "@/src/ui/expense-table";
 import { ReceiptUpload } from "@/src/ui/receipt-upload";
 import { SubmissionSummary } from "@/src/ui/submission-summary";
@@ -74,7 +74,7 @@ export default function ClaimPage({ params }: { params: Promise<{ claimId: strin
   async function requestPreview() {
     if (!claim) return;
     setIsPreviewing(true); setError(null);
-    try { const response = await fetch(`/api/claims/${claim.id}/submission-request`, { method: "POST" }); const payload = await response.json() as Preview & { error?: string }; if (!response.ok) throw new Error(payload.error || "无法生成确认摘要。"); setPreview(payload); }
+    try { const response = await fetch(`/api/claims/${claim.id}/submission-request`, { method: "POST" }); const payload = await response.json() as Preview & { error?: string }; if (!response.ok) { if (payload.issues) setIssues(payload.issues); throw new Error(payload.error || "无法生成确认摘要。"); } setPreview(payload); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "无法生成确认摘要。"); }
     finally { setIsPreviewing(false); }
   }
@@ -82,7 +82,7 @@ export default function ClaimPage({ params }: { params: Promise<{ claimId: strin
   async function submit(token: string) {
     if (!claim) return;
     setError(null);
-    try { const response = await fetch(`/api/claims/${claim.id}/submit`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirmationToken: token }) }); const payload = await response.json() as { submissionNumber?: string; error?: string }; if (!response.ok || !payload.submissionNumber) throw new Error(payload.error || "提交失败，请重新生成确认摘要。"); setSubmittedNumber(payload.submissionNumber); router.replace(`/claims/${claim.id}/detail`); }
+    try { const response = await fetch(`/api/claims/${claim.id}/submit`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirmationToken: token }) }); const payload = await response.json() as { submissionNumber?: string; error?: string; issues?: ValidationIssue[] }; if (!response.ok || !payload.submissionNumber) { if (payload.issues) setIssues(payload.issues); throw new Error(payload.error || "提交失败，请重新生成确认摘要。"); } setSubmittedNumber(payload.submissionNumber); router.replace(`/claims/${claim.id}/detail`); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "提交失败，请重新生成确认摘要。"); }
   }
 
@@ -102,7 +102,7 @@ export default function ClaimPage({ params }: { params: Promise<{ claimId: strin
             <textarea id="workspace-purpose" className="resize-none" value={purposeDraft} onChange={(event) => setPurposeDraft(event.target.value)} rows={3} disabled={claim.status === "SUBMITTED"} placeholder="例如：客户拜访交通与餐饮" />
             <div className={styles.purposeActions}><button type="submit" className="button-outline" disabled={isSavingPurpose || claim.status === "SUBMITTED"} aria-busy={isSavingPurpose}>保存报销事由</button>{purposeStatus ? <p role="status" className={styles.saved}>{purposeStatus}</p> : null}</div>
           </form>
-          <div className={styles.grid}><div className={styles.mainColumn}><ReceiptUpload claimId={claim.id} receipts={claim.receipts} onComplete={() => void refresh()} /><ExpenseTable items={claim.expenseItems} receipts={claim.receipts} onConfirmField={confirmField} /></div><div className={styles.sideColumn}><ValidationPanel issues={issues} /><ClaimChat claimId={claim.id} onComplete={() => void refresh()} /><SubmissionSummary preview={preview} isLoading={isPreviewing} onRequest={() => void requestPreview()} onSubmit={(token) => void submit(token)} submittedNumber={submittedNumber} /></div></div>
+          <div className={styles.grid}><div className={styles.mainColumn}><ReceiptUpload claimId={claim.id} receipts={claim.receipts} onComplete={() => void refresh()} /><ExpenseTable items={claim.expenseItems} receipts={claim.receipts} onConfirmField={confirmField} /></div><div className={styles.sideColumn}><ValidationPanel issues={issues} /><ClaimChat claimId={claim.id} onComplete={() => void refresh()} /><SubmissionSummary preview={preview} isLoading={isPreviewing} hasBlockingValidation={hasBlockingValidation(issues)} onRequest={() => void requestPreview()} onSubmit={(token) => void submit(token)} submittedNumber={submittedNumber} /></div></div>
         </div>
       </div>}
     </main>
