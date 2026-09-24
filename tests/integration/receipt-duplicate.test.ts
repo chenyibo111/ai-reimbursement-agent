@@ -4,7 +4,7 @@ import { POST } from "@/app/api/claims/[claimId]/receipts/[receiptId]/extract/ro
 import { createPrismaClient } from "@/src/infrastructure/prisma/client";
 import { createSessionToken } from "@/src/server/session";
 
-const databaseUrl = "postgresql://reimbursement:reimbursement@127.0.0.1:5433/reimbursement";
+const databaseUrl = process.env.TEST_DATABASE_URL ?? "postgresql://reimbursement:reimbursement@127.0.0.1:5433/reimbursement_test";
 const prisma = createPrismaClient(databaseUrl);
 
 beforeAll(async () => {
@@ -14,6 +14,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  await prisma.submissionSnapshot.deleteMany();
   await prisma.auditEvent.deleteMany();
   await prisma.validationResult.deleteMany();
   await prisma.expenseItem.deleteMany();

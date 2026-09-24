@@ -8,3 +8,7 @@ it("marks production session cookies Secure and HttpOnly", () => {
   expect(cookie).toContain("Secure");
   expect(cookie).toContain("SameSite=Lax");
 });
+
+it("keeps a session cookie for thirty days", () => {
+  expect(sessionCookie("employee-1", "secret", false)).toContain("Max-Age=2592000");
+});

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { createSessionToken } from "@/src/server/session";
+import { createSessionToken, sessionDurationSeconds } from "@/src/server/session";
 
 export const sessionCookieName = "reimbursement_session";
 export const oauthStateCookieName = "reimbursement_oauth_state";
@@ -9,7 +9,7 @@ export function createOAuthState(): string {
 }
 
 export function sessionCookie(actorId: string, secret: string, isProduction: boolean): string {
-  return cookie(sessionCookieName, createSessionToken(actorId, secret), isProduction, 60 * 60 * 8);
+  return cookie(sessionCookieName, createSessionToken(actorId, secret), isProduction, sessionDurationSeconds);
 }
 
 export function clearSessionCookie(isProduction: boolean): string {

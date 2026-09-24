@@ -1,14 +1,17 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 
 const sessionCookieName = "reimbursement_session";
+export const sessionDurationSeconds = 60 * 60 * 24 * 30;
+type SessionPayload = { actorId: string; issuedAt: number; expiresAt: number; sessionId: string };
 
-export function createSessionToken(actorId: string, secret: string): string {
-  const payload = Buffer.from(JSON.stringify({ actorId }), "utf8").toString("base64url");
+export function createSessionToken(actorId: string, secret: string, now = new Date()): string {
+  const issuedAt = Math.floor(now.getTime() / 1000);
+  const payload = Buffer.from(JSON.stringify({ actorId, issuedAt, expiresAt: issuedAt + sessionDurationSeconds, sessionId: randomUUID() } satisfies SessionPayload), "utf8").toString("base64url");
   const signature = createHmac("sha256", secret).update(payload).digest("base64url");
   return `${payload}.${signature}`;
 }
 
-export function getSessionActorId(request: Request): string {
+export function getSessionActorId(request: Request, now = new Date()): string {
   const secret = process.env.SESSION_SECRET;
   if (!secret) {
     throw new Error("session configuration is missing");
@@ -31,8 +34,9 @@ export function getSessionActorId(request: Request): string {
   }
 
   try {
-    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { actorId?: unknown };
-    if (typeof parsed.actorId !== "string" || !parsed.actorId) {
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Partial<SessionPayload>;
+    const expiresAt = parsed.expiresAt;
+    if (typeof parsed.actorId !== "string" || !parsed.actorId || !Number.isInteger(parsed.issuedAt) || !Number.isInteger(expiresAt) || typeof parsed.sessionId !== "string" || !parsed.sessionId || typeof expiresAt !== "number" || expiresAt <= Math.floor(now.getTime() / 1000)) {
       throw new Error("invalid actor");
     }
     return parsed.actorId;

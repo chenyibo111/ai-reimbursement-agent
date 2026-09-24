@@ -5,7 +5,7 @@ import { POST as submit } from "@/app/api/claims/[claimId]/submit/route";
 import { createPrismaClient } from "@/src/infrastructure/prisma/client";
 import { createSessionToken } from "@/src/server/session";
 
-const databaseUrl = "postgresql://reimbursement:reimbursement@127.0.0.1:5433/reimbursement";
+const databaseUrl = process.env.TEST_DATABASE_URL ?? "postgresql://reimbursement:reimbursement@127.0.0.1:5433/reimbursement_test";
 const prisma = createPrismaClient(databaseUrl);
 beforeAll(async () => { process.env.DATABASE_URL = databaseUrl; process.env.SESSION_SECRET = "test-session-secret"; await prisma.$connect(); });
 beforeEach(async () => { await prisma.auditEvent.deleteMany(); await prisma.submissionSnapshot.deleteMany(); await prisma.expenseItem.deleteMany(); await prisma.claimDraft.deleteMany(); await prisma.employee.deleteMany(); });

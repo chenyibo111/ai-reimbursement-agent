@@ -3,7 +3,7 @@ import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
 import { PrismaClaimRepository } from "@/src/infrastructure/prisma/claim-repository";
 import { createPrismaClient } from "@/src/infrastructure/prisma/client";
 
-const databaseUrl = "postgresql://reimbursement:reimbursement@127.0.0.1:5433/reimbursement";
+const databaseUrl = process.env.TEST_DATABASE_URL ?? "postgresql://reimbursement:reimbursement@127.0.0.1:5433/reimbursement_test";
 const prisma = createPrismaClient(databaseUrl);
 const claims = new PrismaClaimRepository(prisma);
 
@@ -12,6 +12,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  await prisma.submissionSnapshot.deleteMany();
   await prisma.auditEvent.deleteMany();
   await prisma.claimDraft.deleteMany();
   await prisma.employee.deleteMany();
