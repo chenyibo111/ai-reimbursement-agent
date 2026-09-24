@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@/generated/prisma/client";
 import type { ClaimSummary } from "@/src/application/get-claim-summary";
 import type { Claim, ClaimStatus } from "@/src/domain/claim";
+import { formatProposalValue, type AgentProposalField } from "@/src/domain/agent-proposal";
 
 export type CreateClaimDraft = {
   employeeId: string;
@@ -57,6 +58,9 @@ export class PrismaClaimRepository {
         receipts: true,
         expenseItems: true,
         validationResults: true,
+        agentProposals: {
+          orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+        },
       },
     });
     if (!draft) {
@@ -73,6 +77,17 @@ export class PrismaClaimRepository {
       receipts: draft.receipts,
       expenseItems: draft.expenseItems,
       validationResults: draft.validationResults,
+      agentProposals: draft.agentProposals.map((proposal) => ({
+        id: proposal.id,
+        target: proposal.targetRef,
+        field: proposal.field,
+        displayValue: formatProposalValue({ field: proposal.field as AgentProposalField, value: proposal.value as string | number }),
+        reason: proposal.reason,
+        status: proposal.status,
+        claimVersion: proposal.claimVersion,
+        createdAt: proposal.createdAt.toISOString(),
+        resolvedAt: proposal.resolvedAt?.toISOString() ?? null,
+      })),
     };
   }
 }

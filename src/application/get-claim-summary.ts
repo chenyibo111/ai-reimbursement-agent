@@ -11,6 +11,17 @@ export type ClaimSummary = {
   receipts: Array<Record<string, unknown>>;
   expenseItems: Array<Record<string, unknown>>;
   validationResults: Array<Record<string, unknown>>;
+  agentProposals: Array<{
+    id: string;
+    target: string;
+    field: string;
+    displayValue: string;
+    reason: string;
+    status: "PENDING" | "ACCEPTED" | "REJECTED" | "EXPIRED";
+    claimVersion: number;
+    createdAt: string;
+    resolvedAt: string | null;
+  }>;
 };
 
 export type ClaimSummaryDeps = {

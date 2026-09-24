@@ -33,6 +33,13 @@ enum ValidationSeverity {
   WARNING
 }
 
+enum AgentProposalStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
 model Employee {
   id          String       @id
   displayName String
@@ -57,6 +64,7 @@ model ClaimDraft {
   validationResults ValidationResult[]
   submissions       SubmissionSnapshot[]
   auditEvents       AuditEvent[]
+  agentProposals    AgentFieldProposal[]
 
   @@index([employeeId, status])
 }
@@ -96,6 +104,26 @@ model ExpenseItem {
   projectCode       String?
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
+  agentProposals    AgentFieldProposal[]
+}
+
+model AgentFieldProposal {
+  id            String              @id @default(cuid())
+  claimId       String
+  claim         ClaimDraft          @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  expenseItemId String?
+  expenseItem   ExpenseItem?        @relation(fields: [expenseItemId], references: [id], onDelete: SetNull)
+  targetRef     String
+  field         String
+  value         Json
+  reason        String
+  claimVersion  Int
+  status        AgentProposalStatus @default(PENDING)
+  createdAt     DateTime            @default(now())
+  resolvedAt    DateTime?
+
+  @@index([claimId, status])
+  @@index([claimId, createdAt])
 }
 
 model Clarification {
