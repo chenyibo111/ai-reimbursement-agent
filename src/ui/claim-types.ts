@@ -26,6 +26,17 @@ export type ClaimSummary = {
   totalAmountCents: number;
   receipts: ClaimReceipt[];
   expenseItems: ExpenseItem[];
+  agentProposals: AgentProposal[];
+};
+
+export type AgentProposal = {
+  id: string;
+  target: string;
+  field: "purpose" | "invoiceNumber" | "issuedOn" | "totalAmountCents";
+  displayValue: string;
+  reason: string;
+  status: "PENDING" | "ACCEPTED" | "REJECTED" | "EXPIRED";
+  claimVersion: number;
 };
 
 export type ValidationIssue = { code: string; severity: "BLOCKING" | "WARNING"; message: string };
