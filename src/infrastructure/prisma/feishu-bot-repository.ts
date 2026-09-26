@@ -47,6 +47,13 @@ export class FeishuBotRepository {
     }
   }
 
+  async findInboundByEventId(eventId: string): Promise<Omit<ClaimedInboundEvent, "id" | "status" | "claimId"> | null> {
+    return this.prisma.inboundChannelEvent.findUnique({
+      where: { eventId },
+      select: { eventId: true, messageId: true, messageType: true, chatId: true, senderOpenId: true },
+    });
+  }
+
   async claimNextPending(): Promise<ClaimedInboundEvent | null> {
     return this.prisma.$transaction(async (tx) => {
       const candidate = await tx.inboundChannelEvent.findFirst({
