@@ -1,5 +1,6 @@
 export type AppConfig = {
   isProduction: boolean;
+  policyAdminOpenIds: ReadonlySet<string>;
   receiptExtractionProvider?: string;
   modelProvider?: "fixture" | "openai-compatible";
   model?: {
@@ -77,6 +78,7 @@ export function loadConfig(env: Record<string, string | undefined>): AppConfig {
 
   return {
     isProduction,
+    policyAdminOpenIds: parsePolicyAdminOpenIds(env.POLICY_ADMIN_FEISHU_OPEN_IDS),
     receiptExtractionProvider: env.RECEIPT_EXTRACTION_PROVIDER,
     modelProvider,
     model,
@@ -90,6 +92,15 @@ export function loadConfig(env: Record<string, string | undefined>): AppConfig {
       : undefined,
     feishuBot,
   };
+}
+
+function parsePolicyAdminOpenIds(value: string | undefined): ReadonlySet<string> {
+  return new Set(
+    (value ?? "")
+      .split(",")
+      .map((openId) => openId.trim())
+      .filter((openId) => /^ou_[A-Za-z0-9_]+$/.test(openId)),
+  );
 }
 
 export function validateFeishuWorkerEnvironment(env: Record<string, string | undefined>): FeishuBotConfig {

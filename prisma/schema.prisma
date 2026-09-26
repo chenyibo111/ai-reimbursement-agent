@@ -47,6 +47,19 @@ enum InboundChannelEventStatus {
   RETRYABLE
 }
 
+enum PolicyVersionStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum PolicyRuleType {
+  CLAIM_TOTAL_MAX
+  CATEGORY_ITEM_MAX
+  CATEGORY_ALLOWED
+  CATEGORY_REQUIRED_FIELD
+}
+
 model Employee {
   id                  String               @id
   displayName         String
@@ -218,4 +231,51 @@ model FeishuConversation {
 
   @@unique([employeeId, chatId])
   @@index([claimId])
+}
+
+model PolicyVersion {
+  id                String              @id @default(cuid())
+  title             String
+  status            PolicyVersionStatus @default(DRAFT)
+  version           Int                 @default(0)
+  effectiveFrom     DateTime
+  createdByEmployeeId String
+  publishedByEmployeeId String?
+  publishedAt       DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  rules             PolicyRule[]
+  auditEvents       PolicyAuditEvent[]
+
+  @@index([status, effectiveFrom])
+}
+
+model PolicyRule {
+  id              String             @id @default(cuid())
+  policyVersionId String
+  policyVersion   PolicyVersion      @relation(fields: [policyVersionId], references: [id], onDelete: Cascade)
+  code            String
+  name            String
+  type            PolicyRuleType
+  severity        ValidationSeverity
+  config          Json
+  enabled         Boolean            @default(true)
+  sortOrder       Int                @default(0)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@unique([policyVersionId, code])
+  @@index([policyVersionId, sortOrder])
+}
+
+model PolicyAuditEvent {
+  id              String        @id @default(cuid())
+  policyVersionId String
+  policyVersion   PolicyVersion @relation(fields: [policyVersionId], references: [id], onDelete: Cascade)
+  actorId         String
+  type            String
+  payload         Json
+  createdAt       DateTime      @default(now())
+
+  @@index([policyVersionId, createdAt])
 }
