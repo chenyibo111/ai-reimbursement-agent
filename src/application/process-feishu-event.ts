@@ -88,6 +88,7 @@ export async function processFeishuEvent(
 async function processAttachment(input: { employeeId: string; claimId: string; message: FeishuInboundMessage; deps: ProcessFeishuEventDeps }): Promise<FeishuProcessingResult> {
   const attachment = input.message.attachments[0];
   if (!attachment) return { kind: "RETRYABLE_FAILURE", claimId: input.claimId, retryable: false, replyText: `未找到可处理的附件，请在工作台上传：${claimUrl(input.deps.publicAppUrl, input.claimId)}` };
+  let receiptPersisted = false;
   try {
     const downloaded = await input.deps.client.downloadResource(input.message.messageId, attachment.fileKey, attachment.resourceType);
     validateDownloadedAttachment(downloaded.mimeType, downloaded.bytes);
@@ -99,6 +100,7 @@ async function processAttachment(input: { employeeId: string; claimId: string; m
       mimeType: downloaded.mimeType,
       bytes: downloaded.bytes,
     });
+    receiptPersisted = true;
     await input.deps.extractReceipt({ actorId: input.employeeId, claimId: input.claimId, receiptId: receipt.id });
     return {
       kind: "ATTACHMENT_QUEUED",
@@ -113,7 +115,7 @@ async function processAttachment(input: { employeeId: string; claimId: string; m
     return {
       kind: "RETRYABLE_FAILURE",
       claimId: input.claimId,
-      retryable: !deterministic,
+      retryable: !deterministic && !receiptPersisted,
       replyText: `${deterministic ? "附件仅支持 JPG、PNG 或 PDF，大小不超过 20MB，且文件内容需与格式一致。" : "附件暂未处理完成，请稍后重试或在工作台上传。"} ${claimUrl(input.deps.publicAppUrl, input.claimId)}`,
     };
   }

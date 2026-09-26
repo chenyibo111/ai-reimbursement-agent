@@ -83,7 +83,7 @@ it("preserves the created draft and reports a safe retry response when download 
 
   const ocr = attachmentDeps({ extractReceipt: async () => { throw new Error("ocr response with object key"); } });
   const result = await processFeishuEvent({ eventId: "event-1" }, ocr.deps);
-  expect(result).toMatchObject({ kind: "RETRYABLE_FAILURE", claimId: "claim-1" });
+  expect(result).toMatchObject({ kind: "RETRYABLE_FAILURE", claimId: "claim-1", retryable: false });
   expect(JSON.stringify(result)).not.toContain("object key");
   expect(ocr.calls.upload).toBe(1);
 });
@@ -91,6 +91,6 @@ it("preserves the created draft and reports a safe retry response when download 
 it("does not overwrite a Web update when the existing extraction pipeline reports a version conflict", async () => {
   const { deps, calls } = attachmentDeps({ extractReceipt: async () => { throw new Error("version conflict"); } });
 
-  await expect(processFeishuEvent({ eventId: "event-1" }, deps)).resolves.toMatchObject({ kind: "RETRYABLE_FAILURE", claimId: "claim-1" });
+  await expect(processFeishuEvent({ eventId: "event-1" }, deps)).resolves.toMatchObject({ kind: "RETRYABLE_FAILURE", claimId: "claim-1", retryable: false });
   expect(calls.upload).toBe(1);
 });

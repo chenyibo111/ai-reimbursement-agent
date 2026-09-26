@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "feishu:worker": "tsx src/worker/feishu-bot.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1137.0",
