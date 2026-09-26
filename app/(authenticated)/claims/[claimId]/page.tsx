@@ -30,9 +30,10 @@ export default function ClaimPage({ params }: { params: Promise<{ claimId: strin
 
   useEffect(() => { void params.then(({ claimId: id }) => setClaimId(id)); }, [params]);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (mode: "full" | "background" = "full") => {
     if (!claimId) return;
-    setIsLoading(true); setError(null);
+    if (mode === "full") setIsLoading(true);
+    setError(null);
     try {
       const [claimResponse, validationResponse] = await Promise.all([fetch(`/api/claims/${claimId}`), fetch(`/api/claims/${claimId}/validate`)]);
       const claimPayload = await claimResponse.json() as ClaimSummary & { error?: string };
@@ -42,7 +43,7 @@ export default function ClaimPage({ params }: { params: Promise<{ claimId: strin
       setPurposeDraft(claimPayload.purpose ?? "");
       setIssues(validationResponse.ok ? validationPayload.issues ?? [] : []);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "无法读取当前报销草稿。"); }
-    finally { setIsLoading(false); }
+    finally { if (mode === "full") setIsLoading(false); }
   }, [claimId]);
 
   useEffect(() => { void refresh(); }, [refresh]);
@@ -102,7 +103,7 @@ export default function ClaimPage({ params }: { params: Promise<{ claimId: strin
             <textarea id="workspace-purpose" className="resize-none" value={purposeDraft} onChange={(event) => setPurposeDraft(event.target.value)} rows={3} disabled={claim.status === "SUBMITTED"} placeholder="例如：客户拜访交通与餐饮" />
             <div className={styles.purposeActions}><button type="submit" className="button-outline" disabled={isSavingPurpose || claim.status === "SUBMITTED"} aria-busy={isSavingPurpose}>保存报销事由</button>{purposeStatus ? <p role="status" className={styles.saved}>{purposeStatus}</p> : null}</div>
           </form>
-          <div className={styles.grid}><div className={styles.mainColumn}><ReceiptUpload claimId={claim.id} receipts={claim.receipts} onComplete={() => void refresh()} /><ExpenseTable items={claim.expenseItems} receipts={claim.receipts} onConfirmField={confirmField} /></div><div className={styles.sideColumn}><ValidationPanel issues={issues} /><ClaimChat claimId={claim.id} version={claim.version} proposals={claim.agentProposals} onComplete={() => void refresh()} /><SubmissionSummary preview={preview} isLoading={isPreviewing} hasBlockingValidation={hasBlockingValidation(issues)} onRequest={() => void requestPreview()} onSubmit={(token) => void submit(token)} submittedNumber={submittedNumber} /></div></div>
+          <div className={styles.grid}><div className={styles.mainColumn}><ReceiptUpload claimId={claim.id} receipts={claim.receipts} onComplete={() => void refresh("background")} /><ExpenseTable items={claim.expenseItems} receipts={claim.receipts} onConfirmField={confirmField} /></div><div className={styles.sideColumn}><ValidationPanel issues={issues} /><ClaimChat claimId={claim.id} version={claim.version} proposals={claim.agentProposals} onComplete={() => void refresh("background")} /><SubmissionSummary preview={preview} isLoading={isPreviewing} hasBlockingValidation={hasBlockingValidation(issues)} onRequest={() => void requestPreview()} onSubmit={(token) => void submit(token)} submittedNumber={submittedNumber} /></div></div>
         </div>
       </div>}
     </main>
