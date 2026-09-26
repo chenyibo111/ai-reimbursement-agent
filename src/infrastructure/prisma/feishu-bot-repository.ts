@@ -6,6 +6,8 @@ export type RecordInboundEvent = {
   messageType: string;
   chatId: string;
   senderOpenId: string;
+  chatType?: "p2p" | "group";
+  mentionedOpenIds?: string[];
 };
 
 export type ClaimedInboundEvent = {
@@ -15,6 +17,8 @@ export type ClaimedInboundEvent = {
   messageType: string;
   chatId: string;
   senderOpenId: string;
+  chatType: string;
+  mentionedOpenIds: string[];
   status: InboundChannelEventStatus;
   claimId: string | null;
 };
@@ -32,7 +36,7 @@ export class FeishuBotRepository {
 
     try {
       const created = await this.prisma.inboundChannelEvent.create({
-        data: { ...input, messageId },
+        data: { ...input, messageId, chatType: input.chatType ?? "p2p", mentionedOpenIds: input.mentionedOpenIds ?? [] },
         select: { id: true },
       });
       return { id: created.id, shouldProcess: true };
@@ -50,7 +54,7 @@ export class FeishuBotRepository {
   async findInboundByEventId(eventId: string): Promise<Omit<ClaimedInboundEvent, "id" | "status" | "claimId"> | null> {
     return this.prisma.inboundChannelEvent.findUnique({
       where: { eventId },
-      select: { eventId: true, messageId: true, messageType: true, chatId: true, senderOpenId: true },
+      select: { eventId: true, messageId: true, messageType: true, chatId: true, senderOpenId: true, chatType: true, mentionedOpenIds: true },
     });
   }
 
@@ -78,6 +82,8 @@ export class FeishuBotRepository {
           messageType: true,
           chatId: true,
           senderOpenId: true,
+          chatType: true,
+          mentionedOpenIds: true,
           status: true,
           claimId: true,
         },

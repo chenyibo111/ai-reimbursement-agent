@@ -8,7 +8,7 @@ function attachmentDeps(overrides: Partial<ProcessFeishuEventDeps> = {}) {
     botOpenId: "ou-bot",
     publicAppUrl: "https://reimbursement.example.test",
     events: {
-      findInboundByEventId: async () => ({ eventId: "event-1", messageId: "om-1", messageType: "image", chatId: "oc-1", senderOpenId: "ou-employee" }),
+      findInboundByEventId: async () => ({ eventId: "event-1", messageId: "om-1", messageType: "image", chatId: "oc-1", senderOpenId: "ou-employee", chatType: "p2p", mentionedOpenIds: [] }),
       findEmployeeByOpenId: async () => ({ id: "employee-1" }),
       getConversation: async () => null,
       setConversation: async () => undefined,

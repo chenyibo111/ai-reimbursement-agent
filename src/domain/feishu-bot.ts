@@ -15,6 +15,8 @@ export type FeishuInboundMessage = {
   attachments: FeishuAttachment[];
 };
 
+export type FeishuMessageContent = Omit<FeishuInboundMessage, "chatType" | "mentions">;
+
 export type FeishuReplyCard = Record<string, unknown>;
 
 export type FeishuBotCommand = "NEW_CLAIM" | "VIEW_CURRENT_CLAIM" | "CHAT";

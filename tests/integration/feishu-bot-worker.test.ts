@@ -37,7 +37,7 @@ it("persists, processes, and replies to a first bound message exactly once acros
   const replies: string[] = [];
   const { runtime, repository } = createRuntime(messages, replies);
 
-  await runtime.onEvent(rawEvent("event-first", "om-first", "oc-direct"));
+  await runtime.onEvent(rawEvent("event-first", "om-first", "oc-direct", "p2p"));
   await expect(runtime.drainOnce()).resolves.toBe(true);
 
   const claims = await prisma.claimDraft.findMany({ where: { employeeId: "employee-1" } });
@@ -45,7 +45,7 @@ it("persists, processes, and replies to a first bound message exactly once acros
   await expect(repository.getConversation("employee-1", "oc-direct")).resolves.toEqual({ claimId: claims[0].id });
   expect(replies).toEqual([expect.stringContaining(`/claims/${claims[0].id}`)]);
 
-  await runtime.onEvent(rawEvent("event-redelivered", "om-first", "oc-direct"));
+  await runtime.onEvent(rawEvent("event-redelivered", "om-first", "oc-direct", "p2p"));
   await expect(runtime.drainOnce()).resolves.toBe(false);
   await expect(prisma.claimDraft.count({ where: { employeeId: "employee-1" } })).resolves.toBe(1);
 });
@@ -59,14 +59,14 @@ it("ignores a group message that has not mentioned the bot and routes new/view c
   const replies: string[] = [];
   const { runtime } = createRuntime(messages, replies);
 
-  await runtime.onEvent(rawEvent("event-ignore", "om-ignore", "oc-group"));
+  await runtime.onEvent(rawEvent("event-ignore", "om-ignore", "oc-group", "group", ["ou-other"]));
   await runtime.drainOnce();
   await expect(prisma.claimDraft.count()).resolves.toBe(0);
 
-  await runtime.onEvent(rawEvent("event-new", "om-new", "oc-group"));
+  await runtime.onEvent(rawEvent("event-new", "om-new", "oc-group", "group", ["ou-bot"]));
   await runtime.drainOnce();
   const claim = await prisma.claimDraft.findFirstOrThrow();
-  await runtime.onEvent(rawEvent("event-view", "om-view", "oc-group"));
+  await runtime.onEvent(rawEvent("event-view", "om-view", "oc-group", "group", ["ou-bot"]));
   await runtime.drainOnce();
 
   expect(replies).toEqual([
@@ -106,10 +106,10 @@ function createRuntime(messages: Map<string, FeishuInboundMessage>, replies: str
   };
 }
 
-function rawEvent(eventId: string, messageId: string, chatId: string) {
+function rawEvent(eventId: string, messageId: string, chatId: string, chatType: "p2p" | "group", mentions: string[] = []) {
   return {
     event_id: eventId,
     sender: { sender_id: { open_id: "ou-employee" } },
-    message: { message_id: messageId, message_type: "text", chat_id: chatId },
+    message: { message_id: messageId, message_type: "text", chat_id: chatId, chat_type: chatType, mentions: mentions.map((openId) => ({ id: { open_id: openId } })) },
   };
 }

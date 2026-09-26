@@ -8,7 +8,7 @@ function fixture(overrides: Partial<ProcessFeishuEventDeps> = {}) {
     botOpenId: "ou_bot",
     publicAppUrl: "https://reimbursement.example.test",
     events: {
-      findInboundByEventId: async () => ({ eventId: "event-1", messageId: "om-1", messageType: "text", chatId: "oc-1", senderOpenId: "ou-employee" }),
+      findInboundByEventId: async () => ({ eventId: "event-1", messageId: "om-1", messageType: "text", chatId: "oc-1", senderOpenId: "ou-employee", chatType: "p2p", mentionedOpenIds: [] }),
       findEmployeeByOpenId: async () => {
         calls.findEmployee += 1;
         return { id: "employee-1" };
@@ -41,12 +41,32 @@ function fixture(overrides: Partial<ProcessFeishuEventDeps> = {}) {
 
 it("ignores a group message that does not mention the bot before looking up an employee", async () => {
   const { deps, calls } = fixture({
-    client: { ...fixture().deps.client, getMessage: async () => ({ messageId: "om-1", chatId: "oc-1", chatType: "group", senderOpenId: "ou-employee", messageType: "text", text: "报销", mentions: ["ou-other"], attachments: [] }) },
+    events: {
+      ...fixture().deps.events,
+      findInboundByEventId: async () => ({ eventId: "event-1", messageId: "om-1", messageType: "text", chatId: "oc-1", senderOpenId: "ou-employee", chatType: "group", mentionedOpenIds: ["ou-other"] }),
+    },
+    client: { ...fixture().deps.client, getMessage: async () => ({ messageId: "om-1", chatId: "oc-1", senderOpenId: "ou-employee", messageType: "text", text: "报销", attachments: [] }) },
   });
 
   await expect(processFeishuEvent({ eventId: "event-1" }, deps)).resolves.toEqual({ kind: "IGNORED" });
   expect(calls.findEmployee).toBe(0);
   expect(calls.createClaim).toBe(0);
+});
+
+it("uses durable group metadata instead of the message-query response when enforcing bot mentions", async () => {
+  const { deps, calls } = fixture({
+    events: {
+      ...fixture().deps.events,
+      findInboundByEventId: async () => ({ eventId: "event-1", messageId: "om-1", messageType: "text", chatId: "oc-1", senderOpenId: "ou-employee", chatType: "group", mentionedOpenIds: ["ou-other"] }),
+    },
+    client: {
+      ...fixture().deps.client,
+      getMessage: async () => ({ messageId: "om-1", chatId: "oc-1", senderOpenId: "ou-employee", messageType: "text", text: "报销", attachments: [] }),
+    },
+  });
+
+  await expect(processFeishuEvent({ eventId: "event-1" }, deps)).resolves.toEqual({ kind: "IGNORED" });
+  expect(calls.findEmployee).toBe(0);
 });
 
 it("returns a Web OAuth login link for an unbound employee without creating a claim", async () => {

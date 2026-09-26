@@ -3,12 +3,13 @@ import { expect, it } from "vitest";
 import { createFeishuBotRuntime } from "@/src/worker/feishu-bot-runtime";
 
 function fixture() {
-  const calls = { record: 0, processed: 0, retryable: 0, process: 0, replies: 0, close: 0 };
-  const pending = [{ id: "inbound-1", eventId: "event-1", messageId: "om-1", messageType: "text", chatId: "oc-1", senderOpenId: "ou-1", status: "PROCESSING" as const, claimId: null }];
+  const calls = { record: 0, recorded: [] as unknown[], processed: 0, retryable: 0, process: 0, replies: 0, close: 0 };
+  const pending = [{ id: "inbound-1", eventId: "event-1", messageId: "om-1", messageType: "text", chatId: "oc-1", senderOpenId: "ou-1", chatType: "p2p", mentionedOpenIds: [], status: "PROCESSING" as const, claimId: null }];
   const runtime = createFeishuBotRuntime({
     repository: {
-      recordInbound: async () => {
+      recordInbound: async (input) => {
         calls.record += 1;
+        calls.recorded.push(input);
         return { id: "inbound-1", shouldProcess: calls.record === 1 };
       },
       claimNextPending: async () => pending.shift() ?? null,
@@ -28,7 +29,7 @@ function fixture() {
 const rawEvent = {
   event_id: "event-1",
   sender: { sender_id: { open_id: "ou-1" } },
-  message: { message_id: "om-1", message_type: "text", chat_id: "oc-1" },
+  message: { message_id: "om-1", message_type: "text", chat_id: "oc-1", chat_type: "group", mentions: [{ id: { open_id: "ou-bot" } }] },
 };
 
 it("persists a long-connection event once and does not process inside the callback", async () => {
@@ -38,6 +39,7 @@ it("persists a long-connection event once and does not process inside the callba
   await runtime.onEvent(rawEvent);
 
   expect(calls.record).toBe(2);
+  expect(calls.recorded[0]).toMatchObject({ chatType: "group", mentionedOpenIds: ["ou-bot"] });
   expect(calls.process).toBe(0);
 });
 
@@ -57,7 +59,7 @@ it("returns retryable processing failures to the pending queue", async () => {
   const retryable = createFeishuBotRuntime({
     repository: {
       recordInbound: async () => ({ id: "inbound-1", shouldProcess: true }),
-      claimNextPending: async () => ({ id: "inbound-1", eventId: "event-1", messageId: "om-1", messageType: "text", chatId: "oc-1", senderOpenId: "ou-1", status: "PROCESSING", claimId: null }),
+      claimNextPending: async () => ({ id: "inbound-1", eventId: "event-1", messageId: "om-1", messageType: "text", chatId: "oc-1", senderOpenId: "ou-1", chatType: "p2p", mentionedOpenIds: [], status: "PROCESSING", claimId: null }),
       markProcessed: async () => { calls.processed += 1; },
       markRetryableFailure: async (_id, code) => { expect(code).toBe("RETRYABLE_FAILURE"); calls.retryable += 1; },
     },

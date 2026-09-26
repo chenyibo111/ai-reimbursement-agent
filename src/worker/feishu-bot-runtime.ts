@@ -4,7 +4,13 @@ import type { ClaimedInboundEvent, RecordInboundEvent } from "@/src/infrastructu
 type RawFeishuMessageEvent = {
   event_id?: string;
   sender?: { sender_id?: { open_id?: string } };
-  message?: { message_id?: string; message_type?: string; chat_id?: string };
+  message?: {
+    message_id?: string;
+    message_type?: string;
+    chat_id?: string;
+    chat_type?: string;
+    mentions?: Array<{ id?: { open_id?: string } }>;
+  };
 };
 
 export type FeishuBotRuntime = {
@@ -87,9 +93,11 @@ function normalizeInbound(event: RawFeishuMessageEvent): RecordInboundEvent | nu
   const messageId = event.message?.message_id?.trim();
   const messageType = event.message?.message_type?.trim();
   const chatId = event.message?.chat_id?.trim();
+  const chatType = event.message?.chat_type;
   const senderOpenId = event.sender?.sender_id?.open_id?.trim();
-  if (!eventId || !messageId || !messageType || !chatId || !senderOpenId) return null;
-  return { eventId, messageId, messageType, chatId, senderOpenId };
+  if (!eventId || !messageId || !messageType || !chatId || !senderOpenId || (chatType !== "p2p" && chatType !== "group")) return null;
+  const mentionedOpenIds = [...new Set(event.message?.mentions?.flatMap((mention) => mention.id?.open_id ? [mention.id.open_id] : []) ?? [])];
+  return { eventId, messageId, messageType, chatId, senderOpenId, chatType, mentionedOpenIds };
 }
 
 function replyFor(result: FeishuProcessingResult): string | null {

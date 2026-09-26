@@ -190,6 +190,8 @@ model InboundChannelEvent {
   messageId     String?                   @unique
   messageType   String
   chatId        String
+  chatType      String                    @default("p2p")
+  mentionedOpenIds String[]                @default([])
   senderOpenId  String
   status        InboundChannelEventStatus @default(PENDING)
   failureCode   String?

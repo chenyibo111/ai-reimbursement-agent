@@ -42,11 +42,9 @@ it("normalizes a message response without retaining the original provider payloa
           items: [{
             message_id: "om_123",
             chat_id: "oc_123",
-            chat_type: "group",
-            message_type: "text",
-            content: '{"text":"报销午餐"}',
+            msg_type: "text",
+            body: { content: '{"text":"报销午餐"}' },
             sender: { id: "ou_employee" },
-            mentions: [{ id: { open_id: "ou_bot" } }],
           }],
         },
       });
@@ -56,11 +54,9 @@ it("normalizes a message response without retaining the original provider payloa
   await expect(client.getMessage("om_123")).resolves.toEqual({
     messageId: "om_123",
     chatId: "oc_123",
-    chatType: "group",
     senderOpenId: "ou_employee",
     messageType: "text",
     text: "报销午餐",
-    mentions: ["ou_bot"],
     attachments: [],
   });
 });

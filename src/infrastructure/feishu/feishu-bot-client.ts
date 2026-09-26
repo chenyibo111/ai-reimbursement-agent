@@ -1,9 +1,9 @@
 import { z } from "zod";
 
-import type { FeishuInboundMessage, FeishuReplyCard } from "@/src/domain/feishu-bot";
+import type { FeishuMessageContent, FeishuReplyCard } from "@/src/domain/feishu-bot";
 
 export type FeishuBotClient = {
-  getMessage(messageId: string): Promise<FeishuInboundMessage>;
+  getMessage(messageId: string): Promise<FeishuMessageContent>;
   downloadResource(messageId: string, fileKey: string, type: "image" | "file"): Promise<{ bytes: Uint8Array; filename: string; mimeType: string }>;
   replyText(messageId: string, text: string): Promise<void>;
   replyCard(messageId: string, card: FeishuReplyCard): Promise<void>;
@@ -97,32 +97,28 @@ const messageEnvelopeSchema = z.object({
     items: z.array(z.object({
       message_id: z.string().min(1),
       chat_id: z.string().min(1),
-      chat_type: z.enum(["p2p", "group"]),
-      message_type: z.string().min(1),
-      content: z.string(),
+      msg_type: z.string().min(1),
+      body: z.object({ content: z.string() }),
       sender: z.object({
         id: z.string().optional(),
         sender_id: z.object({ open_id: z.string().optional() }).optional(),
       }).passthrough(),
-      mentions: z.array(z.object({ id: z.object({ open_id: z.string().optional() }).optional() }).passthrough()).default([]),
     }).passthrough()).min(1),
   }),
 }).passthrough();
 
-function normalizeMessage(message: z.infer<typeof messageEnvelopeSchema>["data"]["items"][number]): FeishuInboundMessage {
+function normalizeMessage(message: z.infer<typeof messageEnvelopeSchema>["data"]["items"][number]): FeishuMessageContent {
   const senderOpenId = message.sender.id ?? message.sender.sender_id?.open_id;
   if (!senderOpenId) throw new FeishuBotClientError("INVALID_RESPONSE");
-  const content = parseContent(message.content);
+  const content = parseContent(message.body.content);
   const imageKey = content.image_key;
   const fileKey = content.file_key;
   return {
     messageId: message.message_id,
     chatId: message.chat_id,
-    chatType: message.chat_type,
     senderOpenId,
-    messageType: message.message_type,
+    messageType: message.msg_type,
     text: typeof content.text === "string" ? content.text : "",
-    mentions: message.mentions.flatMap((mention) => mention.id?.open_id ? [mention.id.open_id] : []),
     attachments: [
       ...(typeof imageKey === "string" && imageKey ? [{ fileKey: imageKey, resourceType: "image" as const, filename: typeof content.image_name === "string" ? content.image_name : undefined }] : []),
       ...(typeof fileKey === "string" && fileKey ? [{ fileKey, resourceType: "file" as const, filename: typeof content.file_name === "string" ? content.file_name : undefined }] : []),

@@ -1,7 +1,7 @@
 import type { AgentTurnResult } from "@/src/application/run-agent-turn";
 import type { ExtractReceiptResult } from "@/src/application/extract-receipt";
 import type { Claim } from "@/src/domain/claim";
-import { parseFeishuBotCommand, type FeishuInboundMessage } from "@/src/domain/feishu-bot";
+import { parseFeishuBotCommand, type FeishuInboundMessage, type FeishuMessageContent } from "@/src/domain/feishu-bot";
 import type { Receipt, ReceiptStatus } from "@/src/domain/receipt";
 import type { UploadReceiptInput } from "@/src/application/upload-receipt";
 import type { FeishuBotClient } from "@/src/infrastructure/feishu/feishu-bot-client";
@@ -20,6 +20,8 @@ type StoredInboundEvent = {
   messageType: string;
   chatId: string;
   senderOpenId: string;
+  chatType: string;
+  mentionedOpenIds: string[];
 };
 
 export type ProcessFeishuEventDeps = {
@@ -45,8 +47,13 @@ export async function processFeishuEvent(
   const event = await deps.events.findInboundByEventId(input.eventId);
   if (!event?.messageId) return { kind: "RETRYABLE_FAILURE", retryable: false, replyText: "消息无法处理，请稍后重新发送。" };
 
-  const message = await deps.client.getMessage(event.messageId);
-  assertEventMatchesMessage(event, message);
+  const fetchedMessage = await deps.client.getMessage(event.messageId);
+  assertEventMatchesMessage(event, fetchedMessage);
+  const message: FeishuInboundMessage = {
+    ...fetchedMessage,
+    chatType: event.chatType === "group" ? "group" : "p2p",
+    mentions: event.mentionedOpenIds,
+  };
   if (message.chatType === "group" && !message.mentions.includes(deps.botOpenId)) return { kind: "IGNORED" };
 
   const employee = await deps.events.findEmployeeByOpenId(message.senderOpenId);
@@ -156,7 +163,7 @@ function safeReply(agent: AgentTurnResult): string {
   return agent.reply.trim().slice(0, 1_000) || "已生成补充建议。";
 }
 
-function assertEventMatchesMessage(event: StoredInboundEvent, message: FeishuInboundMessage) {
+function assertEventMatchesMessage(event: StoredInboundEvent, message: FeishuMessageContent) {
   if (event.messageId !== message.messageId || event.chatId !== message.chatId || event.senderOpenId !== message.senderOpenId) {
     throw new Error("feishu message metadata mismatch");
   }
