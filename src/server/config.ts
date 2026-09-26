@@ -14,9 +14,18 @@ export type AppConfig = {
     appSecret: string;
     redirectUri: string;
   };
+  feishuBot?: FeishuBotConfig;
 };
 
-export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
+export type FeishuBotConfig = {
+  appId: string;
+  appSecret: string;
+  botOpenId: string;
+  publicAppUrl: string;
+  eventDelivery: "long_connection";
+};
+
+export function loadConfig(env: Record<string, string | undefined>): AppConfig {
   const isProduction = env.NODE_ENV === "production";
 
   if (isProduction && !env.RECEIPT_EXTRACTION_PROVIDER) {
@@ -64,6 +73,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
   const hasCompleteFeishuConfig = Boolean(
     env.FEISHU_APP_ID && env.FEISHU_APP_SECRET && env.FEISHU_REDIRECT_URI,
   );
+  const feishuBot = parseFeishuBotConfig(env);
 
   return {
     isProduction,
@@ -76,12 +86,35 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
           appId: env.FEISHU_APP_ID!,
           appSecret: env.FEISHU_APP_SECRET!,
           redirectUri: env.FEISHU_REDIRECT_URI!,
-        }
+      }
       : undefined,
+    feishuBot,
   };
 }
 
-function parseOpenAiCompatibleModelConfig(env: NodeJS.ProcessEnv) {
+function parseFeishuBotConfig(env: Record<string, string | undefined>): FeishuBotConfig | undefined {
+  if (env.FEISHU_BOT_ENABLED !== "true") return undefined;
+
+  const botOpenId = required(env.FEISHU_BOT_OPEN_ID, "FEISHU_BOT_OPEN_ID is required when FEISHU_BOT_ENABLED=true");
+  const publicAppUrl = required(env.APP_PUBLIC_URL, "APP_PUBLIC_URL is required when FEISHU_BOT_ENABLED=true");
+  try {
+    new URL(publicAppUrl);
+  } catch {
+    throw new Error("APP_PUBLIC_URL must be a valid URL");
+  }
+  const eventDelivery = env.FEISHU_EVENT_DELIVERY ?? "long_connection";
+  if (eventDelivery !== "long_connection") throw new Error("FEISHU_EVENT_DELIVERY must be long_connection");
+
+  return {
+    appId: required(env.FEISHU_APP_ID, "FEISHU_APP_ID is required when FEISHU_BOT_ENABLED=true"),
+    appSecret: required(env.FEISHU_APP_SECRET, "FEISHU_APP_SECRET is required when FEISHU_BOT_ENABLED=true"),
+    botOpenId,
+    publicAppUrl: publicAppUrl.replace(/\/$/, ""),
+    eventDelivery,
+  };
+}
+
+function parseOpenAiCompatibleModelConfig(env: Record<string, string | undefined>) {
   const baseUrl = required(env.MODEL_BASE_URL, "MODEL_BASE_URL is required for openai-compatible");
   const name = required(env.MODEL_NAME, "MODEL_NAME is required for openai-compatible");
   const apiKey = required(env.MODEL_PROVIDER_API_KEY, "MODEL_PROVIDER_API_KEY is required for openai-compatible");
