@@ -51,3 +51,23 @@ it("publishes an immutable policy version with its rules and an audit trail", as
     expect.arrayContaining([expect.objectContaining({ type: "POLICY_VERSION_PUBLISHED", actorId: "employee-finance" })]),
   );
 });
+
+it("rejects a stale draft-rule update without replacing the latest rules", async () => {
+  const repository = new PrismaPolicyRepository(prisma);
+  const draft = await repository.createDraft({ title: "费用制度", actorId: "employee-finance", effectiveFrom: new Date("2026-10-01T00:00:00.000Z") });
+  const revised = await repository.replaceDraftRules({
+    policyVersionId: draft.id,
+    actorId: "employee-finance",
+    expectedVersion: draft.version,
+    rules: [{ code: "TOTAL", name: "总额上限", type: "CLAIM_TOTAL_MAX", severity: "BLOCKING", config: { maxAmountCents: 100_000 }, sortOrder: 0 }],
+  });
+
+  await expect(repository.replaceDraftRules({
+    policyVersionId: draft.id,
+    actorId: "employee-finance",
+    expectedVersion: draft.version,
+    rules: [],
+  })).rejects.toThrow("version conflict");
+  expect(revised.rules).toEqual([expect.objectContaining({ code: "TOTAL" })]);
+  await expect(prisma.policyRule.findMany({ where: { policyVersionId: draft.id } })).resolves.toEqual([expect.objectContaining({ code: "TOTAL" })]);
+});

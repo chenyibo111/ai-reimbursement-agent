@@ -26,7 +26,7 @@
 |---|---|---|
 | Task 1: 政策持久化、配置与管理员授权 | Complete | `6c0978d`；政策版本/规则/审计迁移、白名单授权与仓储测试已落地。 |
 | Task 2: 受限规则配置与确定性规则引擎 | Complete | `ff66e4f`；补充后的领域测试覆盖金额临界值、空类别、逐条命中、规则顺序、严重级别与非法配置。2026-09-26 已验证聚焦领域测试 5/5、全量测试 130/130 和 `npx tsc --noEmit`。 |
-| Task 3: 将政策校验接入草稿、确认和提交 | In progress | `7fb308e`；校验 API、确认摘要与最终提交已接入当前发布版本；提交快照保存政策版本/规则摘要尚未实现。 |
+| Task 3: 将政策校验接入草稿、确认和提交 | Complete | `7fb308e`、`822c712`；草稿校验、确认摘要与最终提交均执行当前有效政策；最终提交事务内固化政策版本及本次命中的规则结果，后续新版本不会改写历史快照。 |
 | Task 4: 政策版本管理 API 与管理员工作台 | In progress | `40ae617`；已完成创建草稿与保存草稿规则 API；发布/归档/读取 API 与 Web 页面尚未实现。 |
 | Task 5: 回归验证、运维说明与交付检查 | Not started | 等待规则中心能力完整后执行。 |
 
@@ -156,27 +156,27 @@ git commit -m "feat: evaluate structured policy rules"
 - Consumes: `evaluatePolicyRules()` from Task 2 and current-policy lookup from Task 1.
 - Produces: `validateStoredClaimWithPolicy(input, policy): Promise<ValidationIssue[]>`; `SubmissionDeps.validate()` returns enriched issues plus policy version; `submissions.create()` accepts immutable policy snapshot data.
 
-- [ ] **Step 1: Write failing application and API tests**
+- [x] **Step 1: Write application and API tests**
 
 Seed an owner, a published policy and expense items. Assert blocking rules prevent confirmation and submit; warnings appear in preview but allow submit; no published policy preserves base validation; a newly published version does not change an earlier `SubmissionSnapshot`; stale publish/update requests return `409`.
 
-- [ ] **Step 2: Run the focused tests to verify they fail**
+- [x] **Step 2: Run the focused tests**
 
 Run: `npm run test -- tests/unit/application/validate-policy-claim.test.ts tests/integration/api/claim-validation.test.ts tests/integration/claim-submission.test.ts tests/integration/policy-repository.test.ts`
 
-Expected: FAIL because claim validation does not load policy or persist the policy snapshot.
+The existing validation integration was already present. The added immutable-policy-snapshot test failed as expected before the submit path wrote policy data.
 
-- [ ] **Step 3: Implement the validation and submission composition**
+- [x] **Step 3: Implement the validation and submission composition**
 
 Load only the single active published version in the same request flow, combine base issues with `PolicyRuleEngine` results without changing their severity, and persist the evaluated policy version/rule summary with the submission transaction. Revalidate immediately before submit; never reuse only a browser preview or confirmation token as policy proof.
 
-- [ ] **Step 4: Run focused tests and type check**
+- [x] **Step 4: Run focused tests and type check**
 
 Run: `npm run test -- tests/unit/application/validate-policy-claim.test.ts tests/integration/api/claim-validation.test.ts tests/integration/claim-submission.test.ts tests/integration/policy-repository.test.ts && npx tsc --noEmit`
 
 Expected: PASS; warnings are retained and only blocking results stop the flow.
 
-- [ ] **Step 5: Commit the claim integration**
+- [x] **Step 5: Commit the claim integration**
 
 ```bash
 git add src app tests
