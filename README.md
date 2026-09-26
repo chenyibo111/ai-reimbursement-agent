@@ -69,3 +69,29 @@ FEISHU_REDIRECT_URI="http://localhost:3000/api/auth/feishu/callback"
 AI 对话只会提出字段建议，员工在工作台点击“接受并写入”后才会更新草稿；建议确认受草稿版本保护并记录审计。聊天框也可以上传票据，使用与票据区域完全相同的安全扫描、私有存储和 OCR 链路。
 
 飞书等 IM 通道会复用同一套应用层用例和服务端身份边界，复杂字段确认和最终提交仍统一回到 Web 工作台。
+
+## 飞书机器人 Worker
+
+机器人使用独立的长连接 Worker，而不是 Web 回调地址。启用后，单聊消息和群聊 `@机器人` 消息会先持久化，再复用相同的草稿、附件安全扫描、MinIO、OCR、Agent 与校验流程；字段确认、删除和提交仍只能在 Web 工作台完成。
+
+```dotenv
+FEISHU_BOT_ENABLED="true"
+FEISHU_BOT_OPEN_ID="ou_..."
+FEISHU_EVENT_DELIVERY="long_connection"
+APP_PUBLIC_URL="https://reimbursement.example.com"
+```
+
+开发环境分别运行 Web 与 Worker：
+
+```powershell
+npm run dev
+npm run feishu:worker
+```
+
+容器部署使用同一镜像运行两个服务：
+
+```powershell
+docker compose up -d --build web feishu-bot-worker
+```
+
+容器中的 `.env.local` 应使用 `postgres`、`minio`、`clamav` 和 `ocr` 作为服务主机名；`APP_PUBLIC_URL` 在多人或移动端必须是员工可访问的 HTTPS 地址。完整开放平台配置、恢复措施与测试清单见 [飞书集成说明](docs/feishu-integration.md) 和 [运维说明](docs/operations.md)。

@@ -92,6 +92,18 @@ export function loadConfig(env: Record<string, string | undefined>): AppConfig {
   };
 }
 
+export function validateFeishuWorkerEnvironment(env: Record<string, string | undefined>): FeishuBotConfig {
+  const bot = loadConfig(env).feishuBot;
+  if (!bot) throw new Error("FEISHU_BOT_ENABLED=true is required to start the Feishu worker");
+  if (env.NODE_ENV === "production" && new URL(bot.publicAppUrl).protocol !== "https:") {
+    throw new Error("APP_PUBLIC_URL must use HTTPS in production");
+  }
+  for (const name of ["DATABASE_URL", "S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "CLAMAV_HOST", "OCR_SERVICE_URL"]) {
+    if (!env[name]?.trim()) throw new Error(`${name} is required to start the Feishu worker`);
+  }
+  return bot;
+}
+
 function parseFeishuBotConfig(env: Record<string, string | undefined>): FeishuBotConfig | undefined {
   if (env.FEISHU_BOT_ENABLED !== "true") return undefined;
 

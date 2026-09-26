@@ -1,34 +1,50 @@
 services:
   postgres:
     image: postgres:16-alpine
+    entrypoint: ["/bin/sh", "-c", "set -a; . /run/secrets/app_env; set +a; exec docker-entrypoint.sh \"$$@\"", "--"]
+    command: ["postgres"]
+    secrets:
+      - app_env
     environment:
-      POSTGRES_DB: reimbursement
-      POSTGRES_USER: reimbursement
-      POSTGRES_PASSWORD: reimbursement
+      POSTGRES_DB: ${POSTGRES_DB_NAME:-reimbursement}
+      POSTGRES_USER: ${POSTGRES_USER_NAME:-reimbursement}
     ports:
       - "5433:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
 
   minio:
     image: quay.io/minio/minio:latest
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: reimbursement
-      MINIO_ROOT_PASSWORD: reimbursement-local-only
+    entrypoint: ["/bin/sh", "-c", "set -a; . /run/secrets/app_env; set +a; exec minio server /data --console-address :9001"]
+    secrets:
+      - app_env
     ports:
       - "9000:9000"
       - "9001:9001"
     volumes:
       - minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
 
   minio-init:
     image: quay.io/minio/mc:latest
+    secrets:
+      - app_env
     depends_on:
-      - minio
+      minio:
+        condition: service_healthy
     entrypoint: >
-      /bin/sh -c "until mc alias set local http://minio:9000 reimbursement reimbursement-local-only; do sleep 1; done;
-      mc mb --ignore-existing local/reimbursement-private"
+      /bin/sh -c "set -a; . /run/secrets/app_env; set +a;
+      until mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD; do sleep 1; done;
+      mc mb --ignore-existing local/$$S3_BUCKET"
 
   clamav:
     image: clamav/clamav:stable_base
@@ -49,7 +65,51 @@ services:
       timeout: 5s
       retries: 12
 
+  web:
+    build: .
+    command: npm run start
+    entrypoint: ["/bin/sh", "-c", "set -a; . /run/secrets/app_env; set +a; exec \"$$@\"", "--"]
+    secrets:
+      - app_env
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      ocr:
+        condition: service_healthy
+      clamav:
+        condition: service_started
+    restart: unless-stopped
+
+  feishu-bot-worker:
+    build: .
+    command: npm run feishu:worker
+    entrypoint: ["/bin/sh", "-c", "set -a; . /run/secrets/app_env; set +a; exec \"$$@\"", "--"]
+    secrets:
+      - app_env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      ocr:
+        condition: service_healthy
+      clamav:
+        condition: service_started
+    restart: unless-stopped
+
 volumes:
   postgres-data:
   minio-data:
   ocr-models:
+
+secrets:
+  app_env:
+    file: .env.local

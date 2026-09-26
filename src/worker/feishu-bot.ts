@@ -19,14 +19,12 @@ import { FeishuBotRepository } from "@/src/infrastructure/prisma/feishu-bot-repo
 import { PrismaReceiptRepository } from "@/src/infrastructure/prisma/receipt-repository";
 import { createClamAvFileSafetyScanner } from "@/src/infrastructure/security/file-safety-scanner";
 import { createS3ObjectStore } from "@/src/infrastructure/storage/object-store";
-import { loadConfig } from "@/src/server/config";
+import { loadConfig, validateFeishuWorkerEnvironment } from "@/src/server/config";
 import { validateStoredClaim } from "@/src/server/stored-claim-validation";
 import { createFeishuBotRuntime } from "@/src/worker/feishu-bot-runtime";
 
 async function main() {
-  const config = loadConfig(process.env);
-  const bot = config.feishuBot;
-  if (!bot) throw new Error("FEISHU_BOT_ENABLED=true is required to start the Feishu worker");
+  const bot = validateFeishuWorkerEnvironment(process.env);
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("database configuration is missing");
 
