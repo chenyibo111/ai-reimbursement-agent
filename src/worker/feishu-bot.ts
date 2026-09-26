@@ -31,6 +31,7 @@ async function main() {
   const prisma = createPrismaClient(databaseUrl);
   await prisma.$connect();
   const repository = new FeishuBotRepository(prisma);
+  await repository.recoverProcessingEvents();
   const client = createFeishuBotClient({ appId: bot.appId, appSecret: bot.appSecret });
   let wsClient: lark.WSClient | undefined;
   const processDeps = createProcessDeps({ prisma, botOpenId: bot.botOpenId, publicAppUrl: bot.publicAppUrl, repository, client });

@@ -1,0 +1,9 @@
+.env
+.env.local
+node_modules
+.next
+playwright-report
+test-results
+output
+.superpowers
+.git

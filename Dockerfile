@@ -7,6 +7,8 @@ RUN npm ci
 
 FROM dependencies AS build
 COPY . .
+ARG DATABASE_URL="postgresql://build:build@localhost:5432/build"
+ENV DATABASE_URL=$DATABASE_URL
 RUN npx prisma generate --config prisma7.config.ts && npm run build
 
 FROM base AS runtime

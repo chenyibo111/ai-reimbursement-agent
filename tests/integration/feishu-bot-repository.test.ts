@@ -67,6 +67,21 @@ it("claims an inbound event once and makes retryable events available again", as
   await expect(repository.claimNextPending()).resolves.toBeNull();
 });
 
+it("releases an event left processing by a stopped Worker so the next Worker can reclaim it", async () => {
+  await repository.recordInbound({
+    eventId: "event-restart",
+    messageId: "om-restart",
+    messageType: "text",
+    chatId: "oc-1",
+    senderOpenId: "ou-1",
+  });
+  await expect(repository.claimNextPending()).resolves.toMatchObject({ eventId: "event-restart", status: "PROCESSING" });
+
+  await repository.recoverProcessingEvents();
+
+  await expect(repository.claimNextPending()).resolves.toMatchObject({ eventId: "event-restart", status: "PROCESSING" });
+});
+
 it("replaces a current claim per employee and chat without mixing employees in the same chat", async () => {
   const [employeeA, employeeB] = await Promise.all([
     prisma.employee.create({ data: { id: "employee-a", displayName: "员工 A", feishuUserId: "ou-a" } }),

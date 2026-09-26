@@ -86,6 +86,14 @@ export class FeishuBotRepository {
     });
   }
 
+  async recoverProcessingEvents(): Promise<number> {
+    const recovered = await this.prisma.inboundChannelEvent.updateMany({
+      where: { status: "PROCESSING" },
+      data: { status: "RETRYABLE", failureCode: "WORKER_RESTART" },
+    });
+    return recovered.count;
+  }
+
   async markProcessed(id: string): Promise<void> {
     await this.prisma.inboundChannelEvent.update({
       where: { id },
