@@ -1,6 +1,9 @@
 import type { AgentTurnResult } from "@/src/application/run-agent-turn";
+import type { ExtractReceiptResult } from "@/src/application/extract-receipt";
 import type { Claim } from "@/src/domain/claim";
 import { parseFeishuBotCommand, type FeishuInboundMessage } from "@/src/domain/feishu-bot";
+import type { Receipt, ReceiptStatus } from "@/src/domain/receipt";
+import type { UploadReceiptInput } from "@/src/application/upload-receipt";
 import type { FeishuBotClient } from "@/src/infrastructure/feishu/feishu-bot-client";
 
 export type FeishuProcessingResult =
@@ -8,8 +11,8 @@ export type FeishuProcessingResult =
   | { kind: "LOGIN_REQUIRED"; replyText: string }
   | { kind: "CLAIM_LINKED"; claimId: string | null; replyText: string }
   | { kind: "AGENT_REPLIED"; claimId: string; replyText: string }
-  | { kind: "ATTACHMENT_QUEUED"; claimId: string; replyText: string }
-  | { kind: "RETRYABLE_FAILURE"; replyText: string };
+  | { kind: "ATTACHMENT_QUEUED"; claimId: string; receiptId: string; receiptStatus: ReceiptStatus; filename: string; replyText: string }
+  | { kind: "RETRYABLE_FAILURE"; claimId?: string; retryable: boolean; replyText: string };
 
 type StoredInboundEvent = {
   eventId: string;
@@ -31,6 +34,8 @@ export type ProcessFeishuEventDeps = {
   client: FeishuBotClient;
   createClaimDraft(input: { actorId: string; purpose?: string }): Promise<Claim>;
   runAgentTurn(input: { actorId: string; claimId: string; message: string }): Promise<AgentTurnResult>;
+  uploadReceipt(input: UploadReceiptInput): Promise<Receipt>;
+  extractReceipt(input: { actorId: string; claimId: string; receiptId: string }): Promise<ExtractReceiptResult>;
 };
 
 export async function processFeishuEvent(
@@ -38,7 +43,7 @@ export async function processFeishuEvent(
   deps: ProcessFeishuEventDeps,
 ): Promise<FeishuProcessingResult> {
   const event = await deps.events.findInboundByEventId(input.eventId);
-  if (!event?.messageId) return { kind: "RETRYABLE_FAILURE", replyText: "消息正在重试处理，请稍后在工作台查看。" };
+  if (!event?.messageId) return { kind: "RETRYABLE_FAILURE", retryable: false, replyText: "消息无法处理，请稍后重新发送。" };
 
   const message = await deps.client.getMessage(event.messageId);
   assertEventMatchesMessage(event, message);
@@ -68,11 +73,7 @@ export async function processFeishuEvent(
     ? { id: conversation.claimId }
     : await createAndLink(employee.id, message.chatId, deps);
   if (message.attachments.length > 0) {
-    return {
-      kind: "ATTACHMENT_QUEUED",
-      claimId: claim.id,
-      replyText: `附件已接收，正在识别。完成后请在工作台确认：${claimUrl(deps.publicAppUrl, claim.id)}`,
-    };
+    return processAttachment({ employeeId: employee.id, claimId: claim.id, message, deps });
   }
   if (!message.text.trim()) return linked(claim.id, deps.publicAppUrl, "已关联报销草稿");
 
@@ -82,6 +83,57 @@ export async function processFeishuEvent(
     claimId: claim.id,
     replyText: `${safeReply(agent)}\n\n请在工作台确认或补充信息：${claimUrl(deps.publicAppUrl, claim.id)}`,
   };
+}
+
+async function processAttachment(input: { employeeId: string; claimId: string; message: FeishuInboundMessage; deps: ProcessFeishuEventDeps }): Promise<FeishuProcessingResult> {
+  const attachment = input.message.attachments[0];
+  if (!attachment) return { kind: "RETRYABLE_FAILURE", claimId: input.claimId, retryable: false, replyText: `未找到可处理的附件，请在工作台上传：${claimUrl(input.deps.publicAppUrl, input.claimId)}` };
+  try {
+    const downloaded = await input.deps.client.downloadResource(input.message.messageId, attachment.fileKey, attachment.resourceType);
+    validateDownloadedAttachment(downloaded.mimeType, downloaded.bytes);
+    const filename = safeFilename(attachment.filename ?? downloaded.filename);
+    const receipt = await input.deps.uploadReceipt({
+      actorId: input.employeeId,
+      claimId: input.claimId,
+      filename,
+      mimeType: downloaded.mimeType,
+      bytes: downloaded.bytes,
+    });
+    await input.deps.extractReceipt({ actorId: input.employeeId, claimId: input.claimId, receiptId: receipt.id });
+    return {
+      kind: "ATTACHMENT_QUEUED",
+      claimId: input.claimId,
+      receiptId: receipt.id,
+      receiptStatus: "EXTRACTED",
+      filename,
+      replyText: `已完成“${filename}”识别，请在工作台确认：${claimUrl(input.deps.publicAppUrl, input.claimId)}`,
+    };
+  } catch (error) {
+    const deterministic = error instanceof AttachmentValidationError;
+    return {
+      kind: "RETRYABLE_FAILURE",
+      claimId: input.claimId,
+      retryable: !deterministic,
+      replyText: `${deterministic ? "附件仅支持 JPG、PNG 或 PDF，大小不超过 20MB，且文件内容需与格式一致。" : "附件暂未处理完成，请稍后重试或在工作台上传。"} ${claimUrl(input.deps.publicAppUrl, input.claimId)}`,
+    };
+  }
+}
+
+class AttachmentValidationError extends Error {}
+
+function validateDownloadedAttachment(mimeType: string, bytes: Uint8Array): void {
+  if (bytes.byteLength > 20 * 1024 * 1024) throw new AttachmentValidationError();
+  const signatures: Record<string, number[]> = {
+    "application/pdf": [0x25, 0x50, 0x44, 0x46, 0x2d],
+    "image/jpeg": [0xff, 0xd8, 0xff],
+    "image/png": [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+  };
+  const signature = signatures[mimeType];
+  if (!signature || !signature.every((byte, index) => bytes[index] === byte)) throw new AttachmentValidationError();
+}
+
+function safeFilename(value: string): string {
+  return value.replace(/[\\/\u0000-\u001f]/g, "_").slice(0, 180) || "receipt";
 }
 
 async function createAndLink(employeeId: string, chatId: string, deps: ProcessFeishuEventDeps): Promise<Pick<Claim, "id">> {

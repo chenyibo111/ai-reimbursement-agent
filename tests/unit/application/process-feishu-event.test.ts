@@ -32,6 +32,8 @@ function fixture(overrides: Partial<ProcessFeishuEventDeps> = {}) {
       calls.runAgent += 1;
       return { reply: "请补充用餐人员。", clarifications: [], proposals: [{ id: "proposal-secret", target: "claim", field: "purpose", displayValue: "客户午餐", reason: "test", status: "PENDING", claimVersion: 0 }] };
     },
+    uploadReceipt: async () => ({ id: "receipt-1", claimId: "claim-1", objectKey: "private", originalFilename: "receipt.jpg", contentHash: "hash", mimeType: "image/jpeg", status: "PENDING" }),
+    extractReceipt: async () => ({ receiptId: "receipt-1", expenseItemCreated: true, validationIssues: [] }),
     ...overrides,
   };
   return { deps, calls };
