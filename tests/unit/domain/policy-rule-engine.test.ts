@@ -33,3 +33,21 @@ it("rejects malformed persisted rule configuration instead of evaluating it", ()
     rules: [{ code: "BAD", name: "错误规则", type: "CLAIM_TOTAL_MAX", severity: "BLOCKING", config: { maxAmountCents: -1 }, sortOrder: 0 }],
   })).toThrow("invalid policy rule configuration");
 });
+
+it("reports every over-limit item, ignores blank categories, and requires the configured category field", () => {
+  const issues = evaluatePolicyRules({
+    policyVersionId: "policy-2026",
+    claim: { totalAmountCents: 200_001, expenseItems: [
+      { id: "a", amountCents: 100_001, expenseCategory: "交通", participants: "张三", projectCode: null },
+      { id: "b", amountCents: 100_001, expenseCategory: "交通", participants: "李四", projectCode: null },
+      { id: "c", amountCents: 1, expenseCategory: "   ", participants: null, projectCode: null },
+    ] },
+    rules: [
+      { code: "TOTAL", name: "总额", type: "CLAIM_TOTAL_MAX", severity: "BLOCKING", config: { maxAmountCents: 200_000 }, sortOrder: 0 },
+      { code: "TRAFFIC", name: "交通", type: "CATEGORY_ITEM_MAX", severity: "WARNING", config: { category: "交通", maxAmountCents: 100_000 }, sortOrder: 1 },
+      { code: "ALLOWED", name: "允许类别", type: "CATEGORY_ALLOWED", severity: "WARNING", config: { categories: ["交通"] }, sortOrder: 2 },
+      { code: "PROJECT", name: "项目", type: "CATEGORY_REQUIRED_FIELD", severity: "BLOCKING", config: { category: "交通", field: "projectCode" }, sortOrder: 3 },
+    ],
+  });
+  expect(issues.map((issue) => issue.code)).toEqual(["POLICY_TOTAL", "POLICY_TRAFFIC", "POLICY_TRAFFIC", "POLICY_PROJECT", "POLICY_PROJECT"]);
+});

@@ -25,7 +25,7 @@
 | Task | Status | Evidence |
 |---|---|---|
 | Task 1: 政策持久化、配置与管理员授权 | Complete | `6c0978d`；政策版本/规则/审计迁移、白名单授权与仓储测试已落地。 |
-| Task 2: 受限规则配置与确定性规则引擎 | In progress | `ff66e4f`；四类规则的基础求值与非法配置校验已实现，计划中的完整边界测试仍待补齐。 |
+| Task 2: 受限规则配置与确定性规则引擎 | Complete | `ff66e4f`；补充后的领域测试覆盖金额临界值、空类别、逐条命中、规则顺序、严重级别与非法配置。2026-09-26 已验证聚焦领域测试 5/5、全量测试 130/130 和 `npx tsc --noEmit`。 |
 | Task 3: 将政策校验接入草稿、确认和提交 | In progress | `7fb308e`；校验 API、确认摘要与最终提交已接入当前发布版本；提交快照保存政策版本/规则摘要尚未实现。 |
 | Task 4: 政策版本管理 API 与管理员工作台 | In progress | `40ae617`；已完成创建草稿与保存草稿规则 API；发布/归档/读取 API 与 Web 页面尚未实现。 |
 | Task 5: 回归验证、运维说明与交付检查 | Not started | 等待规则中心能力完整后执行。 |
@@ -109,27 +109,27 @@ git commit -m "feat: add policy version persistence"
 - Consumes: `PolicyRule` data from Task 1 and `ExpenseItem` fields (`amountCents`, `expenseCategory`, `participants`, `projectCode`).
 - Produces: `parsePolicyRuleConfig(type: PolicyRuleType, value: unknown): ParsedPolicyRuleConfig`; `evaluatePolicyRules(input: { policyVersionId: string; rules: PolicyRuleInput[]; claim: PolicyClaimInput }): PolicyValidationIssue[]`; an extended `ValidationIssue` with optional safe `message`, `source`, `policyVersionId`, and `ruleCode` metadata.
 
-- [ ] **Step 1: Write failing tests for every supported rule and boundary**
+- [x] **Step 1: Write tests for every supported rule and boundary**
 
 Cover: total exactly at/over cap; one matching category item exactly at/over cap; allowed and disallowed categories; category-required `participants` or `projectCode`; `BLOCKING` versus `WARNING`; invalid config; empty category; multiple ordered rule failures; and base validation remaining unchanged.
 
-- [ ] **Step 2: Run the focused tests to verify they fail**
+- [x] **Step 2: Run the focused tests**
 
 Run: `npm run test -- tests/unit/domain/policy-rule-engine.test.ts tests/unit/domain/claim-validation.test.ts`
 
-Expected: FAIL because schemas and engine do not exist.
+Completed after the existing engine was merged; the final focused suite is recorded in Step 4. The original red-phase output was not retained in this plan.
 
-- [ ] **Step 3: Implement typed configs and `evaluatePolicyRules`**
+- [x] **Step 3: Implement typed configs and `evaluatePolicyRules`**
 
 Use discriminated Zod schemas keyed by the four `PolicyRuleType` values. Normalize only trimmed user-entered categories/field names, preserve rule order, and return a stable code of `POLICY_<ruleCode>` plus safe Chinese message metadata. Make malformed stored rules fail closed for publication/management validation, not silently become executable behavior.
 
-- [ ] **Step 4: Run the domain tests**
+- [x] **Step 4: Run the domain tests**
 
 Run: `npm run test -- tests/unit/domain/policy-rule-engine.test.ts tests/unit/domain/claim-validation.test.ts`
 
 Expected: PASS, including all cap boundaries and severity cases.
 
-- [ ] **Step 5: Commit the rule engine**
+- [x] **Step 5: Commit the rule engine**
 
 ```bash
 git add src/domain tests/unit/domain
