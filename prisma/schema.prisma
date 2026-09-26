@@ -40,13 +40,21 @@ enum AgentProposalStatus {
   EXPIRED
 }
 
+enum InboundChannelEventStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  RETRYABLE
+}
+
 model Employee {
-  id          String       @id
-  displayName String
-  department  String?
-  feishuUserId String?     @unique
-  createdAt   DateTime     @default(now())
-  claims      ClaimDraft[]
+  id                  String               @id
+  displayName         String
+  department          String?
+  feishuUserId        String?              @unique
+  createdAt           DateTime             @default(now())
+  claims              ClaimDraft[]
+  feishuConversations FeishuConversation[]
 }
 
 model ClaimDraft {
@@ -65,6 +73,8 @@ model ClaimDraft {
   submissions       SubmissionSnapshot[]
   auditEvents       AuditEvent[]
   agentProposals    AgentFieldProposal[]
+  inboundEvents     InboundChannelEvent[]
+  feishuConversations FeishuConversation[]
 
   @@index([employeeId, status])
 }
@@ -171,4 +181,39 @@ model AuditEvent {
   createdAt DateTime   @default(now())
 
   @@index([claimId, createdAt])
+}
+
+model InboundChannelEvent {
+  id            String                    @id @default(cuid())
+  channel       String                    @default("FEISHU")
+  eventId       String                    @unique
+  messageId     String?                   @unique
+  messageType   String
+  chatId        String
+  senderOpenId  String
+  status        InboundChannelEventStatus @default(PENDING)
+  failureCode   String?
+  claimId       String?
+  claim         ClaimDraft?               @relation(fields: [claimId], references: [id], onDelete: SetNull)
+  receivedAt    DateTime                  @default(now())
+  processedAt   DateTime?
+  updatedAt     DateTime                  @updatedAt
+
+  @@index([status, receivedAt])
+  @@index([chatId, senderOpenId])
+}
+
+model FeishuConversation {
+  id             String     @id @default(cuid())
+  employeeId     String
+  employee       Employee   @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  chatId         String
+  claimId        String
+  claim          ClaimDraft @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  lastActiveAt   DateTime   @default(now())
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@unique([employeeId, chatId])
+  @@index([claimId])
 }
