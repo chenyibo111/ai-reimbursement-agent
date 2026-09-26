@@ -62,7 +62,26 @@ FEISHU_REDIRECT_URI="http://localhost:3000/api/auth/feishu/callback"
 
 访问 `GET /api/auth/feishu/login` 会跳转到飞书授权页；回调成功后，系统使用飞书 `open_id` 映射或创建本地员工，并写入 HttpOnly 会话 Cookie。
 
-没有可用飞书应用配置时，仅本地开发可使用 `POST /api/auth/dev-login`。它只读取 `DEV_DEMO_EMPLOYEE_ID` 和 `DEV_DEMO_EMPLOYEE_NAME` 两个服务端环境变量，绝不接受浏览器提供的员工身份；生产环境始终返回 404。`POST /api/auth/logout` 会清除会话和临时 OAuth state Cookie。
+没有可用飞书应用配置时，仅本地开发可使用 `POST /api/auth/dev-login`。它只读取 `DEV_DEMO_EMPLOYEE_ID`、`DEV_DEMO_EMPLOYEE_NAME` 和可选的 `DEV_DEMO_FEISHU_OPEN_ID` 服务端环境变量，绝不接受浏览器提供的员工身份；生产环境始终返回 404。`POST /api/auth/logout` 会清除会话和临时 OAuth state Cookie。
+
+本地需要验证政策管理员工作台时，可额外设置仅开发使用的 `DEV_DEMO_FEISHU_OPEN_ID`，并让它与管理员白名单匹配：
+
+```dotenv
+DEV_DEMO_FEISHU_OPEN_ID="ou_policy_admin"
+POLICY_ADMIN_FEISHU_OPEN_IDS="ou_policy_admin"
+```
+
+## 报销政策规则
+
+政策管理员由 `POLICY_ADMIN_FEISHU_OPEN_IDS` 中的飞书 `open_id` 白名单决定；白名单为空、格式无效或未登录时，任何人都不能创建、修改或发布政策。白名单外员工仍可访问 `/policies` 查看当前已发布政策，并可正常创建自己的报销草稿。
+
+管理员在 `/admin/policies` 创建草稿，维护受限的结构化规则，再进行页面内确认发布。第一版支持报销总额上限、费用类别单笔上限、允许费用类别和按类别必填字段。发布后的版本不可原地编辑；要调整制度，应创建新草稿并发布。发布会归档旧的已发布版本。
+
+- `BLOCKING` 规则阻止生成确认摘要和最终提交。
+- `WARNING` 规则在确认摘要和提交快照中保留提示，但允许员工继续提交。
+- 没有有效已发布政策时，系统继续执行原有的完整性、低置信度和重复票据检查，不会伪造“符合政策”的结论。
+
+每次提交都会把当时使用的政策版本和命中的规则结果写入不可变 `SubmissionSnapshot`。后来发布新制度不会改写已经提交的报销单。
 
 ## 后续流程
 

@@ -28,7 +28,7 @@
 | Task 2: 受限规则配置与确定性规则引擎 | Complete | `ff66e4f`；补充后的领域测试覆盖金额临界值、空类别、逐条命中、规则顺序、严重级别与非法配置。2026-09-26 已验证聚焦领域测试 5/5、全量测试 130/130 和 `npx tsc --noEmit`。 |
 | Task 3: 将政策校验接入草稿、确认和提交 | Complete | `7fb308e`、`822c712`；草稿校验、确认摘要与最终提交均执行当前有效政策；最终提交事务内固化政策版本及本次命中的规则结果，后续新版本不会改写历史快照。 |
 | Task 4: 政策版本管理 API 与管理员工作台 | Complete | 管理员列表、单版本读取、创建草稿、保存规则和发布 API 已完成；员工 `/policies`、管理员 `/admin/policies`、政策校验分组与浏览器 E2E 均已完成。 |
-| Task 5: 回归验证、运维说明与交付检查 | Not started | 等待规则中心能力完整后执行。 |
+| Task 5: 回归验证、运维说明与交付检查 | Complete | 运行手册覆盖白名单、发布/替代版本、阻断与预警、快照留存及非管理员边界；2026-09-26 已验证全量非 E2E 51 文件/135 测试、类型检查及浏览器回归 6/6 通过。Lint 无错误，遗留 `.worktrees/policy-knowledge/generated/prisma` 中有 22 条 unused-disable 警告。 |
 
 知识检索计划 `2026-09-26-policy-knowledge-retrieval-implementation.md` 尚未开始。
 
@@ -245,23 +245,23 @@ git commit -m "feat: add policy rules management"
 - Consumes: Tasks 1–4.
 - Produces: operator instructions for administrator allowlist, migration/rollback safeguards, policy publishing and user-visible behavior.
 
-- [ ] **Step 1: Write documentation acceptance checks**
+- [x] **Step 1: Write documentation acceptance checks**
 
 Add a small checklist in the relevant docs for blank allowlist, no active policy, policy publication, warning versus blocking, history retention, and non-administrator behavior.
 
-- [ ] **Step 2: Run the full non-E2E suite**
+- [x] **Step 2: Run the full non-E2E suite**
 
 Run: `npm run test && npm run lint && npx tsc --noEmit`
 
 Expected: PASS; existing OAuth, claims, OCR, Agent, deletion, submission and bot behavior remains covered.
 
-- [ ] **Step 3: Run the browser regression suite**
+- [x] **Step 3: Run the browser regression suite**
 
 Run: `npm run test:e2e`
 
 Expected: PASS; no existing employee flow is broken by policy display.
 
-- [ ] **Step 4: Commit documentation and verified policy rules milestone**
+- [x] **Step 4: Commit documentation and verified policy rules milestone**
 
 ```bash
 git add README.md docs
