@@ -6,4 +6,5 @@ playwright-report/
 test-results/
 generated/
 *.tsbuildinfo
+.worktrees/
 output/
