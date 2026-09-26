@@ -27,6 +27,35 @@ it("submits a confirmed claim into an immutable snapshot", async () => {
   await expect(prisma.submissionSnapshot.findFirstOrThrow({ where: { claimId: claim.id } })).resolves.toMatchObject({ claimVersion: 0, payload: expect.objectContaining({ totalAmountCents: 38600 }) });
 });
 
+it("preserves the evaluated warning policy in the submission snapshot after a newer policy is published", async () => {
+  await prisma.employee.create({ data: { id: "employee-1", displayName: "测试员工" } });
+  const firstPolicy = await prisma.policyVersion.create({ data: { title: "差旅制度 V1", status: "PUBLISHED", effectiveFrom: new Date("2026-01-01"), createdByEmployeeId: "employee-finance", version: 3, publishedAt: new Date("2026-01-01") } });
+  await prisma.policyRule.create({ data: { policyVersionId: firstPolicy.id, code: "TOTAL_WARNING", name: "总额提醒", type: "CLAIM_TOTAL_MAX", severity: "WARNING", config: { maxAmountCents: 100_000 } } });
+  const claim = await prisma.claimDraft.create({ data: { employeeId: "employee-1", purpose: "客户拜访", expenseItems: { create: { amountCents: 120_000, amountSource: "USER_ENTERED" } } } });
+  const token = createSessionToken("employee-1", process.env.SESSION_SECRET!);
+  const preview = await requestPreview(new Request(`http://localhost/api/claims/${claim.id}/submission-request`, { method: "POST", headers: { cookie: `reimbursement_session=${token}` } }), { params: Promise.resolve({ claimId: claim.id }) });
+
+  expect(preview.status).toBe(200);
+  const previewBody = await preview.json() as { token: string; issues: Array<{ code: string; severity: string }> };
+  expect(previewBody.issues).toContainEqual(expect.objectContaining({ code: "POLICY_TOTAL_WARNING", severity: "WARNING" }));
+
+  const submitted = await submit(new Request(`http://localhost/api/claims/${claim.id}/submit`, { method: "POST", headers: { "content-type": "application/json", cookie: `reimbursement_session=${token}` }, body: JSON.stringify({ confirmationToken: previewBody.token }) }), { params: Promise.resolve({ claimId: claim.id }) });
+  expect(submitted.status).toBe(201);
+
+  const snapshot = await prisma.submissionSnapshot.findFirstOrThrow({ where: { claimId: claim.id } });
+  expect(snapshot.payload).toMatchObject({
+    policy: {
+      id: firstPolicy.id,
+      version: 3,
+      ruleResults: [expect.objectContaining({ code: "POLICY_TOTAL_WARNING", severity: "WARNING", ruleCode: "TOTAL_WARNING" })],
+    },
+  });
+
+  await prisma.policyVersion.update({ where: { id: firstPolicy.id }, data: { status: "ARCHIVED" } });
+  await prisma.policyVersion.create({ data: { title: "差旅制度 V2", status: "PUBLISHED", effectiveFrom: new Date("2026-01-02"), createdByEmployeeId: "employee-finance", version: 1, publishedAt: new Date("2026-01-02") } });
+  await expect(prisma.submissionSnapshot.findUniqueOrThrow({ where: { id: snapshot.id } })).resolves.toMatchObject({ payload: expect.objectContaining({ policy: expect.objectContaining({ id: firstPolicy.id, version: 3 }) }) });
+});
+
 it("blocks both confirmation and submission when a claim has an active duplicate validation", async () => {
   await prisma.employee.create({ data: { id: "employee-1", displayName: "测试员工" } });
   const claim = await prisma.claimDraft.create({
