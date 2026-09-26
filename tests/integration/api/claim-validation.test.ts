@@ -78,5 +78,5 @@ it("returns blocking issues from the current published policy", async () => {
   const response = await GET(new Request(`http://localhost/api/claims/${claim.id}/validate`, { headers: { cookie: `reimbursement_session=${token}` } }), { params: Promise.resolve({ claimId: claim.id }) });
 
   expect(response.status).toBe(200);
-  await expect(response.json()).resolves.toEqual(expect.objectContaining({ issues: expect.arrayContaining([expect.objectContaining({ code: "POLICY_TOTAL", severity: "BLOCKING", policyVersionId: policy.id })]) }));
+  await expect(response.json()).resolves.toEqual(expect.objectContaining({ policy: { title: "差旅制度", version: 0 }, issues: expect.arrayContaining([expect.objectContaining({ code: "POLICY_TOTAL", severity: "BLOCKING", policyVersionId: policy.id })]) }));
 });

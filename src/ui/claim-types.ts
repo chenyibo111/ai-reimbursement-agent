@@ -41,7 +41,7 @@ export type AgentProposal = {
   claimVersion: number;
 };
 
-export type ValidationIssue = { code: string; severity: "BLOCKING" | "WARNING"; message: string };
+export type ValidationIssue = { code: string; severity: "BLOCKING" | "WARNING"; message: string; policyVersionId?: string; ruleCode?: string };
 export type ConfirmableExpenseField = "invoiceNumber" | "issuedOn" | "totalAmountCents";
 
 export function hasBlockingValidation(issues: ValidationIssue[]) {

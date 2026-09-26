@@ -27,7 +27,7 @@
 | Task 1: 政策持久化、配置与管理员授权 | Complete | `6c0978d`；政策版本/规则/审计迁移、白名单授权与仓储测试已落地。 |
 | Task 2: 受限规则配置与确定性规则引擎 | Complete | `ff66e4f`；补充后的领域测试覆盖金额临界值、空类别、逐条命中、规则顺序、严重级别与非法配置。2026-09-26 已验证聚焦领域测试 5/5、全量测试 130/130 和 `npx tsc --noEmit`。 |
 | Task 3: 将政策校验接入草稿、确认和提交 | Complete | `7fb308e`、`822c712`；草稿校验、确认摘要与最终提交均执行当前有效政策；最终提交事务内固化政策版本及本次命中的规则结果，后续新版本不会改写历史快照。 |
-| Task 4: 政策版本管理 API 与管理员工作台 | In progress | `40ae617`；已完成创建草稿与保存草稿规则 API；发布/归档/读取 API 与 Web 页面尚未实现。 |
+| Task 4: 政策版本管理 API 与管理员工作台 | Complete | 管理员列表、单版本读取、创建草稿、保存规则和发布 API 已完成；员工 `/policies`、管理员 `/admin/policies`、政策校验分组与浏览器 E2E 均已完成。 |
 | Task 5: 回归验证、运维说明与交付检查 | Not started | 等待规则中心能力完整后执行。 |
 
 知识检索计划 `2026-09-26-policy-knowledge-retrieval-implementation.md` 尚未开始。
@@ -205,27 +205,27 @@ git commit -m "feat: enforce policy rules for claims"
 - Consumes: Task 1 repository/authorization and Task 2 parsed configurations; Task 3 enriched validation issues.
 - Produces: administrative draft/create/update/publish responses, a public current-policy read DTO, and UI that separates base and policy issues with source/version text.
 
-- [ ] **Step 1: Write failing route and browser tests**
+- [x] **Step 1: Write failing route and browser tests**
 
 Test unauthenticated/ordinary employee `401`/`403`, allowed administrator CRUD and publish, body schema rejection, version conflict, and an employee seeing a blocking policy issue and policy version on their own claim. In Playwright, cover creation of a draft rule, invalid rule form feedback, publication confirmation, and loss of edit controls after publishing.
 
-- [ ] **Step 2: Run the focused tests to verify they fail**
+- [x] **Step 2: Run the focused tests to verify they fail**
 
 Run: `npm run test -- tests/integration/api/policy-admin-routes.test.ts tests/integration/api/policy-current-route.test.ts && npm run test:e2e -- tests/e2e/policy-management.spec.ts`
 
 Expected: FAIL because routes and pages do not exist.
 
-- [ ] **Step 3: Implement route parsing and responsive policy UI**
+- [x] **Step 3: Implement route parsing and responsive policy UI**
 
 Make every write route obtain actor ID from the signed session, load the employee, and call `isPolicyAdmin`. Validate rule payloads server-side before repository calls. Use explicit forms for the four rule types, a non-destructive publication confirmation, clear Chinese validation messages, and disabled/read-only published controls. Extend the claim validation panel with a policy group showing rule name, severity and effective version, while retaining current base-validation copy.
 
-- [ ] **Step 4: Run focused tests, lint and type check**
+- [x] **Step 4: Run focused tests, lint and type check**
 
 Run: `npm run test -- tests/integration/api/policy-admin-routes.test.ts tests/integration/api/policy-current-route.test.ts && npm run test:e2e -- tests/e2e/policy-management.spec.ts && npm run lint && npx tsc --noEmit`
 
 Expected: PASS; no client-supplied identity can gain management access.
 
-- [ ] **Step 5: Commit policy management UI**
+- [x] **Step 5: Commit policy management UI**
 
 ```bash
 git add app src/ui tests

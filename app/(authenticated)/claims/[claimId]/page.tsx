@@ -19,6 +19,7 @@ export default function ClaimPage({ params }: { params: Promise<{ claimId: strin
   const [claimId, setClaimId] = useState<string | null>(null);
   const [claim, setClaim] = useState<ClaimSummary | null>(null);
   const [issues, setIssues] = useState<ValidationIssue[]>([]);
+  const [policyVersionLabel, setPolicyVersionLabel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -37,11 +38,12 @@ export default function ClaimPage({ params }: { params: Promise<{ claimId: strin
     try {
       const [claimResponse, validationResponse] = await Promise.all([fetch(`/api/claims/${claimId}`), fetch(`/api/claims/${claimId}/validate`)]);
       const claimPayload = await claimResponse.json() as ClaimSummary & { error?: string };
-      const validationPayload = await validationResponse.json() as { issues?: ValidationIssue[]; error?: string };
+      const validationPayload = await validationResponse.json() as { issues?: ValidationIssue[]; policy?: { title: string; version: number } | null; error?: string };
       if (!claimResponse.ok) throw new Error(claimPayload.error || "无法读取当前报销草稿。");
       setClaim(claimPayload);
       setPurposeDraft(claimPayload.purpose ?? "");
       setIssues(validationResponse.ok ? validationPayload.issues ?? [] : []);
+      setPolicyVersionLabel(validationResponse.ok && validationPayload.policy ? `${validationPayload.policy.title} V${validationPayload.policy.version}` : null);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "无法读取当前报销草稿。"); }
     finally { if (mode === "full") setIsLoading(false); }
   }, [claimId]);
@@ -103,7 +105,7 @@ export default function ClaimPage({ params }: { params: Promise<{ claimId: strin
             <textarea id="workspace-purpose" className="resize-none" value={purposeDraft} onChange={(event) => setPurposeDraft(event.target.value)} rows={3} disabled={claim.status === "SUBMITTED"} placeholder="例如：客户拜访交通与餐饮" />
             <div className={styles.purposeActions}><button type="submit" className="button-outline" disabled={isSavingPurpose || claim.status === "SUBMITTED"} aria-busy={isSavingPurpose}>保存报销事由</button>{purposeStatus ? <p role="status" className={styles.saved}>{purposeStatus}</p> : null}</div>
           </form>
-          <div className={styles.grid}><div className={styles.mainColumn}><ReceiptUpload claimId={claim.id} receipts={claim.receipts} onComplete={() => void refresh("background")} /><ExpenseTable items={claim.expenseItems} receipts={claim.receipts} onConfirmField={confirmField} /></div><div className={styles.sideColumn}><ValidationPanel issues={issues} /><ClaimChat claimId={claim.id} version={claim.version} proposals={claim.agentProposals} onComplete={() => void refresh("background")} /><SubmissionSummary preview={preview} isLoading={isPreviewing} hasBlockingValidation={hasBlockingValidation(issues)} onRequest={() => void requestPreview()} onSubmit={(token) => void submit(token)} submittedNumber={submittedNumber} /></div></div>
+          <div className={styles.grid}><div className={styles.mainColumn}><ReceiptUpload claimId={claim.id} receipts={claim.receipts} onComplete={() => void refresh("background")} /><ExpenseTable items={claim.expenseItems} receipts={claim.receipts} onConfirmField={confirmField} /></div><div className={styles.sideColumn}><ValidationPanel issues={issues} policyVersionLabel={policyVersionLabel} /><ClaimChat claimId={claim.id} version={claim.version} proposals={claim.agentProposals} onComplete={() => void refresh("background")} /><SubmissionSummary preview={preview} isLoading={isPreviewing} hasBlockingValidation={hasBlockingValidation(issues)} onRequest={() => void requestPreview()} onSubmit={(token) => void submit(token)} submittedNumber={submittedNumber} /></div></div>
         </div>
       </div>}
     </main>

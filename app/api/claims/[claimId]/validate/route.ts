@@ -17,7 +17,10 @@ export async function GET(request: Request, context: { params: Promise<{ claimId
     if (claim.employeeId !== actorId) throw new Error("forbidden");
     const policy = await new PrismaPolicyRepository(prisma).getCurrentPublished(new Date());
     const issues = validateStoredClaimWithPolicy(claim, policy);
-    return NextResponse.json({ issues });
+    return NextResponse.json({
+      policy: policy ? { title: policy.title, version: policy.version } : null,
+      issues,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "request failed";
     return NextResponse.json({ error: message }, { status: message === "unauthenticated" ? 401 : message === "forbidden" ? 403 : message === "claim not found" ? 404 : 500 });

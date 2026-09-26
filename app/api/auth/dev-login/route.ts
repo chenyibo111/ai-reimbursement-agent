@@ -10,6 +10,7 @@ export async function POST(_request: Request) {
 
   const employeeId = process.env.DEV_DEMO_EMPLOYEE_ID;
   const displayName = process.env.DEV_DEMO_EMPLOYEE_NAME;
+  const feishuUserId = process.env.DEV_DEMO_FEISHU_OPEN_ID;
   const sessionSecret = process.env.SESSION_SECRET;
   if (!employeeId || !displayName || !sessionSecret) {
     return NextResponse.json({ error: "development login is not configured" }, { status: 503 });
@@ -19,8 +20,8 @@ export async function POST(_request: Request) {
     const prisma = getPrisma();
     const employee = await prisma.employee.upsert({
       where: { id: employeeId },
-      update: { displayName },
-      create: { id: employeeId, displayName },
+      update: { displayName, ...(feishuUserId ? { feishuUserId } : {}) },
+      create: { id: employeeId, displayName, ...(feishuUserId ? { feishuUserId } : {}) },
     });
     const response = NextResponse.json({ employeeId: employee.id });
     response.headers.append("Set-Cookie", sessionCookie(employee.id, sessionSecret, false));

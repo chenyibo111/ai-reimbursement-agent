@@ -6,6 +6,23 @@ import { isPolicyAdmin } from "@/src/server/authorization";
 import { loadConfig } from "@/src/server/config";
 import { getSessionActorId } from "@/src/server/session";
 
+export async function GET(request: Request) {
+  try {
+    const actorId = getSessionActorId(request);
+    const prisma = getPrisma();
+    const employee = await prisma.employee.findUnique({ where: { id: actorId }, select: { id: true, feishuUserId: true } });
+    if (!employee || !isPolicyAdmin(actorId, employee, loadConfig(process.env))) throw new Error("forbidden");
+    const policies = await prisma.policyVersion.findMany({
+      orderBy: [{ effectiveFrom: "desc" }, { createdAt: "desc" }],
+      include: { rules: { orderBy: { sortOrder: "asc" } } },
+    });
+    return NextResponse.json({ policies });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "request failed";
+    return NextResponse.json({ error: message }, { status: message === "unauthenticated" ? 401 : message === "forbidden" ? 403 : 500 });
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const actorId = getSessionActorId(request);
