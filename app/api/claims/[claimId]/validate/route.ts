@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 
 import { createPrismaClient } from "@/src/infrastructure/prisma/client";
+import { PrismaPolicyRepository } from "@/src/infrastructure/prisma/policy-repository";
 import { getSessionActorId } from "@/src/server/session";
-import { validateStoredClaim } from "@/src/server/stored-claim-validation";
+import { validateStoredClaimWithPolicy } from "@/src/application/validate-policy-claim";
 
 export const runtime = "nodejs";
 
@@ -14,7 +15,8 @@ export async function GET(request: Request, context: { params: Promise<{ claimId
     const claim = await prisma.claimDraft.findUnique({ where: { id: claimId }, include: { receipts: { select: { id: true, extractionPayload: true } }, expenseItems: true, validationResults: { where: { code: { in: ["DUPLICATE_FILE", "DUPLICATE_INVOICE"] }, resolvedAt: null } } } });
     if (!claim) throw new Error("claim not found");
     if (claim.employeeId !== actorId) throw new Error("forbidden");
-    const issues = validateStoredClaim(claim);
+    const policy = await new PrismaPolicyRepository(prisma).getCurrentPublished(new Date());
+    const issues = validateStoredClaimWithPolicy(claim, policy);
     return NextResponse.json({ issues });
   } catch (error) {
     const message = error instanceof Error ? error.message : "request failed";

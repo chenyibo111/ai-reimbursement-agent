@@ -66,3 +66,17 @@ it("keeps an unmatched low-confidence receipt blocking even when another receipt
   expect(response.status).toBe(200);
   await expect(response.json()).resolves.toEqual(expect.objectContaining({ issues: expect.arrayContaining([{ code: "CONFIRM_INVOICE_NUMBER", severity: "BLOCKING" }]) }));
 });
+
+it("returns blocking issues from the current published policy", async () => {
+  await prisma.employee.create({ data: { id: "employee-1", displayName: "测试员工" } });
+  const policy = await prisma.policyVersion.create({ data: { title: "差旅制度", status: "PUBLISHED", effectiveFrom: new Date("2026-01-01"), createdByEmployeeId: "employee-finance", publishedByEmployeeId: "employee-finance", publishedAt: new Date() } });
+  await prisma.policyRule.create({ data: { policyVersionId: policy.id, code: "TOTAL", name: "总额上限", type: "CLAIM_TOTAL_MAX", severity: "BLOCKING", config: { maxAmountCents: 100_000 }, sortOrder: 0 } });
+  const claim = await prisma.claimDraft.create({ data: { employeeId: "employee-1", purpose: "客户拜访" } });
+  await prisma.expenseItem.create({ data: { claimId: claim.id, amountCents: 120_000, amountSource: "USER_ENTERED", expenseCategory: "交通" } });
+  const token = createSessionToken("employee-1", process.env.SESSION_SECRET!);
+
+  const response = await GET(new Request(`http://localhost/api/claims/${claim.id}/validate`, { headers: { cookie: `reimbursement_session=${token}` } }), { params: Promise.resolve({ claimId: claim.id }) });
+
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual(expect.objectContaining({ issues: expect.arrayContaining([expect.objectContaining({ code: "POLICY_TOTAL", severity: "BLOCKING", policyVersionId: policy.id })]) }));
+});
