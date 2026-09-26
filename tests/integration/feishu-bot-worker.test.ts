@@ -21,6 +21,7 @@ beforeEach(async () => {
   await prisma.inboundChannelEvent.deleteMany();
   await prisma.feishuConversation.deleteMany();
   await prisma.auditEvent.deleteMany();
+  await prisma.submissionSnapshot.deleteMany();
   await prisma.claimDraft.deleteMany();
   await prisma.employee.deleteMany();
   await prisma.employee.create({ data: { id: "employee-1", displayName: "测试员工", feishuUserId: "ou-employee" } });
