@@ -12,6 +12,16 @@
 
 **Depends on:** `docs/superpowers/plans/2026-09-26-policy-rules-center-implementation.md` Tasks 1 and 4 (管理员授权与政策中心导航)。
 
+## Execution Status (2026-09-26)
+
+| Task | Status | Evidence |
+|---|---|---|
+| Task 1: pgvector、Embedding Provider 与容器运行边界 | Complete | 固定 1024 维配置、Fixture/HTTP Provider、内部 BGE-M3 服务、pgvector PostgreSQL 16 镜像与可选 GPU 覆盖已完成；聚焦测试 10/10、`npx tsc --noEmit` 与 `docker compose config --quiet` 通过。 |
+| Task 2: 政策来源、快照、向量数据与飞书读取边界 | Not started | 等待 Task 1 基础设施。 |
+| Task 3: 安全同步用例、管理员来源 API 与 Worker | Not started | 等待来源持久化。 |
+| Task 4: 检索、可验证引用与 Agent/飞书问答接入 | Not started | 等待安全同步与活动快照。 |
+| Task 5: 管理界面、部署文档与完整验证 | Not started | 等待前序能力。 |
+
 ## Global Constraints
 
 - 同步器只读取管理员已登记且启用的飞书新版文档或 Wiki 页面；禁止枚举、搜索或批量抓取飞书空间。
@@ -64,27 +74,27 @@
 - Produces: `EmbeddingProvider.embed(input: { texts: string[] }): Promise<number[][]>`; `createEmbeddingProvider(config: AppConfig): EmbeddingProvider`; `AppConfig.embedding` with provider, base URL, model and dimensions.
 - Consumes: Docker Compose secret loading, existing production config validation, and Task 2's database migration contract.
 
-- [ ] **Step 1: Write failing configuration/provider tests**
+- [x] **Step 1: Write failing configuration/provider tests**
 
 Assert provider selection, production rejection of `fixture`, rejection of any first-version dimension other than `1024`, HTTP error/timeout mapping, empty text rejection, non-finite element rejection and a deterministic fixture vector for tests.
 
-- [ ] **Step 2: Run the focused tests to verify they fail**
+- [x] **Step 2: Run the focused tests to verify they fail**
 
 Run: `npm run test -- tests/unit/infrastructure/embedding-provider.test.ts tests/unit/server/embedding-config.test.ts`
 
 Expected: FAIL because the provider/configuration does not exist.
 
-- [ ] **Step 3: Implement provider contracts and Docker services**
+- [x] **Step 3: Implement provider contracts and Docker services**
 
 Implement a bounded internal JSON batch API (`POST /embed`, `GET /health`) for BGE-M3. Add a named model-cache volume and an internal-only Compose service. Switch the PostgreSQL image to a pinned PostgreSQL-16 pgvector image after verifying its documented tag, preserve `postgres-data`, and add environment parsing for `fixture`, `bge-m3`, and `openai-compatible` providers. Fix the first-version index to 1024 dimensions; an OpenAI-compatible provider must return 1024 dimensions or be rejected. Keep GPU activation optional via a Compose override/profile so CPU deployment remains supported.
 
-- [ ] **Step 4: Run focused tests and Compose configuration validation**
+- [x] **Step 4: Run focused tests and Compose configuration validation**
 
 Run: `npm run test -- tests/unit/infrastructure/embedding-provider.test.ts tests/unit/server/embedding-config.test.ts && docker compose config`
 
 Expected: PASS; embedding has no host-published port and Postgres data volume name is unchanged.
 
-- [ ] **Step 5: Commit the Embedding runtime foundation**
+- [x] **Step 5: Commit the Embedding runtime foundation**
 
 ```bash
 git add embedding-service docker-compose.yml Dockerfile src/server src/infrastructure/embedding tests

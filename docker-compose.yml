@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:0.8.6-pg16
     entrypoint: ["/bin/sh", "-c", "set -a; . /run/secrets/app_env; set +a; exec docker-entrypoint.sh \"$$@\"", "--"]
     command: ["postgres"]
     secrets:
@@ -65,6 +65,23 @@ services:
       timeout: 5s
       retries: 12
 
+  embedding-service:
+    build: ./embedding-service
+    profiles: ["knowledge"]
+    environment:
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-m3}
+      EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
+      MODEL_CACHE_DIR: /models
+    expose:
+      - "8080"
+    volumes:
+      - embedding-models:/models
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
   web:
     build: .
     command: npm run start
@@ -109,6 +126,7 @@ volumes:
   postgres-data:
   minio-data:
   ocr-models:
+  embedding-models:
 
 secrets:
   app_env:

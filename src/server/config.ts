@@ -1,6 +1,7 @@
 export type AppConfig = {
   isProduction: boolean;
   policyAdminOpenIds: ReadonlySet<string>;
+  embedding?: EmbeddingConfig;
   receiptExtractionProvider?: string;
   modelProvider?: "fixture" | "openai-compatible";
   model?: {
@@ -16,6 +17,15 @@ export type AppConfig = {
     redirectUri: string;
   };
   feishuBot?: FeishuBotConfig;
+};
+
+export type EmbeddingConfig = {
+  provider: "fixture" | "bge-m3" | "openai-compatible";
+  baseUrl?: string;
+  model?: string;
+  apiKey?: string;
+  dimensions: 1024;
+  timeoutMs?: number;
 };
 
 export type FeishuBotConfig = {
@@ -46,6 +56,7 @@ export function loadConfig(env: Record<string, string | undefined>): AppConfig {
     throw new Error("MODEL_PROVIDER must be fixture or openai-compatible");
   }
   const modelProvider: AppConfig["modelProvider"] = configuredModelProvider as AppConfig["modelProvider"];
+  const embedding = parseEmbeddingConfig(env, isProduction);
 
   if (isProduction && !env.SESSION_SECRET) {
     throw new Error("SESSION_SECRET is required in production");
@@ -79,6 +90,7 @@ export function loadConfig(env: Record<string, string | undefined>): AppConfig {
   return {
     isProduction,
     policyAdminOpenIds: parsePolicyAdminOpenIds(env.POLICY_ADMIN_FEISHU_OPEN_IDS),
+    embedding,
     receiptExtractionProvider: env.RECEIPT_EXTRACTION_PROVIDER,
     modelProvider,
     model,
@@ -91,6 +103,40 @@ export function loadConfig(env: Record<string, string | undefined>): AppConfig {
       }
       : undefined,
     feishuBot,
+  };
+}
+
+function parseEmbeddingConfig(env: Record<string, string | undefined>, isProduction: boolean): EmbeddingConfig | undefined {
+  const provider = env.EMBEDDING_PROVIDER;
+  if (!provider) return undefined;
+  if (provider !== "fixture" && provider !== "bge-m3" && provider !== "openai-compatible") {
+    throw new Error("EMBEDDING_PROVIDER must be fixture, bge-m3 or openai-compatible");
+  }
+
+  const dimensions = env.EMBEDDING_DIMENSIONS ? Number(env.EMBEDDING_DIMENSIONS) : 1024;
+  if (dimensions !== 1024) throw new Error("EMBEDDING_DIMENSIONS must be 1024");
+  if (provider === "fixture") {
+    if (isProduction) throw new Error("fixture embedding provider is not allowed in production");
+    return { provider, dimensions };
+  }
+
+  const baseUrl = required(env.EMBEDDING_BASE_URL, `EMBEDDING_BASE_URL is required for ${provider} embedding`);
+  try {
+    new URL(baseUrl);
+  } catch {
+    throw new Error("EMBEDDING_BASE_URL must be a valid URL");
+  }
+  const timeoutMs = env.EMBEDDING_TIMEOUT_MS ? Number(env.EMBEDDING_TIMEOUT_MS) : 20_000;
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 120_000) {
+    throw new Error("EMBEDDING_TIMEOUT_MS must be an integer between 1000 and 120000");
+  }
+  return {
+    provider,
+    baseUrl: baseUrl.replace(/\/+$/, ""),
+    model: env.EMBEDDING_MODEL?.trim() || "BAAI/bge-m3",
+    apiKey: env.EMBEDDING_PROVIDER_API_KEY?.trim() || undefined,
+    dimensions,
+    timeoutMs,
   };
 }
 
