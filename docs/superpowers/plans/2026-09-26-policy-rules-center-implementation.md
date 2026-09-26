@@ -20,6 +20,18 @@
 - 历史 `ValidationResult` 和 `SubmissionSnapshot` 必须能指出使用的政策版本和规则，后续发布不得重写其事实。
 - 所有路由返回既有 `{ error: string }` 风格，不泄露内部数据库 ID、配置或密钥。
 
+## Execution Status (2026-09-26)
+
+| Task | Status | Evidence |
+|---|---|---|
+| Task 1: 政策持久化、配置与管理员授权 | Complete | `6c0978d`；政策版本/规则/审计迁移、白名单授权与仓储测试已落地。 |
+| Task 2: 受限规则配置与确定性规则引擎 | In progress | `ff66e4f`；四类规则的基础求值与非法配置校验已实现，计划中的完整边界测试仍待补齐。 |
+| Task 3: 将政策校验接入草稿、确认和提交 | In progress | `7fb308e`；校验 API、确认摘要与最终提交已接入当前发布版本；提交快照保存政策版本/规则摘要尚未实现。 |
+| Task 4: 政策版本管理 API 与管理员工作台 | In progress | `40ae617`；已完成创建草稿与保存草稿规则 API；发布/归档/读取 API 与 Web 页面尚未实现。 |
+| Task 5: 回归验证、运维说明与交付检查 | Not started | 等待规则中心能力完整后执行。 |
+
+知识检索计划 `2026-09-26-policy-knowledge-retrieval-implementation.md` 尚未开始。
+
 ## Review Focus
 
 - 空白、重复、非 `ou_` 格式或由逗号产生的空管理员白名单项必须不授予权限；由 Task 1 的配置与授权测试锁定。
