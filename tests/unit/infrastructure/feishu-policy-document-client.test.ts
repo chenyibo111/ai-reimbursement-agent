@@ -2,15 +2,15 @@ import { expect, it, vi } from "vitest";
 
 import { createFeishuPolicyDocumentClient } from "@/src/infrastructure/feishu/feishu-policy-document-client";
 
-it("reads a registered docx source with a tenant token and returns normalized blocks", async () => {
+it("reads a raw-content-only docx response with the registered source title", async () => {
   const fetchImpl = vi.fn()
     .mockResolvedValueOnce(new Response(JSON.stringify({ tenant_access_token: "t-secret", expire: 7200 }), { status: 200 }))
-    .mockResolvedValueOnce(new Response(JSON.stringify({ code: 0, data: { title: "差旅制度", revision_id: 42, content: "# 标题\n住宿上限 500 元" } }), { status: 200 }));
+    .mockResolvedValueOnce(new Response(JSON.stringify({ code: 0, data: { content: "# 标题\n住宿上限 500 元" } }), { status: 200 }));
   const client = createFeishuPolicyDocumentClient({ appId: "app-id", appSecret: "app-secret", fetch: fetchImpl });
 
-  await expect(client.read({ type: "FEISHU_DOCX", token: "ABCdef0123456789", canonicalUrl: "https://acme.feishu.cn/docx/ABCdef0123456789" })).resolves.toEqual({
+  await expect(client.read({ type: "FEISHU_DOCX", token: "ABCdef0123456789", canonicalUrl: "https://acme.feishu.cn/docx/ABCdef0123456789", title: "差旅制度" })).resolves.toEqual({
     title: "差旅制度",
-    revision: "42",
+    revision: "9e3ee49e6a905f2670478e29250a6aaffdd9bb33ee6b6808c2c5e91130f3f22a",
     canonicalUrl: "https://acme.feishu.cn/docx/ABCdef0123456789",
     blocks: [{ kind: "heading", text: "标题" }, { kind: "paragraph", text: "住宿上限 500 元" }],
   });

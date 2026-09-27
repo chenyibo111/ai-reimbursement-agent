@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { z } from "zod";
 
 import type { PolicySourceLocator } from "@/src/domain/policy-source";
@@ -37,7 +39,7 @@ export function createFeishuPolicyDocumentClient(config: { appId: string; appSec
     const response = await authorized(`/open-apis/docx/v1/documents/${encodeURIComponent(token)}/raw_content`);
     if (!response.ok) throw providerError(response.status);
     const payload = await json(response);
-    const parsed = z.object({ code: z.union([z.literal(0), z.literal("0")]).optional(), data: z.object({ title: z.string().min(1), revision_id: z.union([z.string(), z.number()]), content: z.string() }) }).safeParse(payload);
+    const parsed = z.object({ code: z.union([z.literal(0), z.literal("0")]).optional(), data: z.object({ content: z.string() }) }).safeParse(payload);
     if (!response.ok || !parsed.success) throw providerError(response.status);
     return parsed.data.data;
   }
@@ -53,7 +55,12 @@ export function createFeishuPolicyDocumentClient(config: { appId: string; appSec
         documentToken = parsed.data.data.node.obj_token;
       }
       const document = await rawDocument(documentToken);
-      return { title: document.title.trim(), revision: String(document.revision_id), canonicalUrl: locator.canonicalUrl, blocks: blocks(document.content) };
+      return {
+        title: locator.title?.trim() || "未命名政策来源",
+        revision: createHash("sha256").update(document.content).digest("hex"),
+        canonicalUrl: locator.canonicalUrl,
+        blocks: blocks(document.content),
+      };
     },
   };
 

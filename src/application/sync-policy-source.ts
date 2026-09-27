@@ -4,7 +4,7 @@ import { splitPolicyDocument } from "@/src/application/split-policy-document";
 import type { EmbeddingProvider } from "@/src/infrastructure/embedding/embedding-provider";
 import type { FeishuPolicyDocumentClient } from "@/src/infrastructure/feishu/feishu-policy-document-client";
 
-type SyncSource = { id: string; type: "FEISHU_DOCX" | "FEISHU_WIKI"; resourceToken: string; canonicalUrl: string };
+type SyncSource = { id: string; type: "FEISHU_DOCX" | "FEISHU_WIKI"; resourceToken: string; canonicalUrl: string; title: string };
 type SyncRepository = {
   getEnabledSourceForSync(id: string): Promise<SyncSource | null>;
   getLatestContentHash(sourceId: string): Promise<string | null>;
@@ -17,7 +17,7 @@ export async function syncPolicySource(input: { actorId: string; sourceId: strin
   const source = await deps.sources.getEnabledSourceForSync(input.sourceId);
   if (!source) throw new Error("policy source is unavailable");
   try {
-    const document = await deps.documents.read({ type: source.type, token: source.resourceToken, canonicalUrl: source.canonicalUrl });
+    const document = await deps.documents.read({ type: source.type, token: source.resourceToken, canonicalUrl: source.canonicalUrl, title: source.title });
     const contentHash = createHash("sha256").update(JSON.stringify(document.blocks)).digest("hex");
     if (contentHash === await deps.sources.getLatestContentHash(source.id)) return { status: "UNCHANGED" as const, chunkCount: 0 };
     const chunks = splitPolicyDocument(document.blocks, { maxLength: 1600, minLength: 80 });

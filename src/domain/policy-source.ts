@@ -2,6 +2,7 @@ export type PolicySourceLocator = {
   type: "FEISHU_DOCX" | "FEISHU_WIKI";
   token: string;
   canonicalUrl: string;
+  title?: string;
 };
 
 const tokenPattern = /^[A-Za-z0-9]{12,128}$/;

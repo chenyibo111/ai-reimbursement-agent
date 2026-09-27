@@ -2,7 +2,7 @@ import { expect, it, vi } from "vitest";
 
 import { syncPolicySource } from "@/src/application/sync-policy-source";
 
-const source = { id: "source-1", type: "FEISHU_DOCX" as const, resourceToken: "ABCdef0123456789", canonicalUrl: "https://acme.feishu.cn/docx/ABCdef0123456789" };
+const source = { id: "source-1", type: "FEISHU_DOCX" as const, resourceToken: "ABCdef0123456789", canonicalUrl: "https://acme.feishu.cn/docx/ABCdef0123456789", title: "差旅制度" };
 
 it("activates a changed document only after all chunks are embedded", async () => {
   const stageSnapshot = vi.fn().mockResolvedValue({ id: "snapshot-1" });
