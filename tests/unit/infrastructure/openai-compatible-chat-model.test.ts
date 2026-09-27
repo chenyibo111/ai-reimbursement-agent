@@ -27,6 +27,20 @@ describe("OpenAiCompatibleChatModel", () => {
     expect(JSON.stringify(request.body)).not.toContain("must-not-be-sent");
   });
 
+  it("classifies a policy question with a constrained intent response", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: '{"intent":"POLICY_QUERY"}' } }],
+    }), { status: 200 }));
+    const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "top-secret", fetchImpl });
+
+    await expect(model.classifyIntent("酒店住宿上限是多少")).resolves.toBe("POLICY_QUERY");
+
+    const [, request] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(request.body));
+    expect(body.temperature).toBe(0);
+    expect(body.messages[1].content).toContain("酒店住宿上限是多少");
+  });
+
   it.each([
     ["unauthorized", new Response("provider detail", { status: 401 })],
     ["empty choices", new Response(JSON.stringify({ choices: [] }), { status: 200 })],

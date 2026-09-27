@@ -33,7 +33,9 @@ export async function runAgentTurn(input: { actorId: string; claimId: string; me
   const message = input.message.trim();
   if (!message || message.length > 2_000) throw new Error("message is invalid");
   const context = await deps.getContext(input.actorId, input.claimId);
-  if (deps.searchPolicy && /政策|制度|标准|报销规定/.test(message)) {
+  const hasPolicyKeywords = /政策|制度|标准|报销规定|报销规则/.test(message);
+  const modelClassifiesPolicy = !hasPolicyKeywords && deps.searchPolicy && await isPolicyQuery(message, deps.model);
+  if (deps.searchPolicy && (hasPolicyKeywords || modelClassifiesPolicy)) {
     try { const citations = await deps.searchPolicy(message); return citations.length ? { reply: "以下为已同步制度中的相关依据，请以引用原文为准。", clarifications: [], proposals: [], citations } : { reply: "当前没有可供引用的已同步报销政策，请以公司财务制度为准。", clarifications: [], proposals: [], citations: [] }; }
     catch { return { reply: "政策检索暂不可用，请稍后重试或查阅公司财务制度。", clarifications: [], proposals: [], citations: [] }; }
   }
@@ -56,6 +58,10 @@ export async function runAgentTurn(input: { actorId: string; claimId: string; me
     }
   }
   return { reply: parsed.data.reply, clarifications: toClarifications(context.issues), proposals };
+}
+
+async function isPolicyQuery(message: string, model: ChatModel): Promise<boolean> {
+  try { return await model.classifyIntent?.(message) === "POLICY_QUERY"; } catch { return false; }
 }
 
 function isAllowed(context: AgentContext, proposal: AgentProposalInput) {

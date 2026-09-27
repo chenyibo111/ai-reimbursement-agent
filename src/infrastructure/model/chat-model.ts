@@ -5,6 +5,9 @@ export type ChatModelInput = {
   issues: unknown[];
 };
 
+export type AgentIntent = "POLICY_QUERY" | "CLAIM_ACTION" | "OTHER";
+
 export type ChatModel = {
   decide(input: ChatModelInput): Promise<unknown>;
+  classifyIntent?(message: string): Promise<AgentIntent>;
 };

@@ -42,3 +42,34 @@ it("returns only server-approved citations for a policy question", async () => {
   const result = await runAgentTurn({ actorId: "employee-1", claimId: "claim-1", message: "报销政策是什么" }, { model: { decide: async () => { throw new Error("must not call model"); } }, getContext: async () => ({ summary: { purpose: null, totalAmountCents: 0, expenses: [] }, issues: [], allowedTargets: [], targetMap: {}, claimVersion: 1 }), createProposal: async () => { throw new Error("must not create"); }, audit: { append: async () => undefined }, searchPolicy: async () => [{ id: "safe", title: "制度", url: "https://example", excerpt: "住宿上限", headingPath: [] }] });
   expect(result).toMatchObject({ proposals: [], citations: [{ id: "safe" }] });
 });
+
+it("treats a reimbursement rule question as a policy knowledge query", async () => {
+  const searchPolicy = vi.fn(async () => [{ id: "safe", title: "制度", url: "https://example", excerpt: "住宿上限", headingPath: [] }]);
+  const result = await runAgentTurn({ actorId: "employee-1", claimId: "claim-1", message: "住宿费报销规则是怎么样的" }, {
+    model: { decide: async () => { throw new Error("must not call model"); } },
+    getContext: async () => ({ summary: { purpose: null, totalAmountCents: 0, expenses: [] }, issues: [], allowedTargets: [], targetMap: {}, claimVersion: 1 }),
+    createProposal: async () => { throw new Error("must not create"); },
+    audit: { append: async () => undefined },
+    searchPolicy,
+  });
+
+  expect(result.citations).toEqual([expect.objectContaining({ id: "safe" })]);
+  expect(searchPolicy).toHaveBeenCalledWith("住宿费报销规则是怎么样的");
+});
+
+it("uses the model intent classifier for a policy question without policy keywords", async () => {
+  const searchPolicy = vi.fn(async () => [{ id: "safe", title: "制度", url: "https://example", excerpt: "住宿上限", headingPath: [] }]);
+  const result = await runAgentTurn({ actorId: "employee-1", claimId: "claim-1", message: "酒店住宿上限是多少" }, {
+    model: {
+      decide: async () => { throw new Error("must not call agent model"); },
+      classifyIntent: async () => "POLICY_QUERY",
+    },
+    getContext: async () => ({ summary: { purpose: null, totalAmountCents: 0, expenses: [] }, issues: [], allowedTargets: [], targetMap: {}, claimVersion: 1 }),
+    createProposal: async () => { throw new Error("must not create"); },
+    audit: { append: async () => undefined },
+    searchPolicy,
+  });
+
+  expect(result.citations).toEqual([expect.objectContaining({ id: "safe" })]);
+  expect(searchPolicy).toHaveBeenCalledWith("酒店住宿上限是多少");
+});

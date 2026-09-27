@@ -1,4 +1,4 @@
-import type { ChatModel, ChatModelInput } from "@/src/infrastructure/model/chat-model";
+import type { AgentIntent, ChatModel, ChatModelInput } from "@/src/infrastructure/model/chat-model";
 
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -32,6 +32,33 @@ export class OpenAiCompatibleChatModel implements ChatModel {
   }
 
   async decide(input: ChatModelInput): Promise<unknown> {
+    return this.complete([
+      {
+        role: "system",
+        content: "你是报销澄清助手。只返回一个 JSON 对象，格式为 {reply: string, proposals: array}。proposals 只可以是服务端提供的候选目标和字段；你只能提出建议，不能声称已更新、已提交或已确认。信息不足时，proposals 为空并在 reply 中提出澄清问题。",
+      },
+      {
+        role: "user",
+        content: JSON.stringify({ message: input.message, summary: input.summary, issues: input.issues }),
+      },
+    ]);
+  }
+
+  async classifyIntent(message: string): Promise<AgentIntent> {
+    const result = await this.complete([
+      {
+        role: "system",
+        content: "你是报销对话意图分类器。只返回 JSON：{intent: \"POLICY_QUERY\" | \"CLAIM_ACTION\" | \"OTHER\"}。POLICY_QUERY 仅用于咨询公司报销制度、可否报销、额度上限、票据要求或标准；CLAIM_ACTION 用于创建、上传、修改、补充或提交当前报销单；其他为 OTHER。",
+      },
+      { role: "user", content: JSON.stringify({ message }) },
+    ]);
+    if (!result || typeof result !== "object" || Array.isArray(result) || !["POLICY_QUERY", "CLAIM_ACTION", "OTHER"].includes(String((result as { intent?: unknown }).intent))) {
+      throw new ChatModelError("AI 返回内容无法识别，请稍后重试。", "INVALID_RESPONSE");
+    }
+    return (result as { intent: AgentIntent }).intent;
+  }
+
+  private async complete(messages: Array<{ role: "system" | "user"; content: string }>): Promise<unknown> {
     let response: Response;
     try {
       response = await this.fetchImpl(this.endpoint, {
@@ -44,20 +71,7 @@ export class OpenAiCompatibleChatModel implements ChatModel {
         body: JSON.stringify({
           model: this.options.model,
           temperature: 0,
-          messages: [
-            {
-              role: "system",
-              content: "你是报销澄清助手。只返回一个 JSON 对象，格式为 {reply: string, proposals: array}。proposals 只可以是服务端提供的候选目标和字段；你只能提出建议，不能声称已更新、已提交或已确认。信息不足时，proposals 为空并在 reply 中提出澄清问题。",
-            },
-            {
-              role: "user",
-              content: JSON.stringify({
-                message: input.message,
-                summary: input.summary,
-                issues: input.issues,
-              }),
-            },
-          ],
+          messages,
         }),
       });
     } catch (error) {
