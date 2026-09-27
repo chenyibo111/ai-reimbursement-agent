@@ -75,6 +75,19 @@ describe("AgentConversationRepository", () => {
     ]);
   });
 
+  it("finds the assistant reply that is explicitly linked to an inbound message", async () => {
+    const employee = await createEmployee();
+    const conversation = await repository.getOrCreatePrivate(employee.id);
+    const firstInboundId = `om-first-${employee.id}`;
+    const secondInboundId = `om-second-${employee.id}`;
+    await repository.appendMessage({ conversationId: conversation.id, role: "USER", channel: "FEISHU", channelMessageId: firstInboundId, text: "第一条" });
+    await repository.appendMessage({ conversationId: conversation.id, role: "USER", channel: "FEISHU", channelMessageId: secondInboundId, text: "第二条" });
+    await repository.appendMessage({ conversationId: conversation.id, role: "ASSISTANT", channel: "FEISHU", inReplyToChannelMessageId: secondInboundId, text: "第二条回复" });
+    await repository.appendMessage({ conversationId: conversation.id, role: "ASSISTANT", channel: "FEISHU", inReplyToChannelMessageId: firstInboundId, text: "第一条回复" });
+
+    await expect(repository.findAssistantReplyByInboundMessageId(firstInboundId)).resolves.toMatchObject({ text: "第一条回复" });
+  });
+
   it("keeps one active Intake per employee and allows a new one after abandonment", async () => {
     const employee = await createEmployee();
     const conversation = await repository.getOrCreatePrivate(employee.id);

@@ -96,7 +96,7 @@ function createProcessDeps(input: {
         chunks: new PrismaPolicyKnowledgeRepository(input.prisma),
       }) : undefined,
       preflightAttachment: (attachment) => preflightReceiptUpload(attachment, scanner),
-      createClaim: ({ actorId }) => createClaimDraft({ actorId }, { claims, audit }),
+      createClaim: ({ actorId, purpose }) => createClaimDraft({ actorId, purpose }, { claims, audit }),
       uploadReceipt: (receiptInput) => uploadReceipt(receiptInput, { claims, receipts, audit, scanner, store: objects }),
       extractReceipt: (extractInput) => extractReceipt(extractInput, {
         claims,

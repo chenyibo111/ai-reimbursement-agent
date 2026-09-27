@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 
 import { runConversationTurn, type ConversationStore } from "@/src/application/run-conversation-turn";
+import { createPrismaAuditEventWriter } from "@/src/application/audit-event";
 import { searchPolicyKnowledge } from "@/src/application/search-policy-knowledge";
 import { requestStoredSubmission, submitStoredClaim } from "@/src/application/stored-submission";
+import { updateClaimField } from "@/src/application/update-claim-field";
 import { createEmbeddingProvider } from "@/src/infrastructure/embedding/embedding-provider-factory";
 import { createChatModel } from "@/src/infrastructure/model/chat-model-factory";
 import { AgentConversationRepository } from "@/src/infrastructure/prisma/agent-conversation-repository";
+import { PrismaClaimRepository } from "@/src/infrastructure/prisma/claim-repository";
 import { createPrismaClient } from "@/src/infrastructure/prisma/client";
 import { PrismaPolicyKnowledgeRepository } from "@/src/infrastructure/prisma/policy-knowledge-repository";
 import { loadConfig } from "@/src/server/config";
@@ -22,6 +25,8 @@ export async function POST(request: Request) {
     }
     const prisma = getPrisma();
     const repository = new AgentConversationRepository(prisma);
+    const claims = new PrismaClaimRepository(prisma);
+    const audit = createPrismaAuditEventWriter(prisma);
     const conversation = await repository.getOrCreatePrivate(actorId);
     const config = loadConfig(process.env);
     const result = await runConversationTurn(
@@ -33,6 +38,11 @@ export async function POST(request: Request) {
           embeddings: createEmbeddingProvider(config),
           chunks: new PrismaPolicyKnowledgeRepository(prisma),
         }) : undefined,
+        updatePurpose: async ({ actorId: claimActorId, claimId, value }) => {
+          const claim = await claims.getByIdOrThrow(claimId);
+          const updated = await updateClaimField({ actorId: claimActorId, claimId, expectedVersion: claim.version, field: "purpose", value }, { claims, audit });
+          return { version: updated.version };
+        },
         requestSubmission: ({ actorId: submissionActorId, claimId }) => requestStoredSubmission({ prisma, actorId: submissionActorId, claimId }),
         submitClaim: async ({ actorId: submissionActorId, claimId, confirmationToken }) => {
           const submitted = await submitStoredClaim({ prisma, actorId: submissionActorId, claimId, confirmationToken });

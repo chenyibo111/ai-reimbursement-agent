@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 
 export type ConversationCitation = { id: string; title: string; url: string; excerpt: string; headingPath: string[]; score: number };
 export type AgentConversationMessage = { id: string; sequence: number; role: "USER" | "ASSISTANT" | "SYSTEM"; channel: "WEB" | "FEISHU"; text: string; citations: ConversationCitation[] | null; result: Record<string, unknown> | null; createdAt: string };
-export type AgentConversationIntake = { id: string; status: "COLLECTING" | "READY_TO_SUBMIT" | "SUBMITTED" | "ABANDONED"; claimId: string | null; pendingFields: string[]; collectedFields?: Record<string, unknown> };
+export type SubmissionPreview = { claimVersion: number | null; totalAmountCents: number | null; receiptCount: number | null; purpose: string | null; issueCount: number };
+export type AgentConversationIntake = { id: string; status: "COLLECTING" | "READY_TO_SUBMIT" | "SUBMITTED" | "ABANDONED"; claimId: string | null; pendingFields: string[]; collectedFields?: Record<string, unknown>; submissionPreview?: SubmissionPreview | null };
 export type AgentConversationState = {
   conversation: { id: string; kind: "PRIVATE"; lastActiveAt: string };
   messages: AgentConversationMessage[];
@@ -154,7 +155,15 @@ function normalizeMessage(value: unknown): AgentConversationMessage | null {
 
 function normalizeIntake(value: unknown): AgentConversationIntake | null {
   if (!isRecord(value) || typeof value.id !== "string" || !isIntakeStatus(value.status) || (typeof value.claimId !== "string" && value.claimId !== null) || !Array.isArray(value.pendingFields) || !value.pendingFields.every((field) => typeof field === "string")) return null;
-  return { id: value.id, status: value.status, claimId: value.claimId, pendingFields: value.pendingFields, ...(isRecord(value.collectedFields) ? { collectedFields: value.collectedFields } : {}) };
+  const submissionPreview = normalizeSubmissionPreview(value.submissionPreview);
+  return { id: value.id, status: value.status, claimId: value.claimId, pendingFields: value.pendingFields, ...(isRecord(value.collectedFields) ? { collectedFields: value.collectedFields } : {}), ...(submissionPreview !== undefined ? { submissionPreview } : {}) };
+}
+
+function normalizeSubmissionPreview(value: unknown): SubmissionPreview | null | undefined {
+  if (value === null) return null;
+  if (!isRecord(value)) return undefined;
+  if (!isNullableNumber(value.claimVersion) || !isNullableNumber(value.totalAmountCents) || !isNullableNumber(value.receiptCount) || (typeof value.purpose !== "string" && value.purpose !== null) || typeof value.issueCount !== "number") return undefined;
+  return { claimVersion: value.claimVersion, totalAmountCents: value.totalAmountCents, receiptCount: value.receiptCount, purpose: value.purpose, issueCount: value.issueCount };
 }
 
 function normalizeCitation(value: unknown): ConversationCitation | null {
@@ -163,6 +172,7 @@ function normalizeCitation(value: unknown): ConversationCitation | null {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === "object" && !Array.isArray(value); }
+function isNullableNumber(value: unknown): value is number | null { return typeof value === "number" || value === null; }
 function isRole(value: unknown): value is AgentConversationMessage["role"] { return value === "USER" || value === "ASSISTANT" || value === "SYSTEM"; }
 function isChannel(value: unknown): value is AgentConversationMessage["channel"] { return value === "WEB" || value === "FEISHU"; }
 function isIntakeStatus(value: unknown): value is AgentConversationIntake["status"] { return value === "COLLECTING" || value === "READY_TO_SUBMIT" || value === "SUBMITTED" || value === "ABANDONED"; }

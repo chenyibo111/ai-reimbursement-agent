@@ -37,3 +37,15 @@ it("sends the exact confirmation command through the ordinary message endpoint",
 
   expect(fetchImpl).toHaveBeenCalledWith("/api/conversations/private/messages", expect.objectContaining({ body: JSON.stringify({ message: "确认提交" }) }));
 });
+
+it("keeps the server-derived submission preview with the ready Intake", async () => {
+  const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    conversation: { id: "private-1", kind: "PRIVATE", lastActiveAt: "2026-09-27T12:00:00.000Z" },
+    messages: [],
+    intake: { id: "intake-1", status: "READY_TO_SUBMIT", claimId: "claim-1", pendingFields: [], submissionPreview: { claimVersion: 2, totalAmountCents: 12_345, receiptCount: 2, purpose: "客户拜访", issueCount: 0 } },
+  }), { status: 200 }));
+
+  await expect(loadAgentConversation(fetchImpl)).resolves.toMatchObject({
+    intake: { status: "READY_TO_SUBMIT", submissionPreview: { totalAmountCents: 12_345, receiptCount: 2, purpose: "客户拜访" } },
+  });
+});

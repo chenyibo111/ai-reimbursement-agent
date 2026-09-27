@@ -4,6 +4,7 @@ import { createPrismaAuditEventWriter } from "@/src/application/audit-event";
 import { createClaimDraft } from "@/src/application/create-claim-draft";
 import { extractReceipt } from "@/src/application/extract-receipt";
 import { preflightReceiptUpload, uploadReceipt } from "@/src/application/upload-receipt";
+import { updateClaimField } from "@/src/application/update-claim-field";
 import { runConversationTurn, type ConversationStore } from "@/src/application/run-conversation-turn";
 import { createClamAvFileSafetyScanner } from "@/src/infrastructure/security/file-safety-scanner";
 import { createS3ObjectStore } from "@/src/infrastructure/storage/object-store";
@@ -39,9 +40,14 @@ export async function POST(request: Request) {
         conversations: repository as unknown as ConversationStore,
         model: createChatModel(loadConfig(process.env)),
         preflightAttachment: (input) => preflightReceiptUpload(input, scanner),
-        createClaim: ({ actorId: claimActorId }) => createClaimDraft({ actorId: claimActorId }, { claims, audit }),
+        createClaim: ({ actorId: claimActorId, purpose }) => createClaimDraft({ actorId: claimActorId, purpose }, { claims, audit }),
         uploadReceipt: (input) => uploadReceipt(input, { claims, receipts: new PrismaReceiptRepository(prisma), scanner, store: objects, audit }),
         extractReceipt: ({ actorId: extractionActorId, claimId, receiptId }) => extractUploadedReceipt({ prisma, actorId: extractionActorId, claimId, receiptId, objects, audit }),
+        updatePurpose: async ({ actorId: claimActorId, claimId, value }) => {
+          const claim = await claims.getByIdOrThrow(claimId);
+          const updated = await updateClaimField({ actorId: claimActorId, claimId, expectedVersion: claim.version, field: "purpose", value }, { claims, audit });
+          return { version: updated.version };
+        },
       },
     );
     return NextResponse.json(result, { status: 201 });

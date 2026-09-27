@@ -14,28 +14,31 @@ type IntakeRecord = {
   collectedFields: Record<string, unknown>;
   pendingFields: string[];
   submissionToken: string | null;
+  submissionPreview?: Record<string, unknown> | null;
 };
 
 export type ConversationStore = {
   getConversationByIdOrThrow(id: string): Promise<ConversationRecord>;
   listMessages(input: { conversationId: string; limit?: number }): Promise<ConversationMessage[]>;
-  appendMessage(input: { conversationId: string; role: AgentMessageRole; channel: AgentMessageChannel; channelMessageId?: string | null; text: string; citations?: Record<string, unknown>[]; result?: Record<string, unknown> }): Promise<unknown>;
+  appendMessage(input: { conversationId: string; role: AgentMessageRole; channel: AgentMessageChannel; channelMessageId?: string | null; inReplyToChannelMessageId?: string | null; text: string; citations?: Record<string, unknown>[]; result?: Record<string, unknown> }): Promise<unknown>;
   appendUserMessageIfAbsent?(input: { conversationId: string; role: "USER"; channel: AgentMessageChannel; channelMessageId: string; text: string }): Promise<{ message: { sequence: number }; created: boolean }>;
+  findAssistantReplyByInboundMessageId?(channelMessageId: string): Promise<ConversationMessage | null>;
+  compareAndSetSummary?(input: { conversationId: string; expectedThroughSequence: number; summary: string; throughSequence: number }): Promise<boolean>;
   getCurrentIntake(employeeId: string): Promise<IntakeRecord | null>;
-  createIntake(input: { employeeId: string; conversationId: string; claimId?: string | null; collectedFields?: Record<string, unknown>; pendingFields?: string[]; submissionToken?: string | null }): Promise<IntakeRecord>;
-  updateIntake(input: { id: string; status?: ReimbursementIntakeStatus; claimId?: string | null; collectedFields?: Record<string, unknown>; pendingFields?: string[]; submissionToken?: string | null; lastUserConfirmationAt?: Date | null }): Promise<IntakeRecord>;
+  createIntake(input: { employeeId: string; conversationId: string; claimId?: string | null; collectedFields?: Record<string, unknown>; pendingFields?: string[]; submissionToken?: string | null; submissionPreview?: Record<string, unknown> | null }): Promise<IntakeRecord>;
+  updateIntake(input: { id: string; status?: ReimbursementIntakeStatus; claimId?: string | null; collectedFields?: Record<string, unknown>; pendingFields?: string[]; submissionToken?: string | null; submissionPreview?: Record<string, unknown> | null; lastUserConfirmationAt?: Date | null }): Promise<IntakeRecord>;
 };
 
 export type RunConversationTurnDeps = {
   conversations: ConversationStore;
   model: Pick<ChatModel, "classifyIntent" | "answerPolicy" | "decideConversation">;
   searchPolicy?: (query: string) => Promise<PolicyCitation[]>;
-  createClaim?: (input: { actorId: string }) => Promise<{ id: string; version: number }>;
+  createClaim?: (input: { actorId: string; purpose?: string }) => Promise<{ id: string; version: number }>;
   preflightAttachment?: (input: { filename: string; mimeType: string; bytes: Uint8Array }) => Promise<void>;
   uploadReceipt?: (input: { actorId: string; claimId: string; filename: string; mimeType: string; bytes: Uint8Array }) => Promise<{ id: string }>;
   extractReceipt?: (input: { actorId: string; claimId: string; receiptId: string }) => Promise<unknown>;
   updatePurpose?: (input: { actorId: string; claimId: string; value: string }) => Promise<{ version: number }>;
-  requestSubmission?: (input: { actorId: string; claimId: string }) => Promise<{ token: string; claimId: string }>;
+  requestSubmission?: (input: { actorId: string; claimId: string }) => Promise<{ token: string; claimId: string; claimVersion?: number; totalAmountCents?: number; receiptCount?: number; purpose?: string | null; issues?: unknown[] }>;
   submitClaim?: (input: { actorId: string; claimId: string; confirmationToken: string }) => Promise<{ submissionNumber: string }>;
 };
 
@@ -54,7 +57,10 @@ export async function runConversationTurn(
   const conversation = await deps.conversations.getConversationByIdOrThrow(input.conversationId);
   if (input.channelMessageId && deps.conversations.appendUserMessageIfAbsent) {
     const appended = await deps.conversations.appendUserMessageIfAbsent({ conversationId: conversation.id, role: "USER", channel: input.channel, channelMessageId: input.channelMessageId, text: message });
-    if (!appended.created) return replayPersistedTurn(conversation.id, appended.message.sequence, deps.conversations);
+    if (!appended.created) {
+      const persisted = await deps.conversations.findAssistantReplyByInboundMessageId?.(input.channelMessageId);
+      if (persisted) return replayPersistedTurn(persisted);
+    }
   } else {
     await deps.conversations.appendMessage({ conversationId: conversation.id, role: "USER", channel: input.channel, channelMessageId: input.channelMessageId, text: message });
   }
@@ -77,7 +83,7 @@ export async function runConversationTurn(
 }
 
 async function handleAttachment(
-  input: { actorId: string; conversationId: string; channel: AgentMessageChannel; attachment: { filename: string; mimeType: string; bytes: Uint8Array } },
+  input: { actorId: string; conversationId: string; channel: AgentMessageChannel; channelMessageId?: string; attachment: { filename: string; mimeType: string; bytes: Uint8Array } },
   active: IntakeRecord | null,
   deps: RunConversationTurnDeps,
 ): Promise<ConversationTurnResult> {
@@ -95,8 +101,12 @@ async function handleAttachment(
     }
   }
   if (!intake.claimId) {
-    const claim = await deps.createClaim({ actorId: input.actorId });
+    const purpose = asPurpose(intake.collectedFields.purpose);
+    const claim = await deps.createClaim({ actorId: input.actorId, ...(purpose ? { purpose } : {}) });
     intake = await deps.conversations.updateIntake({ id: intake.id, claimId: claim.id });
+  }
+  if (intake.status === "READY_TO_SUBMIT") {
+    intake = await deps.conversations.updateIntake({ id: intake.id, status: "COLLECTING", submissionToken: null, submissionPreview: null });
   }
   const receipt = await deps.uploadReceipt({ actorId: input.actorId, claimId: intake.claimId!, ...input.attachment });
   try {
@@ -108,12 +118,12 @@ async function handleAttachment(
 }
 
 async function startIntake(
-  input: { actorId: string; conversationId: string; channel: AgentMessageChannel },
+  input: { actorId: string; conversationId: string; channel: AgentMessageChannel; channelMessageId?: string },
   active: IntakeRecord | null,
   deps: RunConversationTurnDeps,
 ): Promise<ConversationTurnResult> {
   if (active) {
-    return persistReply(input, active, "当前已有一项进行中的报销办理，请继续补充信息或先完成提交。", [], deps.conversations);
+    await deps.conversations.updateIntake({ id: active.id, status: "ABANDONED", submissionToken: null, submissionPreview: null });
   }
   let intake: IntakeRecord;
   try {
@@ -132,7 +142,7 @@ async function startIntake(
 }
 
 async function answerPolicyQuestion(
-  input: { actorId: string; conversationId: string; channel: AgentMessageChannel },
+  input: { actorId: string; conversationId: string; channel: AgentMessageChannel; channelMessageId?: string },
   intake: IntakeRecord | null,
   message: string,
   deps: RunConversationTurnDeps,
@@ -149,7 +159,7 @@ async function answerPolicyQuestion(
 }
 
 async function applyDecision(
-  input: { actorId: string; conversationId: string; channel: AgentMessageChannel },
+  input: { actorId: string; conversationId: string; channel: AgentMessageChannel; channelMessageId?: string },
   intake: IntakeRecord | null,
   decision: ConversationDecision,
   deps: RunConversationTurnDeps,
@@ -161,14 +171,27 @@ async function applyDecision(
       await deps.updatePurpose({ actorId: input.actorId, claimId: intake.claimId, value: decision.fields.purpose });
     }
     const pendingFields = intake.pendingFields.filter((field) => !(field in (decision.fields ?? {})));
-    const updated = await deps.conversations.updateIntake({ id: intake.id, collectedFields, pendingFields });
+    const invalidatesSubmission = intake.status === "READY_TO_SUBMIT" && typeof decision.fields?.purpose === "string";
+    const updated = await deps.conversations.updateIntake({
+      id: intake.id,
+      collectedFields,
+      pendingFields,
+      ...(invalidatesSubmission ? { status: "COLLECTING" as const, submissionToken: null, submissionPreview: null } : {}),
+    });
     return persistReply(input, updated, decision.reply, [], deps.conversations);
   }
 
   if (decision.action === "REQUEST_SUBMISSION") {
     if (!intake?.claimId || !deps.requestSubmission) return persistReply(input, intake, "请先上传票据并补齐必填信息，再生成提交摘要。", [], deps.conversations);
     const preview = await deps.requestSubmission({ actorId: input.actorId, claimId: intake.claimId });
-    const updated = await deps.conversations.updateIntake({ id: intake.id, status: "READY_TO_SUBMIT", submissionToken: preview.token });
+    const submissionPreview = {
+      claimVersion: preview.claimVersion ?? null,
+      totalAmountCents: preview.totalAmountCents ?? null,
+      receiptCount: preview.receiptCount ?? null,
+      purpose: preview.purpose ?? null,
+      issueCount: preview.issues?.length ?? 0,
+    };
+    const updated = await deps.conversations.updateIntake({ id: intake.id, status: "READY_TO_SUBMIT", submissionToken: preview.token, submissionPreview });
     return persistReply(input, updated, decision.reply, [], deps.conversations);
   }
 
@@ -176,7 +199,7 @@ async function applyDecision(
 }
 
 async function confirmSubmission(
-  input: { actorId: string; conversationId: string; channel: AgentMessageChannel },
+  input: { actorId: string; conversationId: string; channel: AgentMessageChannel; channelMessageId?: string },
   intake: IntakeRecord | null,
   deps: RunConversationTurnDeps,
 ): Promise<ConversationTurnResult> {
@@ -196,15 +219,37 @@ async function getContext(
   message: string,
 ): Promise<ConversationContext> {
   const [messages, citations] = await Promise.all([
-    conversations.listMessages({ conversationId: conversation.id, limit: 50 }),
+    conversations.listMessages({ conversationId: conversation.id, limit: 200 }),
     searchPolicy ? searchPolicy(message).catch(() => []) : Promise.resolve([]),
   ]);
+  const summarizedConversation = await summarizeOlderMessages(conversation, messages, conversations);
   return buildConversationContext({
-    conversation,
+    conversation: summarizedConversation,
     messages,
     intake,
     policyCitations: citations,
   });
+}
+
+async function summarizeOlderMessages(
+  conversation: ConversationRecord,
+  messages: ConversationMessage[],
+  conversations: ConversationStore,
+): Promise<ConversationRecord> {
+  const keepRecent = 12;
+  if (!conversations.compareAndSetSummary || messages.length <= keepRecent) return conversation;
+  const olderMessages = messages.slice(0, -keepRecent).filter((item) => item.sequence > conversation.summaryThroughSequence);
+  const throughSequence = olderMessages.at(-1)?.sequence;
+  if (!throughSequence) return conversation;
+  const additions = olderMessages.map((item) => `${item.role === "USER" ? "员工" : "助理"}：${item.text.trim().slice(0, 600)}`).filter(Boolean);
+  const summary = [conversation.summary, ...additions].filter(Boolean).join("\n").slice(-6_000);
+  const updated = await conversations.compareAndSetSummary({
+    conversationId: conversation.id,
+    expectedThroughSequence: conversation.summaryThroughSequence,
+    summary,
+    throughSequence,
+  });
+  return updated ? { ...conversation, summary, summaryThroughSequence: throughSequence } : conversation;
 }
 
 async function getConversationIntake(employeeId: string, conversationId: string, conversations: ConversationStore): Promise<IntakeRecord | null> {
@@ -232,7 +277,7 @@ async function answerFromCitations(message: string, citations: PolicyCitation[],
 }
 
 async function persistReply(
-  input: { conversationId: string; channel: AgentMessageChannel },
+  input: { conversationId: string; channel: AgentMessageChannel; channelMessageId?: string },
   intake: IntakeRecord | null,
   reply: string,
   citations: PolicyCitation[],
@@ -243,6 +288,7 @@ async function persistReply(
     conversationId: input.conversationId,
     role: "ASSISTANT",
     channel: input.channel,
+    inReplyToChannelMessageId: input.channelMessageId,
     text: reply,
     citations: citations.map(({ id, title, url, excerpt, headingPath, score }) => ({ id, title, url, excerpt, headingPath, score })),
     result: { intakeId: intake?.id ?? null, claimId: intake?.claimId ?? null, submissionNumber: submissionNumber ?? null },
@@ -250,10 +296,7 @@ async function persistReply(
   return { reply, citations, intake, ...(submissionNumber ? { submissionNumber } : {}) };
 }
 
-async function replayPersistedTurn(conversationId: string, userSequence: number, conversations: ConversationStore): Promise<ConversationTurnResult> {
-  const messages = await conversations.listMessages({ conversationId, limit: 50 });
-  const assistant = messages.find((message) => message.sequence > userSequence && message.role === "ASSISTANT");
-  if (!assistant) throw new Error("duplicate message is pending");
+async function replayPersistedTurn(assistant: ConversationMessage): Promise<ConversationTurnResult> {
   const result = isRecord(assistant.result) ? assistant.result : {};
   const submissionNumber = typeof result.submissionNumber === "string" ? result.submissionNumber : undefined;
   return { reply: assistant.text, citations: asPolicyCitations(assistant.citations), intake: null, ...(submissionNumber ? { submissionNumber } : {}) };
@@ -275,4 +318,8 @@ function normalizeMessage(message: string): string {
   const normalized = message.trim();
   if (!normalized || normalized.length > 2_000) throw new Error("message is invalid");
   return normalized;
+}
+
+function asPurpose(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }

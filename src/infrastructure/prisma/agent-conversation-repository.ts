@@ -1,4 +1,4 @@
-import type { AgentConversation, AgentMessage, Prisma, PrismaClient, ReimbursementIntake } from "@/generated/prisma/client";
+import { Prisma, type AgentConversation, type AgentMessage, type PrismaClient, type ReimbursementIntake } from "@/generated/prisma/client";
 import {
   privateConversationScopeKey,
   type AgentMessageChannel,
@@ -13,6 +13,7 @@ export type AppendAgentMessageInput = {
   role: AgentMessageRole;
   channel: AgentMessageChannel;
   channelMessageId?: string | null;
+  inReplyToChannelMessageId?: string | null;
   text: string;
   citations?: Prisma.InputJsonValue;
   result?: Prisma.InputJsonValue;
@@ -25,6 +26,7 @@ export type CreateReimbursementIntakeInput = {
   collectedFields?: Prisma.InputJsonValue;
   pendingFields?: string[];
   submissionToken?: string | null;
+  submissionPreview?: Prisma.InputJsonValue | null;
 };
 
 export type UpdateReimbursementIntakeInput = {
@@ -34,6 +36,7 @@ export type UpdateReimbursementIntakeInput = {
   collectedFields?: Prisma.InputJsonValue;
   pendingFields?: string[];
   submissionToken?: string | null;
+  submissionPreview?: Prisma.InputJsonValue | null;
   lastUserConfirmationAt?: Date | null;
 };
 
@@ -85,6 +88,7 @@ export class AgentConversationRepository {
             role: input.role,
             channel: input.channel,
             channelMessageId,
+            inReplyToChannelMessageId: input.inReplyToChannelMessageId?.trim() || null,
             text: normalizeText(input.text),
             citations: normalizeSnapshot(input.citations),
             result: normalizeSnapshot(input.result),
@@ -108,6 +112,12 @@ export class AgentConversationRepository {
       take: limit,
     });
     return newest.reverse();
+  }
+
+  async findAssistantReplyByInboundMessageId(channelMessageId: string): Promise<AgentMessage | null> {
+    const inReplyToChannelMessageId = channelMessageId.trim();
+    if (!inReplyToChannelMessageId) return null;
+    return this.prisma.agentMessage.findFirst({ where: { role: "ASSISTANT", inReplyToChannelMessageId } });
   }
 
   async getConversationByIdOrThrow(id: string): Promise<AgentConversation> {
@@ -136,6 +146,7 @@ export class AgentConversationRepository {
           collectedFields: normalizeSnapshot(input.collectedFields) ?? {},
           pendingFields: input.pendingFields ?? [],
           submissionToken: input.submissionToken ?? null,
+          submissionPreview: input.submissionPreview === null ? Prisma.JsonNull : normalizeSnapshot(input.submissionPreview),
         },
       });
     } catch (error) {
@@ -151,6 +162,7 @@ export class AgentConversationRepository {
     if (input.collectedFields !== undefined) data.collectedFields = normalizeSnapshot(input.collectedFields) ?? {};
     if (input.pendingFields !== undefined) data.pendingFields = input.pendingFields;
     if ("submissionToken" in input) data.submissionToken = input.submissionToken ?? null;
+    if ("submissionPreview" in input) data.submissionPreview = input.submissionPreview === null ? Prisma.JsonNull : normalizeSnapshot(input.submissionPreview);
     if ("lastUserConfirmationAt" in input) data.lastUserConfirmationAt = input.lastUserConfirmationAt ?? null;
     return this.prisma.reimbursementIntake.update({ where: { id: input.id }, data });
   }

@@ -297,6 +297,7 @@ model AgentMessage {
   role             AgentMessageRole
   channel          AgentMessageChannel
   channelMessageId String?             @unique
+  inReplyToChannelMessageId String?    @unique
   text             String
   citations        Json?
   result           Json?
@@ -318,6 +319,7 @@ model ReimbursementIntake {
   collectedFields        Json                      @default("{}")
   pendingFields          String[]                  @default([])
   submissionToken        String?
+  submissionPreview      Json?
   lastUserConfirmationAt DateTime?
   createdAt              DateTime                  @default(now())
   updatedAt              DateTime                  @updatedAt

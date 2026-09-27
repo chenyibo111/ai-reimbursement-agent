@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 
-import type { AgentConversationMessage, ConversationCitation } from "@/src/ui/use-agent-conversation";
+import type { AgentConversationIntake, AgentConversationMessage, ConversationCitation } from "@/src/ui/use-agent-conversation";
 import { useAgentConversation } from "@/src/ui/use-agent-conversation";
 
 export function AgentConversationWidget() {
@@ -37,7 +37,7 @@ export function AgentConversationWidget() {
         <div><p className="eyebrow">独立会话</p><h2 id="agent-widget-title">报销助理</h2><p>问制度、上传票据或开始报销。</p></div>
         <button className="agent-widget-close" type="button" onClick={() => setIsOpen(false)} aria-label="收起报销助理">×</button>
       </header>
-      {intake ? <IntakeStatus status={intake.status} pendingFields={intake.pendingFields} /> : <p className="agent-widget-context">这是你的私有会话；它不会修改当前手动创建的草稿。</p>}
+      {intake ? <IntakeStatus intake={intake} /> : <p className="agent-widget-context">这是你的私有会话；它不会修改当前手动创建的草稿。</p>}
       <div className="agent-widget-log" aria-live="polite" aria-busy={isLoading}>
         {isLoading ? <p className="agent-widget-muted" role="status">正在读取已保存的对话…</p> : null}
         {!isLoading && !state?.messages.length ? <p className="agent-widget-muted">你可以先问报销制度，或点击“开始报销”。</p> : null}
@@ -63,9 +63,24 @@ export function AgentConversationWidget() {
   </aside>;
 }
 
-function IntakeStatus({ status, pendingFields }: { status: string; pendingFields: string[] }) {
+function IntakeStatus({ intake }: { intake: AgentConversationIntake }) {
   const labels: Record<string, string> = { COLLECTING: "正在补齐信息", READY_TO_SUBMIT: "等待确认提交", SUBMITTED: "已提交", ABANDONED: "已结束" };
-  return <div className="agent-widget-intake"><strong>{labels[status] ?? "办理中"}</strong>{pendingFields.length ? <span>待补：{pendingFields.join("、")}</span> : <span>信息已齐全</span>}</div>;
+  const preview = intake.submissionPreview;
+  return <div className="agent-widget-intake">
+    <strong>{labels[intake.status] ?? "办理中"}</strong>
+    {intake.pendingFields.length ? <span>待补：{intake.pendingFields.join("、")}</span> : <span>信息已齐全</span>}
+    {intake.status === "READY_TO_SUBMIT" && preview ? <div className="agent-widget-submission-preview" aria-label="提交前摘要">
+      <span>事由：{preview.purpose || "未填写"}</span>
+      <span>金额：{formatCny(preview.totalAmountCents)}</span>
+      <span>票据：{preview.receiptCount ?? "—"} 张</span>
+      {preview.issueCount > 0 ? <span>提示：{preview.issueCount} 项</span> : null}
+    </div> : null}
+  </div>;
+}
+
+function formatCny(amountCents: number | null): string {
+  if (amountCents === null) return "—";
+  return new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY" }).format(amountCents / 100);
 }
 
 function ConversationMessage({ message }: { message: AgentConversationMessage }) {
