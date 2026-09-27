@@ -18,7 +18,7 @@
 |---|---|---|
 | Task 1: pgvector、Embedding Provider 与容器运行边界 | Complete | 固定 1024 维配置、Fixture/HTTP Provider、内部 BGE-M3 服务、pgvector PostgreSQL 16 镜像与可选 GPU 覆盖已完成；聚焦测试 10/10、`npx tsc --noEmit` 与 `docker compose config --quiet` 通过。 |
 | Task 2: 政策来源、快照、向量数据与飞书读取边界 | Complete | 受控 Docx/Wiki URL、飞书读取客户端、pgvector 来源/快照/切片迁移与参数化仓储已完成；聚焦测试 12/12、类型检查及专用测试库迁移通过。 |
-| Task 3: 安全同步用例、管理员来源 API 与 Worker | Not started | 等待来源持久化。 |
+| Task 3: 安全同步用例、管理员来源 API 与 Worker | Complete | 受控同步、失败保留活动快照、管理员来源 API 与 `policy:sync` Worker 已完成；聚焦测试 6/6、类型检查通过。 |
 | Task 4: 检索、可验证引用与 Agent/飞书问答接入 | Not started | 等待安全同步与活动快照。 |
 | Task 5: 管理界面、部署文档与完整验证 | Not started | 等待前序能力。 |
 
