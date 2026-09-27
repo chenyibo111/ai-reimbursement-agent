@@ -5,6 +5,7 @@ import type { AgentContext } from "@/src/application/build-agent-context";
 import { parseAgentProposal, type AgentProposalField, type AgentProposalInput } from "@/src/domain/agent-proposal";
 import type { ValidationIssue } from "@/src/domain/claim-validation";
 import type { ChatModel } from "@/src/infrastructure/model/chat-model";
+import type { PolicyCitation } from "@/src/application/search-policy-knowledge";
 
 const decisionSchema = z.object({ reply: z.string().trim().min(1).max(2_000), proposals: z.array(z.unknown()).default([]) }).strict();
 
@@ -18,19 +19,24 @@ export type AgentProposalDto = {
   claimVersion: number;
 };
 
-export type AgentTurnResult = { reply: string; clarifications: Array<{ field: string; prompt: string }>; proposals: AgentProposalDto[] };
+export type AgentTurnResult = { reply: string; clarifications: Array<{ field: string; prompt: string }>; proposals: AgentProposalDto[]; citations?: PolicyCitation[] };
 
 export type RunAgentTurnDeps = {
   model: ChatModel;
   getContext(actorId: string, claimId: string): Promise<AgentContext>;
   createProposal(input: AgentProposalInput & { actorId: string; claimId: string; claimVersion: number; expenseItemId?: string }): Promise<AgentProposalDto>;
   audit: AuditEventWriter;
+  searchPolicy?: (query: string) => Promise<PolicyCitation[]>;
 };
 
 export async function runAgentTurn(input: { actorId: string; claimId: string; message: string }, deps: RunAgentTurnDeps): Promise<AgentTurnResult> {
   const message = input.message.trim();
   if (!message || message.length > 2_000) throw new Error("message is invalid");
   const context = await deps.getContext(input.actorId, input.claimId);
+  if (deps.searchPolicy && /政策|制度|标准|报销规定/.test(message)) {
+    try { const citations = await deps.searchPolicy(message); return citations.length ? { reply: "以下为已同步制度中的相关依据，请以引用原文为准。", clarifications: [], proposals: [], citations } : { reply: "当前没有可供引用的已同步报销政策，请以公司财务制度为准。", clarifications: [], proposals: [], citations: [] }; }
+    catch { return { reply: "政策检索暂不可用，请稍后重试或查阅公司财务制度。", clarifications: [], proposals: [], citations: [] }; }
+  }
   const raw = await deps.model.decide({ message, claimId: input.claimId, summary: { ...context.summary, allowedTargets: context.allowedTargets }, issues: context.issues });
   const parsed = decisionSchema.safeParse(raw);
   if (!parsed.success) {

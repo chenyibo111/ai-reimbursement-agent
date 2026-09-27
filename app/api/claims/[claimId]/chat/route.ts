@@ -5,6 +5,9 @@ import { createPrismaAuditEventWriter } from "@/src/application/audit-event";
 import { buildAgentContext } from "@/src/application/build-agent-context";
 import { getClaimSummary } from "@/src/application/get-claim-summary";
 import { runAgentTurn } from "@/src/application/run-agent-turn";
+import { searchPolicyKnowledge } from "@/src/application/search-policy-knowledge";
+import { createEmbeddingProvider } from "@/src/infrastructure/embedding/embedding-provider-factory";
+import { PrismaPolicyKnowledgeRepository } from "@/src/infrastructure/prisma/policy-knowledge-repository";
 import { formatProposalValue, type AgentProposalField } from "@/src/domain/agent-proposal";
 import { createChatModel } from "@/src/infrastructure/model/chat-model-factory";
 import { ChatModelError } from "@/src/infrastructure/model/openai-compatible-chat-model";
@@ -28,6 +31,7 @@ export async function POST(request: Request, context: { params: Promise<{ claimI
       { actorId, claimId, message: body.message },
       {
         model: createChatModel(loadConfig(process.env)),
+        searchPolicy: loadConfig(process.env).embedding ? (query) => searchPolicyKnowledge({ query, limit: 5 }, { embeddings: createEmbeddingProvider(loadConfig(process.env)), chunks: new PrismaPolicyKnowledgeRepository(prisma) }) : undefined,
         getContext: async (actor, id) => {
           const summary = await getClaimSummary(actor, id, { claims });
           const draft = await prisma.claimDraft.findUnique({ where: { id }, include: { receipts: true, expenseItems: true, validationResults: true } });

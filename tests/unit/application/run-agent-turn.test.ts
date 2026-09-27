@@ -37,3 +37,8 @@ it("rejects unavailable model proposals without creating a field mutation", asyn
   expect(result.proposals).toEqual([]);
   expect(append).toHaveBeenCalledWith(expect.objectContaining({ type: "MODEL_RESPONSE_REJECTED" }));
 });
+
+it("returns only server-approved citations for a policy question", async () => {
+  const result = await runAgentTurn({ actorId: "employee-1", claimId: "claim-1", message: "报销政策是什么" }, { model: { decide: async () => { throw new Error("must not call model"); } }, getContext: async () => ({ summary: { purpose: null, totalAmountCents: 0, expenses: [] }, issues: [], allowedTargets: [], targetMap: {}, claimVersion: 1 }), createProposal: async () => { throw new Error("must not create"); }, audit: { append: async () => undefined }, searchPolicy: async () => [{ id: "safe", title: "制度", url: "https://example", excerpt: "住宿上限", headingPath: [] }] });
+  expect(result).toMatchObject({ proposals: [], citations: [{ id: "safe" }] });
+});
