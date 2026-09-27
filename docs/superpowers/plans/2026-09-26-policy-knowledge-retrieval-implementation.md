@@ -17,7 +17,7 @@
 | Task | Status | Evidence |
 |---|---|---|
 | Task 1: pgvector、Embedding Provider 与容器运行边界 | Complete | 固定 1024 维配置、Fixture/HTTP Provider、内部 BGE-M3 服务、pgvector PostgreSQL 16 镜像与可选 GPU 覆盖已完成；聚焦测试 10/10、`npx tsc --noEmit` 与 `docker compose config --quiet` 通过。 |
-| Task 2: 政策来源、快照、向量数据与飞书读取边界 | Not started | 等待 Task 1 基础设施。 |
+| Task 2: 政策来源、快照、向量数据与飞书读取边界 | Complete | 受控 Docx/Wiki URL、飞书读取客户端、pgvector 来源/快照/切片迁移与参数化仓储已完成；聚焦测试 12/12、类型检查及专用测试库迁移通过。 |
 | Task 3: 安全同步用例、管理员来源 API 与 Worker | Not started | 等待来源持久化。 |
 | Task 4: 检索、可验证引用与 Agent/飞书问答接入 | Not started | 等待安全同步与活动快照。 |
 | Task 5: 管理界面、部署文档与完整验证 | Not started | 等待前序能力。 |
@@ -117,27 +117,27 @@ git commit -m "feat: add local embedding service"
 - Produces: `parsePolicySourceUrl(value: string): PolicySourceLocator`; `FeishuPolicyDocumentClient.read(locator): Promise<ReadPolicyDocument>`; `PolicyKnowledgeRepository` methods `createSource`, `getEnabledSourceForSync`, `stageSnapshot`, `activateSnapshot`, `searchChunks`.
 - Consumes: policy administrator checks from the prerequisite plan and `EmbeddingProvider` dimensions from Task 1.
 
-- [ ] **Step 1: Write failing parser/client/repository tests**
+- [x] **Step 1: Write failing parser/client/repository tests**
 
 Test accepted Feishu docx and Wiki URLs, rejected hosts/tokens/query surprises, source enable state, relation ordering, snapshot activation, previous-snapshot retention, fixed-dimension vector persistence, and parameterized search behavior.
 
-- [ ] **Step 2: Run the focused tests to verify they fail**
+- [x] **Step 2: Run the focused tests to verify they fail**
 
 Run: `npm run test -- tests/unit/domain/policy-source.test.ts tests/unit/infrastructure/feishu-policy-document-client.test.ts tests/integration/policy-knowledge-repository.test.ts`
 
 Expected: FAIL because policy knowledge persistence and client do not exist.
 
-- [ ] **Step 3: Implement source parsing, schema and read client**
+- [x] **Step 3: Implement source parsing, schema and read client**
 
 Add source/snapshot/chunk tables, `CREATE EXTENSION IF NOT EXISTS vector`, a cosine HNSW index and an `Unsupported("vector(1024)")` Prisma field or equivalent migration-safe representation. Keep vector inserts/searches in repository methods using parameterized raw queries. Build a Feishu client that accepts only parsed locators and returns normalized title, revision, ordered heading/paragraph blocks, and canonical source URL; never logs tokens or full body. Treat a future non-1024 model as a separate schema migration and full reindex, never as a runtime configuration toggle.
 
-- [ ] **Step 4: Run focused tests and database migration checks**
+- [x] **Step 4: Run focused tests and database migration checks**
 
 Run: `$testDatabaseUrl = $env:TEST_DATABASE_URL; if (-not $testDatabaseUrl) { throw "TEST_DATABASE_URL is required" }; $env:DATABASE_URL = $testDatabaseUrl; npm run test -- tests/unit/domain/policy-source.test.ts tests/unit/infrastructure/feishu-policy-document-client.test.ts tests/integration/policy-knowledge-repository.test.ts; npx prisma migrate deploy`
 
 Expected: PASS against the dedicated test database; vector extension and index are present without rebuilding existing PostgreSQL data.
 
-- [ ] **Step 5: Commit policy knowledge persistence**
+- [x] **Step 5: Commit policy knowledge persistence**
 
 ```bash
 git add prisma src/domain src/infrastructure tests

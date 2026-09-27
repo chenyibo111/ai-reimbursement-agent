@@ -60,6 +60,17 @@ enum PolicyRuleType {
   CATEGORY_REQUIRED_FIELD
 }
 
+enum PolicySourceType {
+  FEISHU_DOCX
+  FEISHU_WIKI
+}
+
+enum PolicySnapshotStatus {
+  STAGED
+  ACTIVE
+  ARCHIVED
+}
+
 model Employee {
   id                  String               @id
   displayName         String
@@ -278,4 +289,53 @@ model PolicyAuditEvent {
   createdAt       DateTime      @default(now())
 
   @@index([policyVersionId, createdAt])
+}
+
+model PolicySource {
+  id                    String               @id @default(cuid())
+  type                  PolicySourceType
+  canonicalUrl          String               @unique
+  resourceToken         String               @unique
+  title                 String
+  enabled               Boolean              @default(true)
+  createdByEmployeeId   String
+  lastSuccessfulSyncAt  DateTime?
+  lastFailureCode       String?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  snapshots             PolicyDocumentSnapshot[]
+
+  @@index([enabled, updatedAt])
+}
+
+model PolicyDocumentSnapshot {
+  id              String               @id @default(cuid())
+  sourceId        String
+  source          PolicySource         @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  status          PolicySnapshotStatus @default(STAGED)
+  sourceRevision  String
+  contentHash     String
+  title           String
+  blocks          Json
+  createdAt       DateTime             @default(now())
+  activatedAt     DateTime?
+  chunks          PolicyChunk[]
+
+  @@unique([sourceId, sourceRevision])
+  @@index([sourceId, status, createdAt])
+}
+
+model PolicyChunk {
+  id          String                 @id @default(cuid())
+  snapshotId  String
+  snapshot    PolicyDocumentSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  sequence    Int
+  headingPath String[]               @default([])
+  content     String
+  sourceAnchor String?
+  embedding   Unsupported("vector(1024)")?
+  createdAt   DateTime               @default(now())
+
+  @@unique([snapshotId, sequence])
+  @@index([snapshotId, sequence])
 }
