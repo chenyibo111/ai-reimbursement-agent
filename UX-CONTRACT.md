@@ -13,6 +13,7 @@
 |---|---|---|---|
 | 草稿、票据、提交生命周期 | `docs/superpowers/specs/2026-09-20-ai-reimbursement-agent-design.md` | 产品与技术设计 | 2026-09-23 |
 | 会话和员工归属 | `src/server/session.ts`、`src/server/authorization.ts` | 服务端契约 | 2026-09-23 |
+| 跨渠道私有会话与受控办理 | `docs/superpowers/specs/2026-09-27-cross-channel-agent-conversation-design.md`、`app/api/conversations/private/*` | 产品与 API 契约 | 2026-09-27 |
 
 ## Visual contract
 
@@ -32,7 +33,8 @@
 | CRUD | `/api/claims` 路由 | 服务端 API | 创建草稿 / 更新字段 / 提交 | 完整流程 E2E |
 | 政策管理 | `/api/admin/policies` 路由与 `src/ui/policy-version-editor.tsx` | 服务端政策版本与白名单授权 | 创建草稿 / 保存规则 / 发布版本 | 政策管理 E2E |
 | 政策知识来源 | `/api/admin/policy-sources` 路由与 `src/ui/policy-source-manager.tsx` | 服务端来源、快照与白名单授权 | 添加 / 停用 / 重新启用 / 手动同步 | 来源管理 E2E |
-| 政策问答依据 | `src/ui/claim-chat.tsx` 的原生 `<details>` 证据卡 | `/api/claims/[claimId]/chat` 返回的服务端检索引用 | 收起 / 展开原文片段 | 单元测试、浏览器键盘与窄屏复核 |
+| 私有 Agent 会话 | `src/ui/agent-conversation-widget.tsx` | `/api/conversations/private/*` 与服务端会话归属 | 折叠 / 展开 / 附件 / 确认提交 | 单元测试、浏览器键盘与窄屏复核 |
+| 政策问答依据 | `src/ui/agent-conversation-widget.tsx` 的原生 `<details>` 证据卡 | 已保存的服务端检索引用快照 | 收起 / 展开原文片段 | 单元测试、浏览器键盘与窄屏复核 |
 
 ## Flow ledger
 
@@ -48,6 +50,9 @@
 | 管理知识来源 | 管理员添加、停用或重新启用来源 | 当前来源的操作按钮禁用 | 停留来源管理页 | 页面内成功状态与最新来源状态 | 保留来源及上一次成功快照，显示安全失败原因 |
 | 同步知识来源 | 管理员手动同步已启用来源 | 当前来源的操作按钮禁用 | 停留来源管理页 | 显示切片数或原文未变化 | 保留上一次成功快照，显示安全失败原因 |
 | 查看政策问答依据 | 展开“检索依据” | 无异步请求 | 停留当前工作台 | 展示章节、匹配度、命中原文与原文链接 | 无命中时不显示依据卡；原文链接在新标签页打开 |
+| 私有 Agent 问答 | 右下角“报销助理” | 发送按钮禁用，保留输入 | 停留当前页面 | 刷新已保存的私有历史与依据 | 保留输入并显示可重新加载的页面内错误 |
+| 对话中上传票据 | 助理面板的“上传票据” | 操作按钮禁用 | 停留当前页面 | 刷新 Intake，必要时显示工作台链接 | 原文件不被误报为成功；显示服务端安全错误 |
+| 对话确认提交 | 仅 `READY_TO_SUBMIT` 的“确认提交” | 提交按钮禁用 | 停留当前页面 | 以服务端提交结果刷新 Intake | 服务端重新校验后显示可恢复错误，不显示乐观提交状态 |
 
 ## Async and resilience
 
