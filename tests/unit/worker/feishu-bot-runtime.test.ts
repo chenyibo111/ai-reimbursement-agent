@@ -82,7 +82,7 @@ it("keeps a completed business event processed when sending the reply fails", as
       markProcessed: async () => { calls.processed += 1; },
       markRetryableFailure: async () => { calls.retryable += 1; },
     },
-    processEvent: async () => ({ kind: "CLAIM_LINKED", claimId: "claim-1", replyText: "草稿链接" }),
+    processEvent: async () => ({ kind: "AGENT_REPLIED", claimId: "claim-1", replyText: "草稿链接" }),
     replyText: async () => { throw new Error("provider body must not escape"); },
   });
 

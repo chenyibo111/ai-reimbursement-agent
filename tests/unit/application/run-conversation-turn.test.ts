@@ -94,6 +94,24 @@ it("creates an Intake only for an explicit start command and persists an assista
   expect(appendMessage).toHaveBeenCalledTimes(2);
 });
 
+it("does not expose or replace an Intake that belongs to another conversation", async () => {
+  const { deps, createClaim, uploadReceipt } = createDeps();
+  const foreign = { id: "intake-private", employeeId: "employee-1", conversationId: "private-conversation", status: "COLLECTING" as const, claimId: "claim-private", collectedFields: {}, pendingFields: ["purpose"], submissionToken: null };
+  deps.conversations.getCurrentIntake = async () => foreign;
+  deps.conversations.createIntake = async () => { throw new Error("active intake exists"); };
+
+  await expect(runConversationTurn({ actorId: "employee-1", conversationId: "group-conversation", channel: "FEISHU", message: "开始报销" }, deps)).resolves.toMatchObject({
+    intake: null,
+    reply: expect.stringContaining("另一会话"),
+  });
+  await expect(runConversationTurn({ actorId: "employee-1", conversationId: "group-conversation", channel: "FEISHU", message: "上传票据", attachment: { filename: "receipt.jpg", mimeType: "image/jpeg", bytes: new Uint8Array([1]) } }, deps)).resolves.toMatchObject({
+    intake: null,
+    reply: expect.stringContaining("另一会话"),
+  });
+  expect(createClaim).not.toHaveBeenCalled();
+  expect(uploadReceipt).not.toHaveBeenCalled();
+});
+
 it("writes only allowlisted Intake fields through the claim field use case", async () => {
   const { deps, updatePurpose, getIntake } = createDeps({
     model: { decideConversation: async () => ({ action: "COLLECT_FIELDS" as const, reply: "已记录事由。", fields: { purpose: "客户拜访" } }) },

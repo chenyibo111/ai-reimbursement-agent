@@ -19,7 +19,7 @@ type IntakeRecord = {
 export type ConversationStore = {
   getConversationByIdOrThrow(id: string): Promise<ConversationRecord>;
   listMessages(input: { conversationId: string; limit?: number }): Promise<ConversationMessage[]>;
-  appendMessage(input: { conversationId: string; role: AgentMessageRole; channel: AgentMessageChannel; text: string; citations?: Record<string, unknown>[]; result?: Record<string, unknown> }): Promise<unknown>;
+  appendMessage(input: { conversationId: string; role: AgentMessageRole; channel: AgentMessageChannel; channelMessageId?: string | null; text: string; citations?: Record<string, unknown>[]; result?: Record<string, unknown> }): Promise<unknown>;
   getCurrentIntake(employeeId: string): Promise<IntakeRecord | null>;
   createIntake(input: { employeeId: string; conversationId: string; claimId?: string | null; collectedFields?: Record<string, unknown>; pendingFields?: string[]; submissionToken?: string | null }): Promise<IntakeRecord>;
   updateIntake(input: { id: string; status?: ReimbursementIntakeStatus; claimId?: string | null; collectedFields?: Record<string, unknown>; pendingFields?: string[]; submissionToken?: string | null; lastUserConfirmationAt?: Date | null }): Promise<IntakeRecord>;
@@ -46,12 +46,12 @@ export type ConversationTurnResult = {
 };
 
 export async function runConversationTurn(
-  input: { actorId: string; conversationId: string; channel: AgentMessageChannel; message: string; attachment?: { filename: string; mimeType: string; bytes: Uint8Array } },
+  input: { actorId: string; conversationId: string; channel: AgentMessageChannel; channelMessageId?: string; message: string; attachment?: { filename: string; mimeType: string; bytes: Uint8Array } },
   deps: RunConversationTurnDeps,
 ): Promise<ConversationTurnResult> {
   const message = normalizeMessage(input.message);
   const conversation = await deps.conversations.getConversationByIdOrThrow(input.conversationId);
-  await deps.conversations.appendMessage({ conversationId: conversation.id, role: "USER", channel: input.channel, text: message });
+  await deps.conversations.appendMessage({ conversationId: conversation.id, role: "USER", channel: input.channel, channelMessageId: input.channelMessageId, text: message });
   const active = await getConversationIntake(input.actorId, conversation.id, deps.conversations);
 
   const attachment = input.attachment;
@@ -77,7 +77,17 @@ async function handleAttachment(
 ): Promise<ConversationTurnResult> {
   if (!deps.createClaim || !deps.preflightAttachment || !deps.uploadReceipt) throw new Error("attachment handling is unavailable");
   await deps.preflightAttachment(input.attachment);
-  let intake = active ?? await deps.conversations.createIntake({ employeeId: input.actorId, conversationId: input.conversationId, pendingFields: ["purpose"] });
+  let intake = active;
+  if (!intake) {
+    try {
+      intake = await deps.conversations.createIntake({ employeeId: input.actorId, conversationId: input.conversationId, pendingFields: ["purpose"] });
+    } catch (error) {
+      if (error instanceof Error && error.message === "active intake exists") {
+        return persistReply(input, null, "你在另一会话已有一项进行中的报销办理，请回到原会话继续。", [], deps.conversations);
+      }
+      throw error;
+    }
+  }
   if (!intake.claimId) {
     const claim = await deps.createClaim({ actorId: input.actorId });
     intake = await deps.conversations.updateIntake({ id: intake.id, claimId: claim.id });
@@ -99,11 +109,19 @@ async function startIntake(
   if (active) {
     return persistReply(input, active, "当前已有一项进行中的报销办理，请继续补充信息或先完成提交。", [], deps.conversations);
   }
-  const intake = await deps.conversations.createIntake({
-    employeeId: input.actorId,
-    conversationId: input.conversationId,
-    pendingFields: ["purpose"],
-  });
+  let intake: IntakeRecord;
+  try {
+    intake = await deps.conversations.createIntake({
+      employeeId: input.actorId,
+      conversationId: input.conversationId,
+      pendingFields: ["purpose"],
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "active intake exists") {
+      return persistReply(input, null, "你在另一会话已有一项进行中的报销办理，请回到原会话继续。", [], deps.conversations);
+    }
+    throw error;
+  }
   return persistReply(input, intake, "已开始新的报销办理。请上传票据，或先告诉我本次报销事由。", [], deps.conversations);
 }
 
