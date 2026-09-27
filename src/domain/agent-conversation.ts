@@ -14,6 +14,13 @@ export const activeReimbursementIntakeStatuses = ["COLLECTING", "READY_TO_SUBMIT
 
 export const privateConversationScopeKey = "private";
 
+export const conversationCollectedFieldNames = ["purpose", "expenseCategory", "participants", "projectCode"] as const;
+export type ConversationCollectedFieldName = (typeof conversationCollectedFieldNames)[number];
+
+export function isConversationCollectedFieldName(value: string): value is ConversationCollectedFieldName {
+  return (conversationCollectedFieldNames as readonly string[]).includes(value);
+}
+
 export function isActiveReimbursementIntake(status: ReimbursementIntakeStatus): boolean {
   return activeReimbursementIntakeStatuses.includes(status as (typeof activeReimbursementIntakeStatuses)[number]);
 }
