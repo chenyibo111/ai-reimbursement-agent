@@ -161,7 +161,10 @@ function claimUrl(publicAppUrl: string, claimId: string): string {
 
 function safeReply(agent: AgentTurnResult): string {
   const reply = agent.reply.trim().slice(0, 1_000) || "已生成补充建议。";
-  const citations = agent.citations?.slice(0, 3).map((citation) => `政策引用：${citation.title}\n${citation.url}`).join("\n") ?? "";
+  const citations = agent.citations?.slice(0, 3).map((citation) => {
+    const section = citation.headingPath.filter(Boolean).join(" > ");
+    return `政策依据：${citation.title}${section ? `（${section}）` : ""}`;
+  }).join("\n") ?? "";
   return citations ? `${reply}\n\n${citations}` : reply;
 }
 

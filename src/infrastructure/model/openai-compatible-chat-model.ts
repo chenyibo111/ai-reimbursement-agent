@@ -1,4 +1,4 @@
-import type { AgentIntent, ChatModel, ChatModelInput } from "@/src/infrastructure/model/chat-model";
+import type { AgentIntent, ChatModel, ChatModelInput, PolicyAnswerInput } from "@/src/infrastructure/model/chat-model";
 
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -56,6 +56,26 @@ export class OpenAiCompatibleChatModel implements ChatModel {
       throw new ChatModelError("AI 返回内容无法识别，请稍后重试。", "INVALID_RESPONSE");
     }
     return (result as { intent: AgentIntent }).intent;
+  }
+
+  async answerPolicy(input: PolicyAnswerInput): Promise<string> {
+    const result = await this.complete([
+      {
+        role: "system",
+        content: "你是企业报销制度问答助手。只依据用户提供的政策片段回答问题，不得编造金额、条件、例外、流程或制度外规则。片段不足以回答时，明确说明“已同步制度片段未包含该信息”。回答要简洁、直接，不要输出链接、引用标题、Markdown 或 JSON 以外的内容。只返回 JSON：{answer: string}。",
+      },
+      {
+        role: "user",
+        content: JSON.stringify({ question: input.question, sources: input.sources }),
+      },
+    ]);
+    const answer = result && typeof result === "object" && !Array.isArray(result)
+      ? (result as { answer?: unknown }).answer
+      : undefined;
+    if (typeof answer !== "string" || !answer.trim()) {
+      throw new ChatModelError("AI 返回内容无法识别，请稍后重试。", "INVALID_RESPONSE");
+    }
+    return answer.trim().slice(0, 1_000);
   }
 
   private async complete(messages: Array<{ role: "system" | "user"; content: string }>): Promise<unknown> {

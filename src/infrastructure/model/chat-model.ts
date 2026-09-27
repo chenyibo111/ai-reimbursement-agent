@@ -7,7 +7,17 @@ export type ChatModelInput = {
 
 export type AgentIntent = "POLICY_QUERY" | "CLAIM_ACTION" | "OTHER";
 
+export type PolicyAnswerInput = {
+  question: string;
+  sources: Array<{
+    title: string;
+    excerpt: string;
+    headingPath: string[];
+  }>;
+};
+
 export type ChatModel = {
   decide(input: ChatModelInput): Promise<unknown>;
   classifyIntent?(message: string): Promise<AgentIntent>;
+  answerPolicy?(input: PolicyAnswerInput): Promise<string>;
 };

@@ -36,7 +36,11 @@ export async function runAgentTurn(input: { actorId: string; claimId: string; me
   const hasPolicyKeywords = /政策|制度|标准|报销规定|报销规则/.test(message);
   const modelClassifiesPolicy = !hasPolicyKeywords && deps.searchPolicy && await isPolicyQuery(message, deps.model);
   if (deps.searchPolicy && (hasPolicyKeywords || modelClassifiesPolicy)) {
-    try { const citations = await deps.searchPolicy(message); return citations.length ? { reply: "以下为已同步制度中的相关依据，请以引用原文为准。", clarifications: [], proposals: [], citations } : { reply: "当前没有可供引用的已同步报销政策，请以公司财务制度为准。", clarifications: [], proposals: [], citations: [] }; }
+    try {
+      const citations = await deps.searchPolicy(message);
+      if (!citations.length) return { reply: "当前没有可供引用的已同步报销政策，请以公司财务制度为准。", clarifications: [], proposals: [], citations: [] };
+      return { reply: await answerPolicyQuestion(message, citations, deps.model), clarifications: [], proposals: [], citations };
+    }
     catch { return { reply: "政策检索暂不可用，请稍后重试或查阅公司财务制度。", clarifications: [], proposals: [], citations: [] }; }
   }
   const raw = await deps.model.decide({ message, claimId: input.claimId, summary: { ...context.summary, allowedTargets: context.allowedTargets }, issues: context.issues });
@@ -62,6 +66,19 @@ export async function runAgentTurn(input: { actorId: string; claimId: string; me
 
 async function isPolicyQuery(message: string, model: ChatModel): Promise<boolean> {
   try { return await model.classifyIntent?.(message) === "POLICY_QUERY"; } catch { return false; }
+}
+
+async function answerPolicyQuestion(message: string, citations: PolicyCitation[], model: ChatModel): Promise<string> {
+  try {
+    const answer = await model.answerPolicy?.({
+      question: message,
+      sources: citations.map(({ title, excerpt, headingPath }) => ({ title, excerpt, headingPath })),
+    });
+    if (answer?.trim()) return answer.trim().slice(0, 1_000);
+  } catch {
+    // The retrieval result remains usable even when the answer model is unavailable.
+  }
+  return "已找到相关制度依据，请以引用章节为准。";
 }
 
 function isAllowed(context: AgentContext, proposal: AgentProposalInput) {

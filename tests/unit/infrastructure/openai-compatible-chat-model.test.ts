@@ -41,6 +41,23 @@ describe("OpenAiCompatibleChatModel", () => {
     expect(body.messages[1].content).toContain("酒店住宿上限是多少");
   });
 
+  it("answers a policy question only from the supplied policy excerpts", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: '{"answer":"住宿费用上限为每晚 500 元。"}' } }],
+    }), { status: 200 }));
+    const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "top-secret", fetchImpl });
+
+    await expect(model.answerPolicy({
+      question: "住宿费上限是多少？",
+      sources: [{ title: "差旅制度", excerpt: "一线城市住宿费用上限为每晚 500 元。", headingPath: ["差旅", "住宿"] }],
+    })).resolves.toBe("住宿费用上限为每晚 500 元。");
+
+    const [, request] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(request.body));
+    expect(body.messages[1].content).toContain("一线城市住宿费用上限为每晚 500 元。");
+    expect(body.messages[1].content).not.toContain("https://");
+  });
+
   it.each([
     ["unauthorized", new Response("provider detail", { status: 401 })],
     ["empty choices", new Response(JSON.stringify({ choices: [] }), { status: 200 })],
