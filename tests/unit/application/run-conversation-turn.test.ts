@@ -41,6 +41,7 @@ function createDeps(overrides: Partial<Record<string, unknown>> = {}) {
       conversations,
       model: { decideConversation: async () => ({ action: "ANSWER" as const, reply: "好的" }) },
       createClaim,
+      preflightAttachment: async () => undefined,
       uploadReceipt,
       updatePurpose,
       requestSubmission,

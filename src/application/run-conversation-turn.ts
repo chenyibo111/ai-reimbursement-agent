@@ -30,6 +30,7 @@ export type RunConversationTurnDeps = {
   model: Pick<ChatModel, "classifyIntent" | "answerPolicy" | "decideConversation">;
   searchPolicy?: (query: string) => Promise<PolicyCitation[]>;
   createClaim?: (input: { actorId: string }) => Promise<{ id: string; version: number }>;
+  preflightAttachment?: (input: { filename: string; mimeType: string; bytes: Uint8Array }) => Promise<void>;
   uploadReceipt?: (input: { actorId: string; claimId: string; filename: string; mimeType: string; bytes: Uint8Array }) => Promise<{ id: string }>;
   extractReceipt?: (input: { actorId: string; claimId: string; receiptId: string }) => Promise<unknown>;
   updatePurpose?: (input: { actorId: string; claimId: string; value: string }) => Promise<{ version: number }>;
@@ -74,7 +75,8 @@ async function handleAttachment(
   active: IntakeRecord | null,
   deps: RunConversationTurnDeps,
 ): Promise<ConversationTurnResult> {
-  if (!deps.createClaim || !deps.uploadReceipt) throw new Error("attachment handling is unavailable");
+  if (!deps.createClaim || !deps.preflightAttachment || !deps.uploadReceipt) throw new Error("attachment handling is unavailable");
+  await deps.preflightAttachment(input.attachment);
   let intake = active ?? await deps.conversations.createIntake({ employeeId: input.actorId, conversationId: input.conversationId, pendingFields: ["purpose"] });
   if (!intake.claimId) {
     const claim = await deps.createClaim({ actorId: input.actorId });

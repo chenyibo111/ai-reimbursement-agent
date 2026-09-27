@@ -48,6 +48,7 @@ it("keeps policy-only turns out of Intake and creates one persisted agent claim 
     },
     searchPolicy: async () => [{ id: "citation-1", title: "差旅制度", url: "https://example.test/doc", headingPath: ["住宿"], excerpt: "住宿上限", score: 0.9 }],
     createClaim: async ({ actorId }: { actorId: string }) => createClaim({ actorId }),
+    preflightAttachment: async () => undefined,
     uploadReceipt,
   };
 

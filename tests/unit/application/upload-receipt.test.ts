@@ -1,7 +1,18 @@
 import { expect, it } from "vitest";
 import { PDFDocument } from "pdf-lib";
 
-import { uploadReceipt } from "@/src/application/upload-receipt";
+import { preflightReceiptUpload, uploadReceipt } from "@/src/application/upload-receipt";
+
+it("scans a safe attachment before a claim is created", async () => {
+  const scanner = { scanned: 0 };
+
+  await expect(preflightReceiptUpload({
+    mimeType: "image/png",
+    bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+  }, { scan: async () => { scanner.scanned += 1; return "CLEAN" as const; } })).resolves.toBeUndefined();
+
+  expect(scanner.scanned).toBe(1);
+});
 
 it("rejects a file whose signature does not match its declared type", async () => {
   const calls = { stored: 0, created: 0, scanned: 0 };
