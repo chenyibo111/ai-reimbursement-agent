@@ -160,7 +160,9 @@ function claimUrl(publicAppUrl: string, claimId: string): string {
 }
 
 function safeReply(agent: AgentTurnResult): string {
-  return agent.reply.trim().slice(0, 1_000) || "已生成补充建议。";
+  const reply = agent.reply.trim().slice(0, 1_000) || "已生成补充建议。";
+  const citations = agent.citations?.slice(0, 3).map((citation) => `政策引用：${citation.title}\n${citation.url}`).join("\n") ?? "";
+  return citations ? `${reply}\n\n${citations}` : reply;
 }
 
 function assertEventMatchesMessage(event: StoredInboundEvent, message: FeishuMessageContent) {

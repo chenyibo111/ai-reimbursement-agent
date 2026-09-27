@@ -83,6 +83,12 @@ POLICY_ADMIN_FEISHU_OPEN_IDS="ou_policy_admin"
 
 每次提交都会把当时使用的政策版本和命中的规则结果写入不可变 `SubmissionSnapshot`。后来发布新制度不会改写已经提交的报销单。
 
+## 政策知识库
+
+管理员在 `/admin/policy-sources` 显式登记已获授权的飞书 Docx 或 Wiki 链接，再手动同步。同步只读取该来源；内容不变不重嵌入，失败不会替换上一次活动快照。员工询问政策时只能看到服务端检索出的原文引用；没有证据时系统不会猜测制度结论。
+
+本地使用向量服务时启动 `docker compose --profile knowledge up -d embedding-service`。服务仅在 Docker 内部网络开放 8080，模型下载保存于 `embedding-models` 命名卷。GPU 环境可追加 `-f docker-compose.gpu.yml`；生产部署应备份 PostgreSQL 后执行迁移，并将 `EMBEDDING_BASE_URL` 指向内部受控服务。
+
 ## 后续流程
 
 AI 对话只会提出字段建议，员工在工作台点击“接受并写入”后才会更新草稿；建议确认受草稿版本保护并记录审计。聊天框也可以上传票据，使用与票据区域完全相同的安全扫描、私有存储和 OCR 链路。

@@ -29,6 +29,10 @@ POLICY_ADMIN_FEISHU_OPEN_IDS="ou_finance_a,ou_finance_b"
 
 政策监控另包括：管理员 `403` 比例、草稿保存/发布版本冲突、发布审计事件、政策阻断与预警数量、以及无有效发布政策的持续时长。日志不得记录飞书 App Secret、完整规则配置、员工票据或向量内容。
 
+## 政策知识库运行
+
+先备份 PostgreSQL，再部署 pgvector 迁移；不得重建 `postgres-data` 卷。Embedding 服务使用 `knowledge` Compose profile 和 `embedding-models` 缓存卷，且不得发布主机端口。首次同步会下载 BGE-M3 模型；GPU 可使用 `docker-compose.gpu.yml`，CPU 部署不需要业务代码变更。来源同步失败时保留最近活动快照，排查时只记录来源 ID 与安全错误分类，不记录文档正文、token 或向量。
+
 ## 飞书机器人运行
 
 启动前执行 `npm run feishu:worker` 所需的环境校验：`FEISHU_BOT_ENABLED=true`、飞书 App 凭据、机器人 `open_id`、`APP_PUBLIC_URL`、数据库、MinIO、ClamAV 和 OCR 地址均必须完整。生产环境的 `APP_PUBLIC_URL` 必须为 HTTPS。

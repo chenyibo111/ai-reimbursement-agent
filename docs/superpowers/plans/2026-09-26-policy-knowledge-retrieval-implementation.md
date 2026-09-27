@@ -163,27 +163,27 @@ git commit -m "feat: store policy document snapshots"
 - Consumes: `PolicyKnowledgeRepository`, `FeishuPolicyDocumentClient`, `EmbeddingProvider`, and `isPolicyAdmin`.
 - Produces: `syncPolicySource(input: { actorId: string; sourceId: string }, deps): Promise<PolicySyncResult>` and `npm run policy:sync` worker entrypoint.
 
-- [ ] **Step 1: Write failing synchronization and API tests**
+- [x] **Step 1: Write failing synchronization and API tests**
 
 Cover non-admin access, bad request body, disabled source, unchanged content (zero embedding calls), changed content (new snapshot activation), read failure, split failure, second embedding batch failure, dimension mismatch and manual retry retaining the prior searchable snapshot.
 
-- [ ] **Step 2: Run the focused tests to verify they fail**
+- [x] **Step 2: Run the focused tests to verify they fail**
 
 Run: `npm run test -- tests/unit/application/split-policy-document.test.ts tests/unit/application/sync-policy-source.test.ts tests/integration/api/policy-source-routes.test.ts tests/integration/policy-knowledge-repository.test.ts`
 
 Expected: FAIL because no sync application service or routes exist.
 
-- [ ] **Step 3: Implement snapshot-safe synchronization**
+- [x] **Step 3: Implement snapshot-safe synchronization**
 
 Split only at normalized heading/paragraph boundaries using fixed maximum/minimum sizes and overlap decided in constants. Hash normalized content, return early on no change, stage a new snapshot, embed in bounded batches, and activate it only after all vectors are written. On any error, record a safe failure category and preserve the prior active snapshot. The worker must load `.env.local` like the existing Feishu worker, process only explicitly requested/enabled sources, and never accept source URLs from chat input.
 
-- [ ] **Step 4: Run focused tests and worker configuration test**
+- [x] **Step 4: Run focused tests and worker configuration test**
 
 Run: `npm run test -- tests/unit/application/split-policy-document.test.ts tests/unit/application/sync-policy-source.test.ts tests/integration/api/policy-source-routes.test.ts tests/integration/policy-knowledge-repository.test.ts && npx tsc --noEmit`
 
 Expected: PASS; a failed reindex cannot replace the previous searchable content.
 
-- [ ] **Step 5: Commit synchronization flow**
+- [x] **Step 5: Commit synchronization flow** (`5ba1ef9`)
 
 ```bash
 git add app src package.json tests
@@ -212,27 +212,27 @@ git commit -m "feat: sync approved policy sources"
 - Consumes: Task 1 `EmbeddingProvider`, Task 2 chunk search, Task 3 active snapshots.
 - Produces: `searchPolicyKnowledge(input: { query: string; limit: number }): Promise<PolicyCitation[]>`; `AgentTurnResult.citations`; chat model output schema with `citationIds: string[]` restricted to supplied context.
 
-- [ ] **Step 1: Write failing retrieval and conversation tests**
+- [x] **Step 1: Write failing retrieval and conversation tests**
 
 Assert vector search is limited to active chunks, respects threshold/limit, returns title/URL/excerpt only, and excludes inactive/other-source chunks. Assert prompt-injection-like document text is sent as delimited data; model citation IDs outside results are dropped; no-results and embedding/model failures return the approved Chinese fallback; a bot policy question follows the same evidence path.
 
-- [ ] **Step 2: Run the focused tests to verify they fail**
+- [x] **Step 2: Run the focused tests to verify they fail**
 
 Run: `npm run test -- tests/unit/application/search-policy-knowledge.test.ts tests/unit/application/run-agent-turn.test.ts tests/integration/api/claim-chat.test.ts tests/integration/feishu-bot-worker.test.ts`
 
 Expected: FAIL because policy retrieval and citation validation are absent.
 
-- [ ] **Step 3: Implement retrieval and citation enforcement**
+- [x] **Step 3: Implement retrieval and citation enforcement**
 
 Embed the query, search active chunks with a fixed maximum and threshold, construct a data-only `policyEvidence` context, and never put document text into the model system instruction. Extend the model response schema with bounded citation IDs; service-side intersect them with retrieved IDs before returning. When no validated citation remains for a policy answer, return exactly the safe no-evidence response and no invented policy conclusion. Reuse this service from Web and Feishu processing.
 
-- [ ] **Step 4: Run focused tests, lint and type check**
+- [x] **Step 4: Run focused tests, lint and type check**
 
 Run: `npm run test -- tests/unit/application/search-policy-knowledge.test.ts tests/unit/application/run-agent-turn.test.ts tests/integration/api/claim-chat.test.ts tests/integration/feishu-bot-worker.test.ts && npm run lint && npx tsc --noEmit`
 
 Expected: PASS; core Agent field proposals remain unchanged when the user is not asking a policy question.
 
-- [ ] **Step 5: Commit RAG conversation integration**
+- [x] **Step 5: Commit RAG conversation integration** (`d2d8ed2`)
 
 ```bash
 git add app src tests
@@ -256,21 +256,21 @@ git commit -m "feat: answer policy questions with citations"
 - Consumes: Tasks 1–4 and the policy administrator page from the prerequisite plan.
 - Produces: source add/enable/disable/sync UI and deployment/operator runbook.
 
-- [ ] **Step 1: Write the failing source-management browser test**
+- [x] **Step 1: Write source-management browser and API authorization tests**
 
 Cover ordinary employee no-access, administrator source URL validation, add/disable/re-enable, sync busy/success/failure state, last successful sync retention, and visible source/citation link in an employee policy answer.
 
-- [ ] **Step 2: Run the focused browser test to verify it fails**
+- [x] **Step 2: Run and correct the focused browser test**
 
 Run: `npm run test:e2e -- tests/e2e/policy-source-management.spec.ts`
 
 Expected: FAIL because the source-management page does not exist.
 
-- [ ] **Step 3: Implement source management and operations documentation**
+- [x] **Step 3: Implement source management and operations documentation**
 
 Build an accessible responsive source list/form that never renders full document bodies. Show source type, canonical link, enabled state, last successful sync, safe failure text and manual sync action. Document first model download, model cache backup, optional GPU Compose override, production internal networking, pgvector migration backup, required Feishu document/Wiki scopes, and rollback behavior.
 
-- [ ] **Step 4: Run all verification suites and Compose smoke checks**
+- [x] **Step 4: Run all verification suites and Compose smoke checks**
 
 Run: `npm run test && npm run lint && npx tsc --noEmit && npm run test:e2e && docker compose config`
 

@@ -10,12 +10,16 @@
    - `im:message:send_as_bot`
    - `im:resource`
    - `contact:user.base:readonly`（Web OAuth 继续使用）
+   - `docx:document:readonly`（同步已授权的飞书文档）
+   - `wiki:wiki:readonly`（解析并读取已授权的飞书知识库页面）
 3. 在「事件与回调」选择**长连接**，订阅 `im.message.receive_v1`。此模式不填写回调 URL、验证 Token 或加密 Key。
 4. 在「版本管理与发布」发布到测试企业；将机器人加入测试单聊或群聊。
 
 群聊仅响应明确 `@机器人` 的消息；不要开通 `im:message.group_msg`。机器人只会发送登录链接、进度和 Web 工作台链接，不会在飞书内确认建议、删除票据或提交报销单。
 
 机器人也不具备创建、编辑或发布报销政策的权限。即使消息中包含制度文本或“发布规则”指令，也只能引导员工或管理员回到 Web；可执行政策仍由 `/admin/policies` 的白名单管理员通过服务端会话发布。
+
+政策知识库也不会遍历飞书空间：管理员只能在 Web 中逐条录入已授权的 Docx 或 Wiki URL。应用需同时被授予该文档或知识库的阅读权限；Wiki 场景还需由知识库管理员按飞书的访问机制授予应用可读范围。同步失败不会覆盖已生效的政策快照。
 
 ## Worker 配置与运行
 

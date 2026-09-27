@@ -8,14 +8,17 @@ import { extractReceipt } from "@/src/application/extract-receipt";
 import { getClaimSummary } from "@/src/application/get-claim-summary";
 import { processFeishuEvent, type ProcessFeishuEventDeps } from "@/src/application/process-feishu-event";
 import { runAgentTurn } from "@/src/application/run-agent-turn";
+import { searchPolicyKnowledge } from "@/src/application/search-policy-knowledge";
 import { uploadReceipt } from "@/src/application/upload-receipt";
 import { formatProposalValue, type AgentProposalField } from "@/src/domain/agent-proposal";
 import { createReceiptExtractionProvider, createPaddleOcrClient } from "@/src/infrastructure/extraction/receipt-extraction-provider-factory";
+import { createEmbeddingProvider } from "@/src/infrastructure/embedding/embedding-provider-factory";
 import { createFeishuBotClient } from "@/src/infrastructure/feishu/feishu-bot-client";
 import { createChatModel } from "@/src/infrastructure/model/chat-model-factory";
 import { PrismaClaimRepository } from "@/src/infrastructure/prisma/claim-repository";
 import { createPrismaClient } from "@/src/infrastructure/prisma/client";
 import { FeishuBotRepository } from "@/src/infrastructure/prisma/feishu-bot-repository";
+import { PrismaPolicyKnowledgeRepository } from "@/src/infrastructure/prisma/policy-knowledge-repository";
 import { PrismaReceiptRepository } from "@/src/infrastructure/prisma/receipt-repository";
 import { createClamAvFileSafetyScanner } from "@/src/infrastructure/security/file-safety-scanner";
 import { createS3ObjectStore } from "@/src/infrastructure/storage/object-store";
@@ -67,6 +70,7 @@ function createProcessDeps(input: {
   repository: FeishuBotRepository;
   client: ReturnType<typeof createFeishuBotClient>;
 }): ProcessFeishuEventDeps {
+  const config = loadConfig(process.env);
   const claims = new PrismaClaimRepository(input.prisma);
   const audit = createPrismaAuditEventWriter(input.prisma);
   const objects = createS3ObjectStore({
@@ -83,7 +87,7 @@ function createProcessDeps(input: {
     client: input.client,
     createClaimDraft: (claimInput) => createClaimDraft(claimInput, { claims, audit }),
     runAgentTurn: (agentInput) => runAgentTurn(agentInput, {
-      model: createChatModel(loadConfig(process.env)),
+      model: createChatModel(config),
       getContext: async (actorId, claimId) => {
         const summary = await getClaimSummary(actorId, claimId, { claims });
         const draft = await input.prisma.claimDraft.findUnique({ where: { id: claimId }, include: { receipts: true, expenseItems: true, validationResults: true } });
@@ -93,6 +97,10 @@ function createProcessDeps(input: {
           issues: validateStoredClaim(draft),
         });
       },
+      searchPolicy: config.embedding ? (query) => searchPolicyKnowledge({ query, limit: 5 }, {
+        embeddings: createEmbeddingProvider(config),
+        chunks: new PrismaPolicyKnowledgeRepository(input.prisma),
+      }) : undefined,
       createProposal: async (proposal) => {
         const saved = await input.prisma.agentFieldProposal.create({
           data: {

@@ -94,7 +94,7 @@ export function PolicyVersionEditor() {
   if (forbidden) return <ForbiddenPage />;
 
   return <main className="claims-page policy-page">
-    <header className="claims-header"><Link href="/claims" className="brand">AI 报销 <span>Agent</span></Link><Link href="/policies" className="button-outline">员工政策页</Link></header>
+    <header className="claims-header"><Link href="/claims" className="brand">AI 报销 <span>Agent</span></Link><div className="policy-header-actions"><Link href="/admin/policy-sources" className="button-outline">知识来源</Link><Link href="/policies" className="button-outline">员工政策页</Link></div></header>
     <section className="policy-hero"><p className="eyebrow">政策管理员</p><h1>政策规则管理</h1><p>只允许发布受限的结构化规则。发布后不能直接修改，修改请创建新的草稿版本。</p></section>
     {error ? <p className="notice-error" role="alert">{error}</p> : null}{notice ? <p className="policy-status" role="status">{notice}</p> : null}
     <div className="policy-admin-grid">

@@ -132,3 +132,20 @@ it("keeps agent suggestions on the Web workspace without exposing proposal ident
   expect(result.replyText).not.toContain("接受");
   expect(result.replyText).not.toContain("提交");
 });
+
+it("includes only server-approved policy citations in a Feishu policy reply", async () => {
+  const { deps } = fixture({
+    runAgentTurn: async () => ({
+      reply: "以下为已同步制度中的相关依据，请以引用原文为准。",
+      clarifications: [],
+      proposals: [],
+      citations: [{ id: "chunk-1", title: "差旅制度", url: "https://acme.feishu.cn/docx/ABCdef0123456789#住宿", excerpt: "住宿上限 500 元", headingPath: ["住宿"] }],
+    }),
+  });
+
+  const result = await processFeishuEvent({ eventId: "event-1" }, deps);
+
+  if (result.kind !== "AGENT_REPLIED") throw new Error("agent reply expected");
+  expect(result.replyText).toContain("差旅制度");
+  expect(result.replyText).toContain("https://acme.feishu.cn/docx/ABCdef0123456789#住宿");
+});
