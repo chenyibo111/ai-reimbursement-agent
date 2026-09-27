@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 
 import { splitPolicyDocument } from "@/src/application/split-policy-document";
-import type { EmbeddingProvider } from "@/src/infrastructure/embedding/embedding-provider";
-import type { FeishuPolicyDocumentClient } from "@/src/infrastructure/feishu/feishu-policy-document-client";
+import { EmbeddingProviderError, type EmbeddingProvider } from "@/src/infrastructure/embedding/embedding-provider";
+import { FeishuPolicyDocumentClientError, type FeishuPolicyDocumentClient } from "@/src/infrastructure/feishu/feishu-policy-document-client";
 
 type SyncSource = { id: string; type: "FEISHU_DOCX" | "FEISHU_WIKI"; resourceToken: string; canonicalUrl: string; title: string };
 type SyncRepository = {
@@ -12,6 +12,13 @@ type SyncRepository = {
   activateSnapshot(input: { sourceId: string; snapshotId: string; now: Date }): Promise<void>;
   markSyncFailure(input: { sourceId: string; code: string }): Promise<void>;
 };
+
+export class PolicySourceSyncError extends Error {
+  constructor(readonly code: string) {
+    super(`政策来源同步失败：${code}`);
+    this.name = "PolicySourceSyncError";
+  }
+}
 
 export async function syncPolicySource(input: { actorId: string; sourceId: string }, deps: { sources: SyncRepository; documents: FeishuPolicyDocumentClient; embeddings: EmbeddingProvider; now: () => Date }) {
   const source = await deps.sources.getEnabledSourceForSync(input.sourceId);
@@ -27,8 +34,15 @@ export async function syncPolicySource(input: { actorId: string; sourceId: strin
     await deps.sources.activateSnapshot({ sourceId: source.id, snapshotId: snapshot.id, now: deps.now() });
     return { status: "SYNCED" as const, chunkCount: chunks.length };
   } catch (error) {
-    const code = error instanceof Error && error.message === "EMPTY_DOCUMENT" ? "EMPTY_DOCUMENT" : "EMBEDDING_FAILED";
+    const code = failureCode(error);
     await deps.sources.markSyncFailure({ sourceId: source.id, code });
-    throw new Error("policy source sync failed");
+    throw new PolicySourceSyncError(code);
   }
+}
+
+function failureCode(error: unknown): string {
+  if (error instanceof FeishuPolicyDocumentClientError) return `DOCUMENT_${error.code}`;
+  if (error instanceof EmbeddingProviderError) return `EMBEDDING_${error.code}`;
+  if (error instanceof Error && error.message === "EMPTY_DOCUMENT") return "EMPTY_DOCUMENT";
+  return "SYNC_FAILED";
 }
