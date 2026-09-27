@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { splitPolicyDocument } from "@/src/application/split-policy-document";
-import { EmbeddingProviderError, type EmbeddingProvider } from "@/src/infrastructure/embedding/embedding-provider";
+import { EmbeddingProviderError, MAX_EMBEDDING_BATCH_SIZE, type EmbeddingProvider } from "@/src/infrastructure/embedding/embedding-provider";
 import { FeishuPolicyDocumentClientError, type FeishuPolicyDocumentClient } from "@/src/infrastructure/feishu/feishu-policy-document-client";
 
 type SyncSource = { id: string; type: "FEISHU_DOCX" | "FEISHU_WIKI"; resourceToken: string; canonicalUrl: string; title: string };
@@ -29,7 +29,11 @@ export async function syncPolicySource(input: { actorId: string; sourceId: strin
     if (contentHash === await deps.sources.getLatestContentHash(source.id)) return { status: "UNCHANGED" as const, chunkCount: 0 };
     const chunks = splitPolicyDocument(document.blocks, { maxLength: 1600, minLength: 80 });
     if (!chunks.length) throw new Error("EMPTY_DOCUMENT");
-    const vectors = await deps.embeddings.embed({ texts: chunks.map((chunk) => chunk.content) });
+    const vectors: number[][] = [];
+    for (let offset = 0; offset < chunks.length; offset += MAX_EMBEDDING_BATCH_SIZE) {
+      const batch = chunks.slice(offset, offset + MAX_EMBEDDING_BATCH_SIZE);
+      vectors.push(...await deps.embeddings.embed({ texts: batch.map((chunk) => chunk.content) }));
+    }
     const snapshot = await deps.sources.stageSnapshot({ sourceId: source.id, revision: document.revision, contentHash, title: document.title, blocks: document.blocks, chunks: chunks.map((chunk, index) => ({ ...chunk, embedding: vectors[index]! })) });
     await deps.sources.activateSnapshot({ sourceId: source.id, snapshotId: snapshot.id, now: deps.now() });
     return { status: "SYNCED" as const, chunkCount: chunks.length };

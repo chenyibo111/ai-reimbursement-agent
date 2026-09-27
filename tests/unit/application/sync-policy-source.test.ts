@@ -19,6 +19,21 @@ it("activates a changed document only after all chunks are embedded", async () =
   expect(activateSnapshot).toHaveBeenCalledWith({ sourceId: source.id, snapshotId: "snapshot-1", now: new Date("2026-09-27T00:00:00Z") });
 });
 
+it("embeds a long policy document in batches of at most 32 chunks", async () => {
+  const embed = vi.fn(async ({ texts }: { texts: string[] }) => texts.map(() => Array.from({ length: 1024 }, (_, index) => index === 0 ? 1 : 0)));
+  const stageSnapshot = vi.fn().mockResolvedValue({ id: "snapshot-1" });
+  const blocks = Array.from({ length: 33 }, (_, index) => ({ kind: "paragraph" as const, text: `第${index + 1}条${"A".repeat(80)}` }));
+
+  await expect(syncPolicySource({ actorId: "admin-1", sourceId: source.id }, {
+    sources: { getEnabledSourceForSync: async () => source, getLatestContentHash: async () => null, stageSnapshot, activateSnapshot: vi.fn(), markSyncFailure: vi.fn() },
+    documents: { read: async () => ({ title: "差旅制度", revision: "1", canonicalUrl: source.canonicalUrl, blocks }) },
+    embeddings: { embed }, now: () => new Date(),
+  })).resolves.toEqual({ status: "SYNCED", chunkCount: 33 });
+
+  expect(embed.mock.calls.map(([input]) => input.texts.length)).toEqual([32, 1]);
+  expect(stageSnapshot).toHaveBeenCalledWith(expect.objectContaining({ chunks: expect.arrayContaining([expect.objectContaining({ embedding: expect.any(Array) })]) }));
+});
+
 it("retains the active snapshot when embedding fails", async () => {
   const activateSnapshot = vi.fn();
   const markSyncFailure = vi.fn();
