@@ -31,7 +31,7 @@ POLICY_ADMIN_FEISHU_OPEN_IDS="ou_finance_a,ou_finance_b"
 
 ## 政策知识库运行
 
-先备份 PostgreSQL，再部署 pgvector 迁移；不得重建 `postgres-data` 卷。Embedding 服务使用 `knowledge` Compose profile 和 `embedding-models` 缓存卷，且不得发布主机端口。首次同步会下载 BGE-M3 模型；GPU 可使用 `docker-compose.gpu.yml`，CPU 部署不需要业务代码变更。来源同步失败时保留最近活动快照，排查时只记录来源 ID 与安全错误分类，不记录文档正文、token 或向量。
+先备份 PostgreSQL，再部署 pgvector 迁移；不得重建 `postgres-data` 卷。Embedding 服务使用 `knowledge` Compose profile 和 `embedding-models` 缓存卷，生产环境仅通过 Docker 内网访问，不得发布主机端口。开发机以宿主机运行 Web 时，可叠加 `docker-compose.local.yml`，将端口仅绑定到 `127.0.0.1:8081`，并使用 CPU PyTorch；该覆盖文件不得用于生产。首次同步会下载 BGE-M3 模型；生产 GPU 可使用独立构建的 GPU 镜像及 `docker-compose.gpu.yml`。来源同步失败时保留最近活动快照，排查时只记录来源 ID 与安全错误分类，不记录文档正文、token 或向量。
 
 ## 飞书机器人运行
 

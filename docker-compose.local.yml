@@ -1,0 +1,7 @@
+services:
+  embedding-service:
+    build:
+      args:
+        TORCH_VARIANT: cpu
+    ports:
+      - "127.0.0.1:8081:8080"

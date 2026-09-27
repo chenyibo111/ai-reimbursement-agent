@@ -87,7 +87,7 @@ POLICY_ADMIN_FEISHU_OPEN_IDS="ou_policy_admin"
 
 管理员在 `/admin/policy-sources` 显式登记已获授权的飞书 Docx 或 Wiki 链接，再手动同步。同步只读取该来源；内容不变不重嵌入，失败不会替换上一次活动快照。员工询问政策时只能看到服务端检索出的原文引用；没有证据时系统不会猜测制度结论。
 
-本地使用向量服务时启动 `docker compose --profile knowledge up -d embedding-service`。服务仅在 Docker 内部网络开放 8080，模型下载保存于 `embedding-models` 命名卷。GPU 环境可追加 `-f docker-compose.gpu.yml`；生产部署应备份 PostgreSQL 后执行迁移，并将 `EMBEDDING_BASE_URL` 指向内部受控服务。
+本地以宿主机 `npm run dev` 运行 Web 时，使用 `docker compose -f docker-compose.yml -f docker-compose.local.yml --profile knowledge up -d embedding-service`；它只把 Embedding 服务绑定到 `127.0.0.1:8081`，并在 `.env.local` 设置 `EMBEDDING_PROVIDER="bge-m3"`、`EMBEDDING_BASE_URL="http://127.0.0.1:8081"`。本地覆盖使用 CPU PyTorch 以缩短首次依赖安装，模型下载保存于 `embedding-models` 命名卷。生产部署不使用 `docker-compose.local.yml`，而是让 Web 容器通过 Docker 内网的 `http://embedding-service:8080` 访问服务；NVIDIA GPU 部署应使用单独构建的 GPU 镜像及现有 `docker-compose.gpu.yml` 覆盖。
 
 ## 后续流程
 
