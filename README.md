@@ -1,33 +1,150 @@
 # AI Reimbursement Agent
 
-面向中国单企业员工报销场景的 AI 报销单服务。员工上传发票后，系统会安全保存附件、提取结构化字段、识别重复票据，并在信息不完整或可信度不足时要求用户补充确认。
+面向中国单企业员工的 AI 报销服务。它把“上传票据、识别票据、补齐报销信息、校验制度、生成并提交报销单”组织成一条可审计、可人工确认的链路。
 
-## 当前能力
+项目当前提供独立 Web 工作台，并可选接入飞书 OAuth、飞书机器人和以飞书文档为来源的报销政策知识库。
 
-- 通过签名服务端会话创建和读取员工自己的报销草稿
-- 版本号保护草稿更新，避免并发覆盖；所有创建与上传都会写入审计事件
-- 仅接收 JPEG、PNG、PDF（最大 20MB；PDF 最多 20 页），校验文件签名并接入 ClamAV 扫描
-- 使用私有 S3/MinIO 对象键存储附件，不提供匿名下载路径
-- 通过可替换的票据识别 Provider 提取发票号、日期、金额、税额和销售方；本地默认使用 Fixture Provider
-- 对重复文件哈希和同员工已提交的同发票号生成阻断性校验结果，且不重复计入费用
+> **当前边界**：已实现的 Agent 对话仍与某一份报销草稿关联；字段建议、删除与提交均由员工在 Web 工作台确认。下一阶段的“跨渠道独立会话 + 对话内受控办理”已完成设计与实施计划，但尚未实现，详见[路线图](#路线图)。
 
-## 本地运行
+## 功能一览
+
+| 模块 | 当前能力 |
+| --- | --- |
+| 报销单 | 创建草稿、编辑用途和费用字段、生成确认摘要、提交并查看提交快照 |
+| 票据 | 上传 JPG、PNG、PDF；文件签名校验、ClamAV 扫描、私有对象存储、OCR 识别、重新识别和删除草稿票据 |
+| 校验 | 必填字段、低置信度、同文件哈希、同员工已提交发票号，以及已发布的制度规则校验 |
+| AI 助手 | 基于脱敏草稿摘要提出字段建议；员工可接受或拒绝建议，模型不能直接改数据或提交 |
+| 政策中心 | 管理员维护版本化的结构化规则，支持阻断与预警级别，并将提交时命中的规则写入不可变快照 |
+| 政策知识库 | 从获授权的飞书 Docx/Wiki 手动同步、切片、向量检索；回答只能引用命中的原文片段 |
+| 身份与飞书 | 飞书 OAuth 登录、仅开发环境的受限演示登录、长连接飞书机器人 Worker |
+| 审计与恢复 | 草稿写入、建议处理、提交和政策发布均有审计/快照；失败链路保留安全的错误分类 |
+
+## 用户路径
+
+### Web 报销工作台
+
+1. 使用飞书 OAuth 登录（开发环境可使用受限演示登录）。
+2. 在 `/claims` 查看自己创建的报销单，或在 `/claims/new` 新建草稿。
+3. 上传票据；系统完成安全扫描、私有存储和 OCR 后回填候选费用信息。
+4. 在单据详情核对票据、费用、用途和校验结果；AI 建议必须由员工显式接受才会写入草稿。
+5. 修复阻断项，生成确认摘要后提交。系统以当前版本再次校验并写入不可变 `SubmissionSnapshot`。
+
+草稿状态会经历 `DRAFT`、`PROCESSING`、`NEEDS_INFORMATION`、`AWAITING_CONFIRMATION`、`SUBMITTED`。仅草稿允许删除单据或附件。
+
+### 飞书机器人
+
+机器人采用独立的长连接 Worker：单聊会响应消息，群聊只响应 `@机器人`。它会复用 Web 的事件幂等、票据安全处理、OCR、草稿和校验服务，并把用户引导回 Web 完成字段确认、删除及最终提交。
+
+完整开放平台权限、长连接配置和测试清单见[飞书集成说明](docs/feishu-integration.md)。
+
+### 报销政策与知识库
+
+- 员工可以在 `/policies` 阅读已发布的结构化政策摘要。
+- 政策管理员在 `/admin/policies` 维护草稿、规则和发布日期；管理员身份由飞书 `open_id` 白名单决定。
+- 管理员在 `/admin/policy-sources` 登记获授权的飞书 Docx 或 Wiki 链接并手动同步。
+- 同步生成不可变文档快照和 `pgvector` 向量切片。内容未变时不重复嵌入，失败不会覆盖上一份活动快照。
+- AI 只能基于检索出的来源片段回答制度问题；未检索到证据时必须说明无法确认，而不是猜测规则。
+
+## 核心架构
+
+```text
+浏览器 / 飞书用户
+       │
+       ├── Next.js Web 与 Route Handlers ── 签名会话 / 授权 / UI
+       │        │
+       │        └── Application use cases ── 草稿、票据、校验、建议、提交
+       │                    │
+       └── 飞书长连接 Worker ───────────────┘
+                    │
+    ┌───────────────┼──────────────────────────────┐
+    │               │                              │
+PostgreSQL + pgvector  MinIO (私有票据)   ClamAV / PaddleOCR / Embedding Service
+ Prisma 7              S3 API             Docker 服务
+```
+
+| 层次 | 主要目录 | 职责 |
+| --- | --- | --- |
+| 页面与 API | `app/` | Next.js 页面、认证布局、Route Handlers |
+| 交互组件 | `src/ui/` | 票据上传、费用表、校验面板、政策与 Agent UI |
+| 应用用例 | `src/application/` | 创建草稿、上传/识别票据、校验、建议、提交、飞书事件、政策同步 |
+| 领域模型 | `src/domain/` | 报销单、票据、校验、Agent、政策规则与来源约束 |
+| 基础设施 | `src/infrastructure/` | Prisma、MinIO/S3、OCR、Embedding、飞书 SDK、模型 Provider |
+| 后台进程 | `src/worker/` | 飞书机器人长连接、可选政策同步 |
+| 数据库 | `prisma/` | Prisma schema 和已提交的 PostgreSQL 迁移 |
+| 外部服务 | `ocr-service/`、`embedding-service/` | PaddleOCR HTTP 服务与 BGE-M3 Embedding 服务 |
+| 测试 | `tests/unit/`、`tests/integration/`、`tests/e2e/` | 领域/应用单测、PostgreSQL 集成测试、Playwright 流程测试 |
+
+更细的安全边界与数据流见[架构说明](docs/architecture.md)。
+
+## 技术栈
+
+- **Web**：Next.js 15、React 19、TypeScript。
+- **数据**：PostgreSQL 16、Prisma 7、`pgvector`（政策切片向量）。
+- **对象存储**：MinIO，生产可替换为兼容 S3 的私有存储。
+- **安全**：文件类型与签名校验、ClamAV 病毒扫描、HttpOnly 签名会话、服务端授权。
+- **OCR**：PaddleOCR，运行于独立 HTTP 服务；也可切换测试用 Fixture Provider。
+- **模型**：默认 Fixture；可配置任意 OpenAI-compatible Chat Completions 服务。
+- **飞书**：`@larksuiteoapi/node-sdk`，OAuth 与长连接机器人。
+- **质量保障**：Vitest、Playwright、ESLint、TypeScript。
+- **交付**：Docker Compose；Web 与飞书 Worker 使用同一镜像、不同命令运行。
+
+## 快速开始（本地开发）
+
+### 前置条件
+
+- Node.js 与 npm（仓库声明 `npm@11.9.0`）
+- Docker Desktop（PostgreSQL、MinIO、ClamAV、OCR 及可选 Embedding 服务）
+- 若启用真实飞书登录或机器人：飞书自建应用凭据
+
+### 1. 准备环境变量
 
 ```powershell
 Copy-Item .env.example .env.local
-docker compose up -d postgres minio clamav
+```
+
+编辑未提交的 `.env.local`，至少填写数据库、MinIO、会话密钥和服务地址。不要提交 `.env.local`、飞书 App Secret、模型 API Key 或 MinIO 密钥。
+
+### 2. 启动基础依赖
+
+```powershell
+docker compose up -d postgres minio clamav ocr
 npm install
 npx prisma generate --config prisma7.config.ts
+npx prisma migrate deploy --config prisma7.config.ts
 npm run dev
 ```
 
-本机 Windows 若阻止 Prisma 原生迁移引擎，请在 Linux 容器中执行迁移；仓库内已提交 `prisma/migrations/`，应用环境可直接使用这些迁移。
+默认访问地址与端口：
 
-本地服务端口：PostgreSQL `5433`、MinIO API `9000`、MinIO Console `9001`、ClamAV `3310`。
+| 服务 | 地址 |
+| --- | --- |
+| Web | `http://localhost:3000` |
+| PostgreSQL | `localhost:5433` |
+| MinIO S3 API | `http://localhost:9000` |
+| MinIO Console | `http://localhost:9001` |
+| OCR HTTP 服务 | `http://127.0.0.1:8000` |
+| ClamAV | `localhost:3310` |
 
-## AI 报销 Agent 模型配置
+Windows 上若 Prisma 原生迁移引擎受限，可在 Linux 容器中执行迁移；所有数据库变更必须来自仓库中已提交的 `prisma/migrations/`。
 
-本地默认 `MODEL_PROVIDER="fixture"`，只用于开发和自动测试。接入 OpenAI-compatible 服务时，在未提交的 `.env.local` 中设置以下值，然后重启 `npm run dev`：
+### 3. 登录与本地演示
+
+正式登录使用飞书 OAuth：
+
+```dotenv
+SESSION_SECRET="replace-with-a-long-random-secret"
+FEISHU_APP_ID="cli_..."
+FEISHU_APP_SECRET="..."
+FEISHU_REDIRECT_URI="http://localhost:3000/api/auth/feishu/callback"
+```
+
+访问 `/api/auth/feishu/login` 开始授权。没有飞书应用时，仅本地环境可使用 `POST /api/auth/dev-login`；它只读取服务端配置的 `DEV_DEMO_EMPLOYEE_ID`、`DEV_DEMO_EMPLOYEE_NAME` 与可选 `DEV_DEMO_FEISHU_OPEN_ID`，生产环境不提供该入口。
+
+## 可选能力配置
+
+### 真实对话模型
+
+默认 `MODEL_PROVIDER="fixture"`，适用于开发与自动测试。接入兼容 Chat Completions 的服务时：
 
 ```dotenv
 MODEL_PROVIDER="openai-compatible"
@@ -37,67 +154,39 @@ MODEL_PROVIDER_API_KEY="<secret>"
 MODEL_TIMEOUT_MS="20000"
 ```
 
-`MODEL_BASE_URL` 应以兼容 Chat Completions 的 `/v1` 为结尾。服务端只会发送当前消息、脱敏后的草稿摘要和校验项；密钥不会发送到浏览器或写入日志。模型不可用时，员工仍可通过工作台直接补齐字段。
+服务端只构造脱敏草稿摘要、受控校验信息和政策证据；密钥不发送给浏览器，也不写入日志。模型不可用时，员工仍可在工作台手动补齐字段。
 
-## 验证
+### 本地 OCR
+
+```dotenv
+RECEIPT_EXTRACTION_PROVIDER="paddleocr"
+OCR_SERVICE_URL="http://127.0.0.1:8000"
+```
+
+OCR Provider 负责提取发票号、开票日期、金额、税额和销售方等结构化字段。识别失败不会删除原票据；员工可以在工作台重新识别或手工填写。
+
+### 政策知识库与 Embedding
+
+开发机以宿主机运行 Web 时启动 CPU Embedding 服务：
 
 ```powershell
-npm exec vitest -- run
-npm exec tsc -- --noEmit
-npm run lint
+docker compose -f docker-compose.yml -f docker-compose.local.yml --profile knowledge up -d embedding-service
 ```
 
-集成测试使用 Docker PostgreSQL：`postgresql://reimbursement:reimbursement@127.0.0.1:5433/reimbursement`。运行测试前先启动 `docker compose up -d postgres`。
-
-## 身份登录（飞书 OAuth）
-
-开发阶段可以先使用个人飞书账号完成 OAuth 授权。请在飞书开放平台创建自建应用，配置重定向地址为本地 `FEISHU_REDIRECT_URI`（默认 `http://localhost:3000/api/auth/feishu/callback`），然后在 `.env.local` 填入：
+并在 `.env.local` 设置：
 
 ```dotenv
-SESSION_SECRET="请替换为随机长字符串"
-FEISHU_APP_ID="cli_..."
-FEISHU_APP_SECRET="..."
-FEISHU_REDIRECT_URI="http://localhost:3000/api/auth/feishu/callback"
+EMBEDDING_PROVIDER="bge-m3"
+EMBEDDING_BASE_URL="http://127.0.0.1:8081"
+EMBEDDING_MODEL="BAAI/bge-m3"
+EMBEDDING_DIMENSIONS="1024"
 ```
 
-访问 `GET /api/auth/feishu/login` 会跳转到飞书授权页；回调成功后，系统使用飞书 `open_id` 映射或创建本地员工，并写入 HttpOnly 会话 Cookie。
+首次同步会下载模型，缓存位于 Docker 命名卷 `embedding-models`。生产使用 Docker 内网的 `http://embedding-service:8080`，不要把该端口发布到公网。具有 NVIDIA GPU 的生产环境可叠加 `docker-compose.gpu.yml`。
 
-没有可用飞书应用配置时，仅本地开发可使用 `POST /api/auth/dev-login`。它只读取 `DEV_DEMO_EMPLOYEE_ID`、`DEV_DEMO_EMPLOYEE_NAME` 和可选的 `DEV_DEMO_FEISHU_OPEN_ID` 服务端环境变量，绝不接受浏览器提供的员工身份；生产环境始终返回 404。`POST /api/auth/logout` 会清除会话和临时 OAuth state Cookie。
+### 飞书机器人 Worker
 
-本地需要验证政策管理员工作台时，可额外设置仅开发使用的 `DEV_DEMO_FEISHU_OPEN_ID`，并让它与管理员白名单匹配：
-
-```dotenv
-DEV_DEMO_FEISHU_OPEN_ID="ou_policy_admin"
-POLICY_ADMIN_FEISHU_OPEN_IDS="ou_policy_admin"
-```
-
-## 报销政策规则
-
-政策管理员由 `POLICY_ADMIN_FEISHU_OPEN_IDS` 中的飞书 `open_id` 白名单决定；白名单为空、格式无效或未登录时，任何人都不能创建、修改或发布政策。白名单外员工仍可访问 `/policies` 查看当前已发布政策，并可正常创建自己的报销草稿。
-
-管理员在 `/admin/policies` 创建草稿，维护受限的结构化规则，再进行页面内确认发布。第一版支持报销总额上限、费用类别单笔上限、允许费用类别和按类别必填字段。发布后的版本不可原地编辑；要调整制度，应创建新草稿并发布。发布会归档旧的已发布版本。
-
-- `BLOCKING` 规则阻止生成确认摘要和最终提交。
-- `WARNING` 规则在确认摘要和提交快照中保留提示，但允许员工继续提交。
-- 没有有效已发布政策时，系统继续执行原有的完整性、低置信度和重复票据检查，不会伪造“符合政策”的结论。
-
-每次提交都会把当时使用的政策版本和命中的规则结果写入不可变 `SubmissionSnapshot`。后来发布新制度不会改写已经提交的报销单。
-
-## 政策知识库
-
-管理员在 `/admin/policy-sources` 显式登记已获授权的飞书 Docx 或 Wiki 链接，再手动同步。同步只读取该来源；内容不变不重嵌入，失败不会替换上一次活动快照。员工询问政策时只能看到服务端检索出的原文引用；没有证据时系统不会猜测制度结论。
-
-本地以宿主机 `npm run dev` 运行 Web 时，使用 `docker compose -f docker-compose.yml -f docker-compose.local.yml --profile knowledge up -d embedding-service`；它只把 Embedding 服务绑定到 `127.0.0.1:8081`，并在 `.env.local` 设置 `EMBEDDING_PROVIDER="bge-m3"`、`EMBEDDING_BASE_URL="http://127.0.0.1:8081"`。本地覆盖使用 CPU PyTorch 以缩短首次依赖安装，模型下载保存于 `embedding-models` 命名卷。生产部署不使用 `docker-compose.local.yml`，而是让 Web 容器通过 Docker 内网的 `http://embedding-service:8080` 访问服务；NVIDIA GPU 部署应使用单独构建的 GPU 镜像及现有 `docker-compose.gpu.yml` 覆盖。
-
-## 后续流程
-
-AI 对话只会提出字段建议，员工在工作台点击“接受并写入”后才会更新草稿；建议确认受草稿版本保护并记录审计。聊天框也可以上传票据，使用与票据区域完全相同的安全扫描、私有存储和 OCR 链路。
-
-飞书等 IM 通道会复用同一套应用层用例和服务端身份边界，复杂字段确认和最终提交仍统一回到 Web 工作台。
-
-## 飞书机器人 Worker
-
-机器人使用独立的长连接 Worker，而不是 Web 回调地址。启用后，单聊消息和群聊 `@机器人` 消息会先持久化，再复用相同的草稿、附件安全扫描、MinIO、OCR、Agent 与校验流程；字段确认、删除和提交仍只能在 Web 工作台完成。
+在飞书开放平台启用机器人能力、配置**长连接**并订阅 `im.message.receive_v1` 后，填入：
 
 ```dotenv
 FEISHU_BOT_ENABLED="true"
@@ -106,17 +195,91 @@ FEISHU_EVENT_DELIVERY="long_connection"
 APP_PUBLIC_URL="https://reimbursement.example.com"
 ```
 
-开发环境分别运行 Web 与 Worker：
+开发环境需分别运行 Web 与 Worker：
 
 ```powershell
 npm run dev
 npm run feishu:worker
 ```
 
-容器部署使用同一镜像运行两个服务：
+机器人权限、群聊 `@机器人` 限制、故障恢复和验收清单见[飞书集成说明](docs/feishu-integration.md)。
+
+## 生产部署
+
+Web 与 Worker 使用同一个 Docker 镜像，但分别运行 `npm run start` 与 `npm run feishu:worker`：
 
 ```powershell
 docker compose up -d --build web feishu-bot-worker
 ```
 
-容器中的 `.env.local` 应使用 `postgres`、`minio`、`clamav` 和 `ocr` 作为服务主机名；`APP_PUBLIC_URL` 在多人或移动端必须是员工可访问的 HTTPS 地址。完整开放平台配置、恢复措施与测试清单见 [飞书集成说明](docs/feishu-integration.md) 和 [运维说明](docs/operations.md)。
+部署前应按以下顺序执行：
+
+1. 备份 PostgreSQL；不要用删除卷或重建数据库代替迁移。
+2. 将生产环境变量作为 Docker secret/部署平台密钥注入，不写入镜像或 Git。
+3. 执行 `npx prisma migrate deploy --config prisma7.config.ts`。
+4. 确保 Web 的 `APP_PUBLIC_URL` 是员工可访问的 HTTPS 地址。
+5. 确认容器内服务主机名使用 `postgres`、`minio`、`clamav`、`ocr` 和 `embedding-service`。
+6. 启动 Web、Worker 和依赖服务，检查健康状态与 Worker 日志。
+
+更完整的迁移、监控、回滚与安全日志规范见[运维说明](docs/operations.md)。
+
+## 安全与数据边界
+
+- 票据只存储在私有 S3/MinIO 对象中，不提供匿名下载路径。
+- 上传限制为 JPEG、PNG、PDF；最大 20MB，PDF 最多 20 页，并在存储前校验文件签名和扫描病毒。
+- 不信任浏览器传入的员工身份、管理员角色、草稿版本或字段目标；所有授权和版本校验在服务端完成。
+- Agent 只能生成受控字段建议，不能直接修改草稿、删除附件、确认或提交报销单。
+- 重复文件哈希与同员工已提交的同发票号会形成阻断校验，避免重复报销与重复计入费用。
+- 政策管理员由 `POLICY_ADMIN_FEISHU_OPEN_IDS` 中的飞书 `open_id` 白名单控制；白名单为空时保持安全的只读状态。
+- 政策知识库仅同步管理员显式登记且应用有权限读取的文档；同步、向量和日志均不暴露来源 token、原始附件或密钥。
+
+## 开发、测试与常用命令
+
+```powershell
+# 单元与集成测试（需先启动 PostgreSQL）
+npm test
+
+# 类型检查与静态检查
+npx tsc --noEmit
+npm run lint
+
+# 浏览器端到端测试
+npm run test:e2e
+
+# 生产构建
+npm run build
+
+# 查看 Compose 解析结果
+docker compose config
+
+# 飞书机器人与政策同步后台任务
+npm run feishu:worker
+npm run policy:sync
+```
+
+集成测试连接 Docker PostgreSQL：`postgresql://reimbursement:reimbursement@127.0.0.1:5433/reimbursement`。端到端测试会写入测试数据，应使用专用测试数据库或可清理的本地环境，不要指向生产实例。
+
+## 文档索引
+
+| 文档 | 内容 |
+| --- | --- |
+| [架构说明](docs/architecture.md) | 信任边界、领域数据、Agent、政策与知识库安全模型 |
+| [运维说明](docs/operations.md) | 数据库迁移、模型/知识库/机器人运行、监控与恢复 |
+| [飞书集成说明](docs/feishu-integration.md) | 开放平台权限、长连接 Worker、测试企业验收 |
+| [设计规范](DESIGN.md) | UI 视觉与交互基线 |
+| [UX 合约](UX-CONTRACT.md) | UI 状态、错误处理和无障碍要求 |
+| `docs/superpowers/specs/` | 已确认的功能设计决策 |
+| `docs/superpowers/plans/` | 按任务拆分的实施计划与验证命令 |
+
+## 路线图
+
+下一项已确认但尚未实施的工作是“跨渠道报销 Agent 会话”：Web 私有会话与飞书单聊共享同一员工私有历史，飞书群聊保持隔离；政策问答不会创建报销单，只有明确开始报销或上传合规票据才进入受控的 Intake 办理状态，并且只有精确输入“确认提交”才会触发服务端重新校验和提交。
+
+设计与实施计划：
+
+- [跨渠道 Agent 会话设计](docs/superpowers/specs/2026-09-27-cross-channel-agent-conversation-design.md)
+- [跨渠道 Agent 会话实施计划](docs/superpowers/plans/2026-09-27-cross-channel-agent-conversations.md)
+
+## 许可证
+
+本仓库采用 [MIT License](LICENSE)。
