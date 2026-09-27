@@ -100,6 +100,12 @@ export class AgentConversationRepository {
     return newest.reverse();
   }
 
+  async getConversationByIdOrThrow(id: string): Promise<AgentConversation> {
+    const conversation = await this.prisma.agentConversation.findUnique({ where: { id } });
+    if (!conversation) throw new Error("conversation not found");
+    return conversation;
+  }
+
   async getCurrentIntake(employeeId: string): Promise<ReimbursementIntake | null> {
     return this.prisma.reimbursementIntake.findFirst({
       where: { employeeId, status: { in: ["COLLECTING", "READY_TO_SUBMIT"] } },
