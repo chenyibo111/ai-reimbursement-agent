@@ -27,16 +27,20 @@ export type UploadReceiptDeps = {
   audit: AuditEventWriter;
 };
 
-export async function uploadReceipt(input: UploadReceiptInput, deps: UploadReceiptDeps): Promise<Receipt> {
-  const claim = await deps.claims.getByIdOrThrow(input.claimId);
-  assertClaimOwner(input.actorId, claim);
+export async function preflightReceiptUpload(
+  input: Pick<UploadReceiptInput, "mimeType" | "bytes">,
+  scanner: Pick<FileSafetyScanner, "scan">,
+): Promise<void> {
   validateSizeAndMime(input);
   validateFileSignature(input.mimeType, input.bytes);
   if (input.mimeType === "application/pdf") await validatePdf(input.bytes);
+  if ((await scanner.scan(input.bytes)) !== "CLEAN") throw new Error("unsafe file");
+}
 
-  if ((await deps.scanner.scan(input.bytes)) !== "CLEAN") {
-    throw new Error("unsafe file");
-  }
+export async function uploadReceipt(input: UploadReceiptInput, deps: UploadReceiptDeps): Promise<Receipt> {
+  const claim = await deps.claims.getByIdOrThrow(input.claimId);
+  assertClaimOwner(input.actorId, claim);
+  await preflightReceiptUpload(input, deps.scanner);
 
   const id = randomUUID();
   const contentHash = createHash("sha256").update(input.bytes).digest("hex");

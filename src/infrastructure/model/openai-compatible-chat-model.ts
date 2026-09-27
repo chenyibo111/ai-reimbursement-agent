@@ -1,4 +1,7 @@
 import type { AgentIntent, ChatModel, ChatModelInput, PolicyAnswerInput } from "@/src/infrastructure/model/chat-model";
+import type { ConversationContext } from "@/src/application/build-conversation-context";
+import { isConversationCollectedFieldName } from "@/src/domain/agent-conversation";
+import { z } from "zod";
 
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -78,6 +81,17 @@ export class OpenAiCompatibleChatModel implements ChatModel {
     return answer.trim().slice(0, 1_000);
   }
 
+  async decideConversation(input: ConversationContext): Promise<import("@/src/infrastructure/model/chat-model").ConversationDecision> {
+    const result = await this.complete([
+      {
+        role: "system",
+        content: "你是受控的报销会话助手。只返回 JSON：{action: \"ANSWER\" | \"START_INTAKE\" | \"COLLECT_FIELDS\" | \"REQUEST_SUBMISSION\", reply: string, fields?: Record<string,string>}。你不能创建任意草稿、不能提交、不能声称已写入数据。只有服务端提供的 allowedFields 能出现在 fields；没有可写字段时不要返回 fields。政策结论只能依据 policyCitations。",
+      },
+      { role: "user", content: JSON.stringify(input) },
+    ]);
+    return parseConversationDecision(result, input.allowedFields);
+  }
+
   private async complete(messages: Array<{ role: "system" | "user"; content: string }>): Promise<unknown> {
     let response: Response;
     try {
@@ -118,6 +132,27 @@ export class OpenAiCompatibleChatModel implements ChatModel {
       throw new ChatModelError("AI 返回内容无法识别，请稍后重试。", "INVALID_RESPONSE");
     }
   }
+}
+
+const conversationDecisionSchema = z.object({
+  action: z.enum(["ANSWER", "START_INTAKE", "COLLECT_FIELDS", "REQUEST_SUBMISSION"]),
+  reply: z.string().trim().min(1).max(1_000),
+  fields: z.record(z.string(), z.string().trim().min(1).max(1_000)).optional(),
+}).strict();
+
+function parseConversationDecision(
+  value: unknown,
+  allowedFields: readonly string[],
+): import("@/src/infrastructure/model/chat-model").ConversationDecision {
+  const parsed = conversationDecisionSchema.safeParse(value);
+  if (!parsed.success) throw new ChatModelError("AI 返回内容无法识别，请稍后重试。", "INVALID_RESPONSE");
+  const fields = parsed.data.fields;
+  if (fields && (parsed.data.action !== "COLLECT_FIELDS" || Object.keys(fields).some((field) => !allowedFields.includes(field) || !isConversationCollectedFieldName(field)))) {
+    throw new ChatModelError("AI 返回内容无法识别，请稍后重试。", "INVALID_RESPONSE");
+  }
+  return fields
+    ? { action: parsed.data.action, reply: parsed.data.reply, fields }
+    : { action: parsed.data.action, reply: parsed.data.reply };
 }
 
 function isChatCompletionEnvelope(payload: unknown): payload is { choices?: Array<{ message?: { content?: unknown } }> } {

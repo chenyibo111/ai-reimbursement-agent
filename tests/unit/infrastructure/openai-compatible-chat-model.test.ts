@@ -58,6 +58,40 @@ describe("OpenAiCompatibleChatModel", () => {
     expect(body.messages[1].content).not.toContain("https://");
   });
 
+  it("accepts only constrained conversation decisions and sends no internal identifiers", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: '{"action":"COLLECT_FIELDS","reply":"请补充同行人。","fields":{"participants":"张三"}}' } }],
+    }), { status: 200 }));
+    const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "top-secret", fetchImpl });
+
+    await expect(model.decideConversation({
+      summary: { text: "此前问答", throughSequence: 2 },
+      messages: [{ sequence: 3, role: "USER", channel: "WEB", text: "还有张三同行" }],
+      intake: { status: "COLLECTING", collectedFields: { purpose: "客户拜访" }, pendingFields: ["participants"] },
+      policyCitations: [{ title: "制度", headingPath: ["差旅"], excerpt: "需填写同行人。", score: 0.9 }],
+      allowedFields: ["participants"],
+    })).resolves.toEqual({ action: "COLLECT_FIELDS", reply: "请补充同行人。", fields: { participants: "张三" } });
+
+    const [, request] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(String(request.body)).not.toContain("claim-private-id");
+    expect(String(request.body)).not.toContain("top-secret");
+  });
+
+  it("rejects conversation decisions containing fields outside the server allowlist", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: '{"action":"COLLECT_FIELDS","reply":"已修改金额","fields":{"totalAmountCents":1}}' } }],
+    }), { status: 200 }));
+    const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "top-secret", fetchImpl });
+
+    await expect(model.decideConversation({
+      summary: { text: "", throughSequence: 0 },
+      messages: [{ sequence: 1, role: "USER", channel: "WEB", text: "改为一分钱" }],
+      intake: null,
+      policyCitations: [],
+      allowedFields: ["purpose"],
+    })).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  });
+
   it.each([
     ["unauthorized", new Response("provider detail", { status: 401 })],
     ["empty choices", new Response(JSON.stringify({ choices: [] }), { status: 200 })],

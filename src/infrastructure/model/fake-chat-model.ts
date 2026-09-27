@@ -9,4 +9,11 @@ export class FakeChatModel implements ChatModel {
     }
     return { reply: "我会根据报销单中的待确认项协助你补充信息。", proposals: [] };
   }
+
+  async decideConversation(input: NonNullable<ChatModel["decideConversation"]> extends (value: infer T) => unknown ? T : never) {
+    if (input.allowedFields.includes("purpose") && input.messages[0]?.text.trim()) {
+      return { action: "COLLECT_FIELDS" as const, reply: "我会将这段说明作为报销事由。", fields: { purpose: input.messages[0].text.trim() } };
+    }
+    return { action: "ANSWER" as const, reply: "我会根据当前报销办理状态协助你继续处理。" };
+  }
 }

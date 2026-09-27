@@ -1,11 +1,9 @@
 import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
 
-import { createPrismaAuditEventWriter } from "@/src/application/audit-event";
-import { createClaimDraft } from "@/src/application/create-claim-draft";
 import { processFeishuEvent } from "@/src/application/process-feishu-event";
 import type { FeishuInboundMessage } from "@/src/domain/feishu-bot";
 import { createPrismaClient } from "@/src/infrastructure/prisma/client";
-import { PrismaClaimRepository } from "@/src/infrastructure/prisma/claim-repository";
+import { AgentConversationRepository } from "@/src/infrastructure/prisma/agent-conversation-repository";
 import { FeishuBotRepository } from "@/src/infrastructure/prisma/feishu-bot-repository";
 import type { FeishuBotClient } from "@/src/infrastructure/feishu/feishu-bot-client";
 import { createFeishuBotRuntime } from "@/src/worker/feishu-bot-runtime";
@@ -19,6 +17,9 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await prisma.inboundChannelEvent.deleteMany();
+  await prisma.agentMessage.deleteMany();
+  await prisma.reimbursementIntake.deleteMany();
+  await prisma.agentConversation.deleteMany();
   await prisma.feishuConversation.deleteMany();
   await prisma.auditEvent.deleteMany();
   await prisma.submissionSnapshot.deleteMany();
@@ -31,56 +32,49 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
-it("persists, processes, and replies to a first bound message exactly once across message redelivery", async () => {
+it("persists private and group scopes without creating a draft for a policy-only Feishu question", async () => {
   const messages = new Map<string, FeishuInboundMessage>([
-    ["om-first", { messageId: "om-first", chatId: "oc-direct", chatType: "p2p", senderOpenId: "ou-employee", messageType: "text", text: "客户午餐", mentions: [], attachments: [] }],
+    ["om-private", { messageId: "om-private", chatId: "oc-direct", chatType: "p2p", senderOpenId: "ou-employee", messageType: "text", text: "住宿规则", mentions: [], attachments: [] }],
+    ["om-group", { messageId: "om-group", chatId: "oc-group", chatType: "group", senderOpenId: "ou-employee", messageType: "text", text: "@机器人 住宿规则", mentions: ["ou-bot"], attachments: [] }],
   ]);
   const replies: string[] = [];
-  const { runtime, repository } = createRuntime(messages, replies);
+  const { runtime, turns } = createRuntime(messages, replies);
+
+  await runtime.onEvent(rawEvent("event-private", "om-private", "oc-direct", "p2p"));
+  await expect(runtime.drainOnce()).resolves.toBe(true);
+  await runtime.onEvent(rawEvent("event-group", "om-group", "oc-group", "group", ["ou-bot"]));
+  await expect(runtime.drainOnce()).resolves.toBe(true);
+
+  expect(await prisma.claimDraft.count()).toBe(0);
+  expect(await prisma.agentConversation.findMany({ orderBy: { kind: "asc" } })).toEqual([
+    expect.objectContaining({ employeeId: "employee-1", kind: "PRIVATE", scopeKey: "private" }),
+    expect.objectContaining({ employeeId: "employee-1", kind: "GROUP", scopeKey: "oc-group" }),
+  ]);
+  expect(turns.map((turn) => turn.conversationId)).toHaveLength(2);
+  expect(new Set(turns.map((turn) => turn.conversationId)).size).toBe(2);
+  expect(replies).toHaveLength(2);
+});
+
+it("deduplicates a redelivered message before it reaches the conversation turn", async () => {
+  const messages = new Map<string, FeishuInboundMessage>([
+    ["om-first", { messageId: "om-first", chatId: "oc-direct", chatType: "p2p", senderOpenId: "ou-employee", messageType: "text", text: "政策", mentions: [], attachments: [] }],
+  ]);
+  const replies: string[] = [];
+  const { runtime, turns } = createRuntime(messages, replies);
 
   await runtime.onEvent(rawEvent("event-first", "om-first", "oc-direct", "p2p"));
   await expect(runtime.drainOnce()).resolves.toBe(true);
-
-  const claims = await prisma.claimDraft.findMany({ where: { employeeId: "employee-1" } });
-  expect(claims).toHaveLength(1);
-  await expect(repository.getConversation("employee-1", "oc-direct")).resolves.toEqual({ claimId: claims[0].id });
-  expect(replies).toEqual([expect.stringContaining(`/claims/${claims[0].id}`)]);
-
   await runtime.onEvent(rawEvent("event-redelivered", "om-first", "oc-direct", "p2p"));
   await expect(runtime.drainOnce()).resolves.toBe(false);
-  await expect(prisma.claimDraft.count({ where: { employeeId: "employee-1" } })).resolves.toBe(1);
-});
 
-it("ignores a group message that has not mentioned the bot and routes new/view commands to the Web workspace", async () => {
-  const messages = new Map<string, FeishuInboundMessage>([
-    ["om-ignore", { messageId: "om-ignore", chatId: "oc-group", chatType: "group", senderOpenId: "ou-employee", messageType: "text", text: "报销", mentions: ["ou-other"], attachments: [] }],
-    ["om-new", { messageId: "om-new", chatId: "oc-group", chatType: "group", senderOpenId: "ou-employee", messageType: "text", text: "新建报销", mentions: ["ou-bot"], attachments: [] }],
-    ["om-view", { messageId: "om-view", chatId: "oc-group", chatType: "group", senderOpenId: "ou-employee", messageType: "text", text: "查看当前草稿", mentions: ["ou-bot"], attachments: [] }],
-  ]);
-  const replies: string[] = [];
-  const { runtime } = createRuntime(messages, replies);
-
-  await runtime.onEvent(rawEvent("event-ignore", "om-ignore", "oc-group", "group", ["ou-other"]));
-  await runtime.drainOnce();
-  await expect(prisma.claimDraft.count()).resolves.toBe(0);
-
-  await runtime.onEvent(rawEvent("event-new", "om-new", "oc-group", "group", ["ou-bot"]));
-  await runtime.drainOnce();
-  const claim = await prisma.claimDraft.findFirstOrThrow();
-  await runtime.onEvent(rawEvent("event-view", "om-view", "oc-group", "group", ["ou-bot"]));
-  await runtime.drainOnce();
-
-  expect(replies).toEqual([
-    expect.stringContaining(`/claims/${claim.id}`),
-    expect.stringContaining(`/claims/${claim.id}`),
-  ]);
-  expect(replies.join("\n")).not.toContain("提交");
-  expect(replies.join("\n")).not.toContain("接受并写入");
+  expect(turns).toHaveLength(1);
+  expect(replies).toHaveLength(1);
 });
 
 function createRuntime(messages: Map<string, FeishuInboundMessage>, replies: string[]) {
   const repository = new FeishuBotRepository(prisma);
-  const claims = new PrismaClaimRepository(prisma);
+  const conversations = new AgentConversationRepository(prisma);
+  const turns: Array<{ conversationId: string; channelMessageId: string }> = [];
   const client: FeishuBotClient = {
     async getMessage(messageId) {
       const message = messages.get(messageId);
@@ -95,14 +89,15 @@ function createRuntime(messages: Map<string, FeishuInboundMessage>, replies: str
     botOpenId: "ou-bot",
     publicAppUrl: "https://reimbursement.example.test",
     events: repository,
+    conversations,
     client,
-    createClaimDraft: (claimInput) => createClaimDraft(claimInput, { claims, audit: createPrismaAuditEventWriter(prisma) }),
-    runAgentTurn: async () => ({ reply: "请补充参与人员。", clarifications: [], proposals: [] }),
-    uploadReceipt: async () => { throw new Error("attachment not used in this flow"); },
-    extractReceipt: async () => { throw new Error("attachment not used in this flow"); },
+    runConversationTurn: async (turn) => {
+      turns.push({ conversationId: turn.conversationId, channelMessageId: turn.channelMessageId });
+      return { reply: "根据制度，住宿费用上限为每晚 500 元。", citations: [], intake: null };
+    },
   });
   return {
-    repository,
+    turns,
     runtime: createFeishuBotRuntime({ repository, processEvent: process, replyText: client.replyText }),
   };
 }
