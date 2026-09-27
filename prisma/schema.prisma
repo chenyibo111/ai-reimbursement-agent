@@ -71,74 +71,100 @@ enum PolicySnapshotStatus {
   ARCHIVED
 }
 
+enum AgentConversationKind {
+  PRIVATE
+  GROUP
+}
+
+enum AgentMessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+enum AgentMessageChannel {
+  WEB
+  FEISHU
+}
+
+enum ReimbursementIntakeStatus {
+  COLLECTING
+  READY_TO_SUBMIT
+  SUBMITTED
+  ABANDONED
+}
+
 model Employee {
-  id                  String               @id
-  displayName         String
-  department          String?
-  feishuUserId        String?              @unique
-  createdAt           DateTime             @default(now())
-  claims              ClaimDraft[]
-  feishuConversations FeishuConversation[]
+  id                   String                @id
+  displayName          String
+  department           String?
+  feishuUserId         String?               @unique
+  createdAt            DateTime              @default(now())
+  claims               ClaimDraft[]
+  feishuConversations  FeishuConversation[]
+  agentConversations   AgentConversation[]
+  reimbursementIntakes ReimbursementIntake[]
 }
 
 model ClaimDraft {
-  id                String             @id @default(cuid())
-  employeeId        String
-  employee          Employee           @relation(fields: [employeeId], references: [id], onDelete: Restrict)
-  status            ClaimStatus        @default(DRAFT)
-  purpose           String?
-  version           Int                @default(0)
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  receipts          Receipt[]
-  expenseItems      ExpenseItem[]
-  clarifications    Clarification[]
-  validationResults ValidationResult[]
-  submissions       SubmissionSnapshot[]
-  auditEvents       AuditEvent[]
-  agentProposals    AgentFieldProposal[]
-  inboundEvents     InboundChannelEvent[]
-  feishuConversations FeishuConversation[]
+  id                   String                @id @default(cuid())
+  employeeId           String
+  employee             Employee              @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  status               ClaimStatus           @default(DRAFT)
+  purpose              String?
+  version              Int                   @default(0)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  receipts             Receipt[]
+  expenseItems         ExpenseItem[]
+  clarifications       Clarification[]
+  validationResults    ValidationResult[]
+  submissions          SubmissionSnapshot[]
+  auditEvents          AuditEvent[]
+  agentProposals       AgentFieldProposal[]
+  inboundEvents        InboundChannelEvent[]
+  feishuConversations  FeishuConversation[]
+  reimbursementIntakes ReimbursementIntake[]
 
   @@index([employeeId, status])
 }
 
 model Receipt {
-  id                  String        @id @default(cuid())
-  claimId             String
-  claim               ClaimDraft    @relation(fields: [claimId], references: [id], onDelete: Cascade)
-  objectKey           String        @unique
-  originalFilename    String?
-  contentHash         String
-  mimeType            String
-  status              ReceiptStatus @default(PENDING)
-  receiptType         String?
-  extractionPayload   Json?
-  extractionVersion   String?
-  createdAt           DateTime      @default(now())
-  expenseItem         ExpenseItem?
+  id                String        @id @default(cuid())
+  claimId           String
+  claim             ClaimDraft    @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  objectKey         String        @unique
+  originalFilename  String?
+  contentHash       String
+  mimeType          String
+  status            ReceiptStatus @default(PENDING)
+  receiptType       String?
+  extractionPayload Json?
+  extractionVersion String?
+  createdAt         DateTime      @default(now())
+  expenseItem       ExpenseItem?
 
   @@index([claimId, contentHash])
 }
 
 model ExpenseItem {
-  id                String      @id @default(cuid())
-  claimId           String
-  claim             ClaimDraft  @relation(fields: [claimId], references: [id], onDelete: Cascade)
-  receiptId         String?     @unique
-  receipt           Receipt?    @relation(fields: [receiptId], references: [id], onDelete: SetNull)
-  amountCents       Int
-  amountSource      FieldSource
-  issuedOn          DateTime?
-  issuedOnSource    FieldSource?
-  invoiceNumber     String?
-  invoiceSource     FieldSource?
-  expenseCategory   String?
-  participants      String?
-  projectCode       String?
-  createdAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
-  agentProposals    AgentFieldProposal[]
+  id              String               @id @default(cuid())
+  claimId         String
+  claim           ClaimDraft           @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  receiptId       String?              @unique
+  receipt         Receipt?             @relation(fields: [receiptId], references: [id], onDelete: SetNull)
+  amountCents     Int
+  amountSource    FieldSource
+  issuedOn        DateTime?
+  issuedOnSource  FieldSource?
+  invoiceNumber   String?
+  invoiceSource   FieldSource?
+  expenseCategory String?
+  participants    String?
+  projectCode     String?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  agentProposals  AgentFieldProposal[]
 }
 
 model AgentFieldProposal {
@@ -161,14 +187,14 @@ model AgentFieldProposal {
 }
 
 model Clarification {
-  id          String     @id @default(cuid())
-  claimId     String
-  claim       ClaimDraft @relation(fields: [claimId], references: [id], onDelete: Cascade)
-  field       String
-  prompt      String
-  answer      String?
-  resolvedAt  DateTime?
-  createdAt   DateTime   @default(now())
+  id         String     @id @default(cuid())
+  claimId    String
+  claim      ClaimDraft @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  field      String
+  prompt     String
+  answer     String?
+  resolvedAt DateTime?
+  createdAt  DateTime   @default(now())
 }
 
 model ValidationResult {
@@ -208,55 +234,112 @@ model AuditEvent {
 }
 
 model InboundChannelEvent {
-  id            String                    @id @default(cuid())
-  channel       String                    @default("FEISHU")
-  eventId       String                    @unique
-  messageId     String?                   @unique
-  messageType   String
-  chatId        String
-  chatType      String                    @default("p2p")
-  mentionedOpenIds String[]                @default([])
-  senderOpenId  String
-  status        InboundChannelEventStatus @default(PENDING)
-  failureCode   String?
-  claimId       String?
-  claim         ClaimDraft?               @relation(fields: [claimId], references: [id], onDelete: SetNull)
-  receivedAt    DateTime                  @default(now())
-  processedAt   DateTime?
-  updatedAt     DateTime                  @updatedAt
+  id               String                    @id @default(cuid())
+  channel          String                    @default("FEISHU")
+  eventId          String                    @unique
+  messageId        String?                   @unique
+  messageType      String
+  chatId           String
+  chatType         String                    @default("p2p")
+  mentionedOpenIds String[]                  @default([])
+  senderOpenId     String
+  status           InboundChannelEventStatus @default(PENDING)
+  failureCode      String?
+  claimId          String?
+  claim            ClaimDraft?               @relation(fields: [claimId], references: [id], onDelete: SetNull)
+  receivedAt       DateTime                  @default(now())
+  processedAt      DateTime?
+  updatedAt        DateTime                  @updatedAt
 
   @@index([status, receivedAt])
   @@index([chatId, senderOpenId])
 }
 
 model FeishuConversation {
-  id             String     @id @default(cuid())
-  employeeId     String
-  employee       Employee   @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  chatId         String
-  claimId        String
-  claim          ClaimDraft @relation(fields: [claimId], references: [id], onDelete: Cascade)
-  lastActiveAt   DateTime   @default(now())
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  id           String     @id @default(cuid())
+  employeeId   String
+  employee     Employee   @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  chatId       String
+  claimId      String
+  claim        ClaimDraft @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  lastActiveAt DateTime   @default(now())
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
 
   @@unique([employeeId, chatId])
   @@index([claimId])
 }
 
+model AgentConversation {
+  id                     String                @id @default(cuid())
+  employeeId             String
+  employee               Employee              @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  scopeKey               String
+  kind                   AgentConversationKind
+  summary                String                @default("")
+  summaryThroughSequence Int                   @default(0)
+  nextSequence           Int                   @default(1)
+  lastActiveAt           DateTime              @default(now())
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+  messages               AgentMessage[]
+  reimbursementIntakes   ReimbursementIntake[]
+
+  @@unique([employeeId, kind, scopeKey])
+  @@index([employeeId, lastActiveAt])
+}
+
+model AgentMessage {
+  id               String              @id @default(cuid())
+  conversationId   String
+  conversation     AgentConversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sequence         Int
+  role             AgentMessageRole
+  channel          AgentMessageChannel
+  channelMessageId String?             @unique
+  text             String
+  citations        Json?
+  result           Json?
+  createdAt        DateTime            @default(now())
+
+  @@unique([conversationId, sequence])
+  @@index([conversationId, createdAt])
+}
+
+model ReimbursementIntake {
+  id                     String                    @id @default(cuid())
+  employeeId             String
+  employee               Employee                  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  status                 ReimbursementIntakeStatus @default(COLLECTING)
+  claimId                String?
+  claim                  ClaimDraft?               @relation(fields: [claimId], references: [id], onDelete: SetNull)
+  conversationId         String
+  conversation           AgentConversation         @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  collectedFields        Json                      @default("{}")
+  pendingFields          String[]                  @default([])
+  submissionToken        String?
+  lastUserConfirmationAt DateTime?
+  createdAt              DateTime                  @default(now())
+  updatedAt              DateTime                  @updatedAt
+
+  @@index([employeeId, status, updatedAt])
+  @@index([conversationId, updatedAt])
+  @@index([claimId])
+}
+
 model PolicyVersion {
-  id                String              @id @default(cuid())
-  title             String
-  status            PolicyVersionStatus @default(DRAFT)
-  version           Int                 @default(0)
-  effectiveFrom     DateTime
-  createdByEmployeeId String
+  id                    String              @id @default(cuid())
+  title                 String
+  status                PolicyVersionStatus @default(DRAFT)
+  version               Int                 @default(0)
+  effectiveFrom         DateTime
+  createdByEmployeeId   String
   publishedByEmployeeId String?
-  publishedAt       DateTime?
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
-  rules             PolicyRule[]
-  auditEvents       PolicyAuditEvent[]
+  publishedAt           DateTime?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  rules                 PolicyRule[]
+  auditEvents           PolicyAuditEvent[]
 
   @@index([status, effectiveFrom])
 }
@@ -292,49 +375,49 @@ model PolicyAuditEvent {
 }
 
 model PolicySource {
-  id                    String               @id @default(cuid())
-  type                  PolicySourceType
-  canonicalUrl          String               @unique
-  resourceToken         String               @unique
-  title                 String
-  enabled               Boolean              @default(true)
-  createdByEmployeeId   String
-  lastSuccessfulSyncAt  DateTime?
-  lastFailureCode       String?
-  createdAt             DateTime             @default(now())
-  updatedAt             DateTime             @updatedAt
-  snapshots             PolicyDocumentSnapshot[]
+  id                   String                   @id @default(cuid())
+  type                 PolicySourceType
+  canonicalUrl         String                   @unique
+  resourceToken        String                   @unique
+  title                String
+  enabled              Boolean                  @default(true)
+  createdByEmployeeId  String
+  lastSuccessfulSyncAt DateTime?
+  lastFailureCode      String?
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+  snapshots            PolicyDocumentSnapshot[]
 
   @@index([enabled, updatedAt])
 }
 
 model PolicyDocumentSnapshot {
-  id              String               @id @default(cuid())
-  sourceId        String
-  source          PolicySource         @relation(fields: [sourceId], references: [id], onDelete: Cascade)
-  status          PolicySnapshotStatus @default(STAGED)
-  sourceRevision  String
-  contentHash     String
-  title           String
-  blocks          Json
-  createdAt       DateTime             @default(now())
-  activatedAt     DateTime?
-  chunks          PolicyChunk[]
+  id             String               @id @default(cuid())
+  sourceId       String
+  source         PolicySource         @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  status         PolicySnapshotStatus @default(STAGED)
+  sourceRevision String
+  contentHash    String
+  title          String
+  blocks         Json
+  createdAt      DateTime             @default(now())
+  activatedAt    DateTime?
+  chunks         PolicyChunk[]
 
   @@unique([sourceId, sourceRevision])
   @@index([sourceId, status, createdAt])
 }
 
 model PolicyChunk {
-  id          String                 @id @default(cuid())
-  snapshotId  String
-  snapshot    PolicyDocumentSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
-  sequence    Int
-  headingPath String[]               @default([])
-  content     String
+  id           String                       @id @default(cuid())
+  snapshotId   String
+  snapshot     PolicyDocumentSnapshot       @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  sequence     Int
+  headingPath  String[]                     @default([])
+  content      String
   sourceAnchor String?
-  embedding   Unsupported("vector(1024)")?
-  createdAt   DateTime               @default(now())
+  embedding    Unsupported("vector(1024)")?
+  createdAt    DateTime                     @default(now())
 
   @@unique([snapshotId, sequence])
   @@index([snapshotId, sequence])
