@@ -37,7 +37,7 @@ POLICY_ADMIN_FEISHU_OPEN_IDS="ou_finance_a,ou_finance_b"
 
 启动前执行 `npm run feishu:worker` 所需的环境校验：`FEISHU_BOT_ENABLED=true`、飞书 App 凭据、机器人 `open_id`、`APP_PUBLIC_URL`、数据库、MinIO、ClamAV 和 OCR 地址均必须完整。生产环境的 `APP_PUBLIC_URL` 必须为 HTTPS。
 
-长连接回调仅持久化事件 ID、消息 ID、会话 ID、发送者 `open_id` 和状态，不记录正文、附件字节、对象键或 access token。Worker 会领取 `PENDING` 与安全可重试事件；已完成业务即使飞书回复失败也不会回滚草稿或附件。
+长连接回调仅持久化事件 ID、消息 ID、会话 ID、发送者 `open_id` 和状态，不记录原始飞书事件包、附件字节、对象键或 access token。规范化的用户文本与助手安全回复保存在员工会话中，用于跨 Web/飞书私有历史回放；会话不是草稿事实来源，金额、票据、版本与提交状态始终从 Intake/ClaimDraft 重新读取。Worker 会领取 `PENDING` 与安全可重试事件；已完成业务即使飞书回复失败也不会回滚草稿、附件或已保存会话消息。
 
 容器部署：
 
@@ -48,5 +48,13 @@ docker compose restart feishu-bot-worker
 ```
 
 Worker 重启后会恢复未领取或可安全重试的事件。若 OCR、病毒扫描或对象存储不可用，先恢复相应依赖，再在 Web 工作台确认草稿和附件状态；不要通过删除数据库事件来“重试”。
+
+### 跨渠道会话迁移、留存与回滚
+
+部署包含 `AgentConversation`、`AgentMessage` 和 `ReimbursementIntake` 的版本时，先备份 PostgreSQL，再执行 `npx prisma migrate deploy --config prisma7.config.ts`，随后同时滚动重启 `web` 与 `feishu-bot-worker`。Worker 与 Web 必须连接同一数据库，才能让员工私有 Web 会话和飞书单聊共享历史。群聊按员工和群聊 ID 隔离，排障时不得把群聊消息导出到员工私有会话或日志。
+
+会话、消息和 Intake 随员工删除级联清理；删除草稿只会将关联 Intake 的草稿引用置空，不删除会话历史。不要通过清空会话表来处理单一失败：对于 OCR/模型/回复失败，保留已保存消息和 Intake，以服务端安全错误分类提示重试或回到 Web。需要缩短留存期时，应先制定员工、审计和政策依据的保留策略并经数据负责人审批，再执行可验证的分批清理。
+
+应用回滚只能回滚应用镜像；已经执行的会话迁移保持在数据库中，不回退或手改 Prisma 迁移记录。旧 Worker 版本不认识新会话契约，因此发布后如必须回滚，应先停止 Worker、回滚 Web 与 Worker 到同一兼容版本，并验证没有待领取的飞书事件，再恢复长连接。
 
 发布前在测试企业逐项核对：发布应用版本；单聊文本；群聊仅 `@机器人`；JPG/PNG/PDF；未绑定 OAuth 用户；相同消息重投；Worker 重启；飞书下载、OCR、模型和回复失败；以及 Web 仍是建议确认、删除和提交的唯一入口。自动化测试只使用伪造飞书消息和附件，不使用真实 App Secret 或真实发票。

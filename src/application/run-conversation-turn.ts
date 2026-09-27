@@ -4,7 +4,7 @@ import type { ConversationDecision, ChatModel } from "@/src/infrastructure/model
 import type { PolicyCitation } from "@/src/application/search-policy-knowledge";
 
 type ConversationRecord = { id: string; summary: string; summaryThroughSequence: number };
-type ConversationMessage = { id?: string; sequence: number; role: AgentMessageRole; channel: AgentMessageChannel; text: string };
+type ConversationMessage = { id?: string; sequence: number; role: AgentMessageRole; channel: AgentMessageChannel; text: string; citations?: unknown; result?: unknown };
 type IntakeRecord = {
   id: string;
   employeeId: string;
@@ -20,6 +20,7 @@ export type ConversationStore = {
   getConversationByIdOrThrow(id: string): Promise<ConversationRecord>;
   listMessages(input: { conversationId: string; limit?: number }): Promise<ConversationMessage[]>;
   appendMessage(input: { conversationId: string; role: AgentMessageRole; channel: AgentMessageChannel; channelMessageId?: string | null; text: string; citations?: Record<string, unknown>[]; result?: Record<string, unknown> }): Promise<unknown>;
+  appendUserMessageIfAbsent?(input: { conversationId: string; role: "USER"; channel: AgentMessageChannel; channelMessageId: string; text: string }): Promise<{ message: { sequence: number }; created: boolean }>;
   getCurrentIntake(employeeId: string): Promise<IntakeRecord | null>;
   createIntake(input: { employeeId: string; conversationId: string; claimId?: string | null; collectedFields?: Record<string, unknown>; pendingFields?: string[]; submissionToken?: string | null }): Promise<IntakeRecord>;
   updateIntake(input: { id: string; status?: ReimbursementIntakeStatus; claimId?: string | null; collectedFields?: Record<string, unknown>; pendingFields?: string[]; submissionToken?: string | null; lastUserConfirmationAt?: Date | null }): Promise<IntakeRecord>;
@@ -51,7 +52,12 @@ export async function runConversationTurn(
 ): Promise<ConversationTurnResult> {
   const message = normalizeMessage(input.message);
   const conversation = await deps.conversations.getConversationByIdOrThrow(input.conversationId);
-  await deps.conversations.appendMessage({ conversationId: conversation.id, role: "USER", channel: input.channel, channelMessageId: input.channelMessageId, text: message });
+  if (input.channelMessageId && deps.conversations.appendUserMessageIfAbsent) {
+    const appended = await deps.conversations.appendUserMessageIfAbsent({ conversationId: conversation.id, role: "USER", channel: input.channel, channelMessageId: input.channelMessageId, text: message });
+    if (!appended.created) return replayPersistedTurn(conversation.id, appended.message.sequence, deps.conversations);
+  } else {
+    await deps.conversations.appendMessage({ conversationId: conversation.id, role: "USER", channel: input.channel, channelMessageId: input.channelMessageId, text: message });
+  }
   const active = await getConversationIntake(input.actorId, conversation.id, deps.conversations);
 
   const attachment = input.attachment;
@@ -242,6 +248,27 @@ async function persistReply(
     result: { intakeId: intake?.id ?? null, claimId: intake?.claimId ?? null, submissionNumber: submissionNumber ?? null },
   });
   return { reply, citations, intake, ...(submissionNumber ? { submissionNumber } : {}) };
+}
+
+async function replayPersistedTurn(conversationId: string, userSequence: number, conversations: ConversationStore): Promise<ConversationTurnResult> {
+  const messages = await conversations.listMessages({ conversationId, limit: 50 });
+  const assistant = messages.find((message) => message.sequence > userSequence && message.role === "ASSISTANT");
+  if (!assistant) throw new Error("duplicate message is pending");
+  const result = isRecord(assistant.result) ? assistant.result : {};
+  const submissionNumber = typeof result.submissionNumber === "string" ? result.submissionNumber : undefined;
+  return { reply: assistant.text, citations: asPolicyCitations(assistant.citations), intake: null, ...(submissionNumber ? { submissionNumber } : {}) };
+}
+
+function asPolicyCitations(value: unknown): PolicyCitation[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!isRecord(item) || typeof item.id !== "string" || typeof item.title !== "string" || typeof item.url !== "string" || typeof item.excerpt !== "string" || !Array.isArray(item.headingPath) || !item.headingPath.every((part) => typeof part === "string") || typeof item.score !== "number") return [];
+    return [{ id: item.id, title: item.title, url: item.url, excerpt: item.excerpt, headingPath: item.headingPath, score: item.score }];
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function normalizeMessage(message: string): string {

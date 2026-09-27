@@ -51,17 +51,26 @@ export class AgentConversationRepository {
   }
 
   async appendMessage(input: AppendAgentMessageInput): Promise<AgentMessage> {
+    return (await this.appendMessageOnce(input)).message;
+  }
+
+  async appendUserMessageIfAbsent(input: AppendAgentMessageInput): Promise<{ message: AgentMessage; created: boolean }> {
+    if (input.role !== "USER" || !input.channelMessageId?.trim()) throw new Error("channel user message ID is required");
+    return this.appendMessageOnce(input);
+  }
+
+  private async appendMessageOnce(input: AppendAgentMessageInput): Promise<{ message: AgentMessage; created: boolean }> {
     const channelMessageId = input.channelMessageId?.trim() || null;
     if (channelMessageId) {
       const existing = await this.prisma.agentMessage.findUnique({ where: { channelMessageId } });
-      if (existing) return existing;
+      if (existing) return { message: existing, created: false };
     }
 
     try {
       return await this.prisma.$transaction(async (tx) => {
         if (channelMessageId) {
           const existing = await tx.agentMessage.findUnique({ where: { channelMessageId } });
-          if (existing) return existing;
+          if (existing) return { message: existing, created: false };
         }
 
         const conversation = await tx.agentConversation.update({
@@ -69,7 +78,7 @@ export class AgentConversationRepository {
           data: { nextSequence: { increment: 1 }, lastActiveAt: new Date() },
           select: { nextSequence: true },
         });
-        return tx.agentMessage.create({
+        const message = await tx.agentMessage.create({
           data: {
             conversationId: input.conversationId,
             sequence: conversation.nextSequence - 1,
@@ -81,12 +90,13 @@ export class AgentConversationRepository {
             result: normalizeSnapshot(input.result),
           },
         });
+        return { message, created: true };
       });
     } catch (error) {
       if (!channelMessageId || !isUniqueConstraintError(error)) throw error;
       const duplicate = await this.prisma.agentMessage.findUnique({ where: { channelMessageId } });
       if (!duplicate) throw error;
-      return duplicate;
+      return { message: duplicate, created: false };
     }
   }
 
