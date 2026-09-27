@@ -2,12 +2,11 @@
 
 import { useRef, useState } from "react";
 
-import type { AgentProposal } from "@/src/ui/claim-types";
+import { formatPolicyEvidence, type AgentProposal, type PolicyEvidence } from "@/src/ui/claim-types";
 import { useReceiptUpload } from "@/src/ui/use-receipt-upload";
 
 type Props = { claimId: string; version: number; proposals: AgentProposal[]; onComplete: () => void };
-type Citation = { id: string; title: string; url: string; excerpt: string; headingPath: string[] };
-type Turn = { author: "assistant" | "employee"; text: string; citations?: Citation[] };
+type Turn = { author: "assistant" | "employee"; text: string; citations?: PolicyEvidence[] };
 const labels: Record<AgentProposal["field"], string> = { purpose: "报销事由", invoiceNumber: "发票号码", issuedOn: "开票日期", totalAmountCents: "价税合计" };
 
 export function ClaimChat({ claimId, version, proposals, onComplete }: Props) {
@@ -21,7 +20,7 @@ export function ClaimChat({ claimId, version, proposals, onComplete }: Props) {
   async function send(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); const content = message.trim(); if (!content || isSending) return;
     setTurns((current) => [...current, { author: "employee", text: content }]); setMessage(""); setIsSending(true);
-    try { const response = await fetch(`/api/claims/${claimId}/chat`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: content }) }); const result = await response.json() as { reply?: string; error?: string; clarifications?: Array<{ prompt: string }>; citations?: Citation[] }; if (!response.ok) throw new Error(result.error || "暂时无法处理这条消息。"); setTurns((current) => [...current, { author: "assistant", text: [result.reply, result.clarifications?.[0]?.prompt].filter(Boolean).join("\n") || "已记录，我会继续检查报销单。", citations: result.citations }]); onComplete(); }
+    try { const response = await fetch(`/api/claims/${claimId}/chat`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: content }) }); const result = await response.json() as { reply?: string; error?: string; clarifications?: Array<{ prompt: string }>; citations?: PolicyEvidence[] }; if (!response.ok) throw new Error(result.error || "暂时无法处理这条消息。"); setTurns((current) => [...current, { author: "assistant", text: [result.reply, result.clarifications?.[0]?.prompt].filter(Boolean).join("\n") || "已记录，我会继续检查报销单。", citations: result.citations }]); onComplete(); }
     catch (error) { setTurns((current) => [...current, { author: "assistant", text: error instanceof Error ? error.message : "暂时无法处理这条消息。" }]); }
     finally { setIsSending(false); }
   }
@@ -35,9 +34,24 @@ export function ClaimChat({ claimId, version, proposals, onComplete }: Props) {
 
   return <section className="chat-panel" aria-labelledby="claim-chat-title">
     <div className="section-heading"><div><p className="eyebrow">AI 澄清</p><h2 id="claim-chat-title">补充说明</h2></div></div>
-    <div className="chat-log" aria-live="polite">{turns.map((turn, index) => <div key={`${turn.author}-${index}`}><p className={turn.author === "assistant" ? "message-assistant" : "message-employee"}>{turn.text}</p>{turn.citations?.map((citation) => <a className="policy-citation" href={citation.url} key={citation.id} rel="noreferrer" target="_blank">{citation.title}：{citation.excerpt}</a>)}</div>)}</div>
+    <div className="chat-log" aria-live="polite">{turns.map((turn, index) => <div key={`${turn.author}-${index}`}><p className={turn.author === "assistant" ? "message-assistant" : "message-employee"}>{turn.text}</p>{turn.citations?.map((citation) => <PolicyEvidenceCard evidence={citation} key={citation.id} />)}</div>)}</div>
     {proposals.length ? <ul className="agent-proposals" aria-label="AI 字段建议">{proposals.map((proposal) => <li key={proposal.id}><strong>{labels[proposal.field]}：{proposal.displayValue}</strong><p>对象：{proposal.targetLabel} · 当前值：{proposal.currentValue}</p><p>{proposal.reason}</p>{proposal.status === "PENDING" ? <div><button className="button-primary" type="button" disabled={resolving !== null} onClick={() => void resolve(proposal, "accept")}>{resolving === proposal.id ? "处理中…" : "接受并写入"}</button><button className="button-outline" type="button" disabled={resolving !== null} onClick={() => void resolve(proposal, "reject")}>忽略</button></div> : <span className="receipt-status">{proposal.status === "ACCEPTED" ? "已接受" : proposal.status === "REJECTED" ? "已忽略" : "已过期"}</span>}</li>)}</ul> : null}
     <div className="chat-attachment"><input ref={inputRef} className="sr-only" type="file" accept="image/jpeg,image/png,application/pdf" aria-label="在对话中上传票据" onChange={(event) => { void upload(event.target.files?.[0]).then((result) => { if (result) setTurns((items) => [...items, { author: "assistant", text: result.status === "EXTRACTED" ? "附件已处理完成，请在票据区域查看识别结果。" : "附件已保存，但识别未完成；可在票据区域重新识别。" }]); }); event.currentTarget.value = ""; }} /><button className="button-outline" type="button" onClick={() => inputRef.current?.click()} disabled={isUploading}>{isUploading ? "附件处理中…" : "上传附件"}</button><span role="status">{uploadMessage}</span></div>
     <form className="chat-form" noValidate onSubmit={send}><label className="sr-only" htmlFor="agent-message">回复 AI</label><input id="agent-message" value={message} onChange={(event) => setMessage(event.target.value)} placeholder="例如：本次为客户拜访" disabled={isSending} /><button className="button-primary" type="submit" disabled={!message.trim() || isSending}>{isSending ? "发送中…" : "发送"}</button></form>
   </section>;
+}
+
+function PolicyEvidenceCard({ evidence }: { evidence: PolicyEvidence }) {
+  const display = formatPolicyEvidence(evidence);
+  return <details className="policy-evidence">
+    <summary>
+      <span>检索依据</span>
+      <strong>{display.sourceLabel}</strong>
+      <small>{display.scoreLabel}</small>
+    </summary>
+    <div className="policy-evidence-body">
+      <p>{display.excerpt}</p>
+      <a href={evidence.url} rel="noreferrer" target="_blank">查看制度原文</a>
+    </div>
+  </details>;
 }

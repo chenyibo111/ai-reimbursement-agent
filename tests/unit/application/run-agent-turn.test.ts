@@ -40,7 +40,7 @@ it("rejects unavailable model proposals without creating a field mutation", asyn
 
 it("returns only server-approved citations for a policy question", async () => {
   const answerPolicy = vi.fn(async () => "住宿费用请以制度规定的上限为准。");
-  const result = await runAgentTurn({ actorId: "employee-1", claimId: "claim-1", message: "报销政策是什么" }, { model: { decide: async () => { throw new Error("must not call model"); }, answerPolicy }, getContext: async () => ({ summary: { purpose: null, totalAmountCents: 0, expenses: [] }, issues: [], allowedTargets: [], targetMap: {}, claimVersion: 1 }), createProposal: async () => { throw new Error("must not create"); }, audit: { append: async () => undefined }, searchPolicy: async () => [{ id: "safe", title: "制度", url: "https://example", excerpt: "住宿上限", headingPath: [] }] });
+  const result = await runAgentTurn({ actorId: "employee-1", claimId: "claim-1", message: "报销政策是什么" }, { model: { decide: async () => { throw new Error("must not call model"); }, answerPolicy }, getContext: async () => ({ summary: { purpose: null, totalAmountCents: 0, expenses: [] }, issues: [], allowedTargets: [], targetMap: {}, claimVersion: 1 }), createProposal: async () => { throw new Error("must not create"); }, audit: { append: async () => undefined }, searchPolicy: async () => [{ id: "safe", title: "制度", url: "https://example", excerpt: "住宿上限", headingPath: [], score: 0.9 }] });
   expect(result).toMatchObject({ proposals: [], citations: [{ id: "safe" }] });
   expect(result.reply).toBe("住宿费用请以制度规定的上限为准。");
   expect(answerPolicy).toHaveBeenCalledWith({
@@ -50,7 +50,7 @@ it("returns only server-approved citations for a policy question", async () => {
 });
 
 it("treats a reimbursement rule question as a policy knowledge query", async () => {
-  const searchPolicy = vi.fn(async () => [{ id: "safe", title: "制度", url: "https://example", excerpt: "住宿上限", headingPath: [] }]);
+  const searchPolicy = vi.fn(async () => [{ id: "safe", title: "制度", url: "https://example", excerpt: "住宿上限", headingPath: [], score: 0.9 }]);
   const result = await runAgentTurn({ actorId: "employee-1", claimId: "claim-1", message: "住宿费报销规则是怎么样的" }, {
     model: { decide: async () => { throw new Error("must not call model"); } },
     getContext: async () => ({ summary: { purpose: null, totalAmountCents: 0, expenses: [] }, issues: [], allowedTargets: [], targetMap: {}, claimVersion: 1 }),
@@ -64,7 +64,7 @@ it("treats a reimbursement rule question as a policy knowledge query", async () 
 });
 
 it("uses the model intent classifier for a policy question without policy keywords", async () => {
-  const searchPolicy = vi.fn(async () => [{ id: "safe", title: "制度", url: "https://example", excerpt: "住宿上限", headingPath: [] }]);
+  const searchPolicy = vi.fn(async () => [{ id: "safe", title: "制度", url: "https://example", excerpt: "住宿上限", headingPath: [], score: 0.9 }]);
   const result = await runAgentTurn({ actorId: "employee-1", claimId: "claim-1", message: "酒店住宿上限是多少" }, {
     model: {
       decide: async () => { throw new Error("must not call agent model"); },

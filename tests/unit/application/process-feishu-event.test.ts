@@ -139,7 +139,7 @@ it("includes only server-approved policy citations in a Feishu policy reply", as
       reply: "住宿费用上限为每晚 500 元。",
       clarifications: [],
       proposals: [],
-      citations: [{ id: "chunk-1", title: "差旅制度", url: "https://acme.feishu.cn/docx/ABCdef0123456789#住宿", excerpt: "住宿上限 500 元", headingPath: ["住宿"] }],
+      citations: [{ id: "chunk-1", title: "差旅制度", url: "https://acme.feishu.cn/docx/ABCdef0123456789#住宿", excerpt: "一线城市住宿上限 500 元。", headingPath: ["住宿"], score: 0.91 }],
     }),
   });
 
@@ -149,5 +149,6 @@ it("includes only server-approved policy citations in a Feishu policy reply", as
   expect(result.replyText).toContain("住宿费用上限为每晚 500 元。");
   expect(result.replyText).toContain("差旅制度");
   expect(result.replyText).toContain("住宿");
+  expect(result.replyText).toContain("证据摘录：一线城市住宿上限 500 元。");
   expect(result.replyText).not.toContain("https://acme.feishu.cn/docx/ABCdef0123456789#住宿");
 });

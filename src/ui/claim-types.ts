@@ -43,6 +43,7 @@ export type AgentProposal = {
 
 export type ValidationIssue = { code: string; severity: "BLOCKING" | "WARNING"; message: string; policyVersionId?: string; ruleCode?: string };
 export type ConfirmableExpenseField = "invoiceNumber" | "issuedOn" | "totalAmountCents";
+export type PolicyEvidence = { id: string; title: string; url: string; excerpt: string; headingPath: string[]; score: number };
 
 export function hasBlockingValidation(issues: ValidationIssue[]) {
   return issues.some((issue) => issue.severity === "BLOCKING");
@@ -50,6 +51,15 @@ export function hasBlockingValidation(issues: ValidationIssue[]) {
 
 export function formatMoney(cents: number) {
   return new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY" }).format(cents / 100);
+}
+
+export function formatPolicyEvidence(evidence: PolicyEvidence) {
+  const section = evidence.headingPath.filter(Boolean).join(" > ");
+  return {
+    sourceLabel: `${evidence.title}${section ? ` · ${section}` : ""}`,
+    scoreLabel: `检索相关度 ${Math.round(Math.min(1, Math.max(0, evidence.score)) * 100)}%`,
+    excerpt: evidence.excerpt.trim(),
+  };
 }
 
 export function receiptDisplayName(receipt: Pick<ClaimReceipt, "id" | "originalFilename">) {

@@ -163,7 +163,8 @@ function safeReply(agent: AgentTurnResult): string {
   const reply = agent.reply.trim().slice(0, 1_000) || "已生成补充建议。";
   const citations = agent.citations?.slice(0, 3).map((citation) => {
     const section = citation.headingPath.filter(Boolean).join(" > ");
-    return `政策依据：${citation.title}${section ? `（${section}）` : ""}`;
+    const excerpt = citation.excerpt.trim().replace(/\s+/g, " ").slice(0, 280);
+    return `政策依据：${citation.title}${section ? `（${section}）` : ""}${excerpt ? `\n证据摘录：${excerpt}` : ""}`;
   }).join("\n") ?? "";
   return citations ? `${reply}\n\n${citations}` : reply;
 }

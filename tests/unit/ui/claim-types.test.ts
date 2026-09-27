@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 
-import { extractedReceiptField, hasBlockingValidation, lowConfidenceField, receiptDisplayName, receiptStatusLabel, type ClaimReceipt } from "@/src/ui/claim-types";
+import { extractedReceiptField, formatPolicyEvidence, hasBlockingValidation, lowConfidenceField, receiptDisplayName, receiptStatusLabel, type ClaimReceipt } from "@/src/ui/claim-types";
 
 const receipt: ClaimReceipt = {
   id: "receipt-1",
@@ -33,4 +33,19 @@ it("reads recognized values and confidence without inventing values for missing 
 it("marks a submission as blocked only when the server reports a blocking validation", () => {
   expect(hasBlockingValidation([{ code: "DUPLICATE_RECEIPT", severity: "BLOCKING", message: "发现重复票据" }])).toBe(true);
   expect(hasBlockingValidation([{ code: "MANUAL_REVIEW", severity: "WARNING", message: "建议核对" }])).toBe(false);
+});
+
+it("formats a policy evidence item with its exact section and retrieval score", () => {
+  expect(formatPolicyEvidence({
+    id: "chunk-1",
+    title: "差旅制度",
+    url: "https://example.test/docx/1#住宿",
+    excerpt: "一线城市住宿上限为每晚 500 元。",
+    headingPath: ["差旅费用", "住宿标准"],
+    score: 0.906,
+  })).toEqual({
+    sourceLabel: "差旅制度 · 差旅费用 > 住宿标准",
+    scoreLabel: "检索相关度 91%",
+    excerpt: "一线城市住宿上限为每晚 500 元。",
+  });
 });
