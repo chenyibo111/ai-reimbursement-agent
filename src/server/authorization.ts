@@ -12,7 +12,8 @@ export function isPolicyAdmin(
   employee: { id: string; feishuUserId: string | null; role?: EmployeeRoleName },
   config: AppConfig,
 ): boolean {
-  if (employee.role !== undefined) return employee.id === actorId && employee.role === "ADMIN";
+  if (employee.role === "ADMIN") return employee.id === actorId;
+  if (employee.role === "FINANCE_REVIEWER") return false;
   return employee.id === actorId
     && employee.feishuUserId !== null
     && config.policyAdminOpenIds.has(employee.feishuUserId);

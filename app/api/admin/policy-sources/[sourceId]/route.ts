@@ -24,7 +24,7 @@ async function admin(request: Request) {
   const actorId = getSessionActorId(request);
   if (!process.env.DATABASE_URL) throw new Error("database configuration is missing");
   const prisma = createPrismaClient(process.env.DATABASE_URL);
-  const employee = await prisma.employee.findUnique({ where: { id: actorId }, select: { id: true, feishuUserId: true } });
+  const employee = await prisma.employee.findUnique({ where: { id: actorId }, select: { id: true, feishuUserId: true, role: true } });
   if (!employee || !isPolicyAdmin(actorId, employee, loadConfig(process.env))) throw new Error("forbidden");
   return { prisma };
 }

@@ -13,7 +13,7 @@ export async function POST(request: Request, context: { params: Promise<{ policy
     const expectedVersion = body.expectedVersion;
     if (typeof expectedVersion !== "number" || !Number.isInteger(expectedVersion)) throw new Error("invalid policy publish");
     const prisma = db();
-    const employee = await prisma.employee.findUnique({ where: { id: actorId }, select: { id: true, feishuUserId: true } });
+    const employee = await prisma.employee.findUnique({ where: { id: actorId }, select: { id: true, feishuUserId: true, role: true } });
     if (!employee || !isPolicyAdmin(actorId, employee, loadConfig(process.env))) throw new Error("forbidden");
     const { policyVersionId } = await context.params;
     const policy = await new PrismaPolicyRepository(prisma).publish({

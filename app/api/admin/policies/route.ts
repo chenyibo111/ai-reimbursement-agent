@@ -10,7 +10,7 @@ export async function GET(request: Request) {
   try {
     const actorId = getSessionActorId(request);
     const prisma = getPrisma();
-    const employee = await prisma.employee.findUnique({ where: { id: actorId }, select: { id: true, feishuUserId: true } });
+    const employee = await prisma.employee.findUnique({ where: { id: actorId }, select: { id: true, feishuUserId: true, role: true } });
     if (!employee || !isPolicyAdmin(actorId, employee, loadConfig(process.env))) throw new Error("forbidden");
     const policies = await prisma.policyVersion.findMany({
       orderBy: [{ effectiveFrom: "desc" }, { createdAt: "desc" }],
@@ -29,7 +29,7 @@ export async function POST(request: Request) {
     const body = await request.json() as { title?: unknown; effectiveFrom?: unknown };
     if (typeof body.title !== "string" || !body.title.trim() || typeof body.effectiveFrom !== "string" || Number.isNaN(Date.parse(body.effectiveFrom))) throw new Error("invalid policy draft");
     const prisma = getPrisma();
-    const employee = await prisma.employee.findUnique({ where: { id: actorId }, select: { id: true, feishuUserId: true } });
+    const employee = await prisma.employee.findUnique({ where: { id: actorId }, select: { id: true, feishuUserId: true, role: true } });
     if (!employee || !isPolicyAdmin(actorId, employee, loadConfig(process.env))) throw new Error("forbidden");
     const draft = await new PrismaPolicyRepository(prisma).createDraft({ title: body.title, actorId, effectiveFrom: new Date(body.effectiveFrom) });
     return NextResponse.json(draft, { status: 201 });

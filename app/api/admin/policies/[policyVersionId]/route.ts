@@ -9,7 +9,7 @@ export async function GET(request: Request, context: { params: Promise<{ policyV
   try {
     const actorId = getSessionActorId(request);
     const prisma = db();
-    const employee = await prisma.employee.findUnique({ where: { id: actorId }, select: { id: true, feishuUserId: true } });
+    const employee = await prisma.employee.findUnique({ where: { id: actorId }, select: { id: true, feishuUserId: true, role: true } });
     if (!employee || !isPolicyAdmin(actorId, employee, loadConfig(process.env))) throw new Error("forbidden");
     const { policyVersionId } = await context.params;
     const policy = await prisma.policyVersion.findUnique({ where: { id: policyVersionId }, include: { rules: { orderBy: { sortOrder: "asc" } } } });
