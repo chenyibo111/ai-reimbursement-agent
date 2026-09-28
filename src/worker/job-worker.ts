@@ -1,4 +1,7 @@
 import { runAsyncJobWorkerOnce } from "@/src/application/run-async-job-worker";
+import { processAsyncJob } from "@/src/application/process-async-job";
+import { extractReceipt } from "@/src/application/extract-receipt";
+import { createExtractReceiptDeps } from "@/src/application/create-extract-receipt-deps";
 import { PrismaAsyncJobRepository } from "@/src/infrastructure/prisma/async-job-repository";
 import { createPrismaClient } from "@/src/infrastructure/prisma/client";
 
@@ -10,6 +13,7 @@ async function main() {
   if (!Number.isInteger(pollIntervalMs) || pollIntervalMs < 100) throw new Error("JOB_WORKER_POLL_INTERVAL_MS must be an integer of at least 100");
   const prisma = createPrismaClient(databaseUrl);
   const jobs = new PrismaAsyncJobRepository(prisma);
+  const extractDeps = createExtractReceiptDeps(prisma);
   let stopping = false;
   const stop = () => { stopping = true; };
   process.once("SIGINT", stop);
@@ -20,7 +24,7 @@ async function main() {
     while (!stopping) {
       const processed = await runAsyncJobWorkerOnce({
         jobs,
-        process: async () => ({ type: "RETRY_WAIT", failureCode: "WORKER_PROCESSOR_UNAVAILABLE" }),
+        process: (job) => processAsyncJob(job, { jobs, extractReceipt: (input) => extractReceipt(input, extractDeps) }),
         now: () => new Date(),
         leaseMs: 60_000,
       });

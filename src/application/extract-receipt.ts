@@ -3,7 +3,7 @@ import type { ExtractionValidationIssue, ReceiptExtraction } from "@/src/domain/
 import type { ReceiptExtractionProvider } from "@/src/infrastructure/extraction/receipt-extraction-provider";
 import { assertClaimOwner } from "@/src/server/authorization";
 
-export type ExtractReceiptInput = { actorId: string; claimId: string; receiptId: string };
+export type ExtractReceiptInput = { actorId: string; claimId: string; receiptId: string; system?: true };
 export type ExtractReceiptResult = {
   receiptId: string;
   expenseItemCreated: boolean;
@@ -36,7 +36,7 @@ export type ExtractReceiptDeps = {
 
 export async function extractReceipt(input: ExtractReceiptInput, deps: ExtractReceiptDeps): Promise<ExtractReceiptResult> {
   const claim = await deps.claims.getByIdOrThrow(input.claimId);
-  assertClaimOwner(input.actorId, claim);
+  if (!input.system) assertClaimOwner(input.actorId, claim);
   const receipt = await deps.receipts.getByIdOrThrow(input.receiptId, input.claimId);
   let extraction: ReceiptExtraction;
   try {

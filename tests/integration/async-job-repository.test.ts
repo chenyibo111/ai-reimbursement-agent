@@ -91,11 +91,11 @@ it("recovers expired leases and escalates a final retry to review", async () => 
   const target = await createExtractionTarget("retry");
   const repository = new PrismaAsyncJobRepository(prisma);
   const created = await repository.enqueueJob({ kind: "RECEIPT_EXTRACTION", claimId: target.claimId, receiptId: target.receiptId });
-  const startedAt = new Date("2026-09-28T02:00:00.000Z");
+  const startedAt = new Date("2099-09-28T02:00:00.000Z");
   await repository.claimNextJob(startedAt, 60_000);
 
-  expect(await repository.recoverExpiredLeases(new Date("2026-09-28T02:02:00.000Z"))).toBe(1);
-  await expect(prisma.asyncJob.findUniqueOrThrow({ where: { id: created.id } })).resolves.toMatchObject({ status: "RETRY_WAIT", availableAt: new Date("2026-09-28T02:02:00.000Z") });
+  expect(await repository.recoverExpiredLeases(new Date("2099-09-28T02:02:00.000Z"))).toBe(1);
+  await expect(prisma.asyncJob.findUniqueOrThrow({ where: { id: created.id } })).resolves.toMatchObject({ status: "RETRY_WAIT", availableAt: new Date("2099-09-28T02:02:00.000Z") });
 
   await prisma.asyncJob.update({ where: { id: created.id }, data: { status: "RUNNING", attemptCount: 3, leaseUntil: new Date("2026-09-28T03:00:00.000Z") } });
   await repository.markRetryWait(created.id, "OCR_PROVIDER_UNAVAILABLE", new Date("2026-09-28T02:03:00.000Z"));

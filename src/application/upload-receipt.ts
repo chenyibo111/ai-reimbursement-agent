@@ -25,6 +25,7 @@ export type UploadReceiptDeps = {
   store: Pick<ObjectStore, "put">;
   scanner: FileSafetyScanner;
   audit: AuditEventWriter;
+  jobs: { enqueueJob(input: { kind: "RECEIPT_EXTRACTION"; claimId: string; receiptId: string }): Promise<unknown> };
 };
 
 export async function preflightReceiptUpload(
@@ -64,6 +65,7 @@ export async function uploadReceipt(input: UploadReceiptInput, deps: UploadRecei
     },
     deps.audit,
   );
+  await deps.jobs.enqueueJob({ kind: "RECEIPT_EXTRACTION", claimId: receipt.claimId, receiptId: receipt.id });
 
   return receipt;
 }

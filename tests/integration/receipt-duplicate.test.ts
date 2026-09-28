@@ -25,7 +25,7 @@ beforeEach(async () => {
 
 afterAll(async () => prisma.$disconnect());
 
-it("stores the extraction but does not double count a duplicate file", async () => {
+it("queues duplicate receipt extraction without executing OCR in the request", async () => {
   await prisma.employee.create({ data: { id: "employee-1", displayName: "测试员工" } });
   const claim = await prisma.claimDraft.create({ data: { employeeId: "employee-1" } });
   const prior = await prisma.receipt.create({ data: { claimId: claim.id, objectKey: "claims/prior", contentHash: "same-hash", mimeType: "application/pdf", status: "EXTRACTED" } });
@@ -38,9 +38,10 @@ it("stores the extraction but does not double count a duplicate file", async () 
     { params: Promise.resolve({ claimId: claim.id, receiptId: current.id }) },
   );
 
-  expect(response.status).toBe(200);
-  await expect(response.json()).resolves.toMatchObject({ receiptId: current.id, expenseItemCreated: false, validationIssues: [{ code: "DUPLICATE_FILE" }] });
-  await expect(prisma.receipt.findUniqueOrThrow({ where: { id: current.id } })).resolves.toMatchObject({ status: "EXTRACTED", receiptType: "VAT_INVOICE" });
+  expect(response.status).toBe(202);
+  await expect(response.json()).resolves.toMatchObject({ receiptId: current.id, jobStatus: "PENDING" });
+  await expect(prisma.receipt.findUniqueOrThrow({ where: { id: current.id } })).resolves.toMatchObject({ status: "PENDING", receiptType: null });
+  expect(await prisma.asyncJob.count({ where: { receiptId: current.id, kind: "RECEIPT_EXTRACTION", status: "PENDING" } })).toBe(1);
   expect(await prisma.expenseItem.count({ where: { claimId: claim.id } })).toBe(1);
-  expect(await prisma.validationResult.findFirst({ where: { claimId: claim.id, code: "DUPLICATE_FILE" } })).toBeTruthy();
+  expect(await prisma.validationResult.findFirst({ where: { claimId: claim.id, code: "DUPLICATE_FILE" } })).toBeNull();
 });

@@ -33,8 +33,8 @@ it("rejects a file whose signature does not match its declared type", async () =
   expect(calls).toEqual({ stored: 0, created: 0, scanned: 0 });
 });
 
-it("stores a clean PDF under a private claim prefix and records its hash", async () => {
-  const calls = { stored: 0, created: 0, scanned: 0, keys: [] as string[] };
+it("stores a clean PDF under a private claim prefix and enqueues extraction without invoking OCR", async () => {
+  const calls = { stored: 0, created: 0, scanned: 0, enqueued: 0, keys: [] as string[] };
 
   const receipt = await uploadReceipt(
     {
@@ -49,6 +49,7 @@ it("stores a clean PDF under a private claim prefix and records its hash", async
 
   expect(calls.stored).toBe(1);
   expect(calls.keys[0]).toMatch(/^claims\/claim-1\/receipts\/[\w-]+\/[a-f0-9]{64}$/);
+  expect(calls.enqueued).toBe(1);
   expect(receipt).toMatchObject({ claimId: "claim-1", status: "PENDING", originalFilename: "invoice.pdf" });
   expect(receipt.contentHash).toHaveLength(64);
 });
@@ -72,7 +73,7 @@ it("rejects a PDF with more than 20 pages before scanning or storage", async () 
   expect(calls).toEqual({ stored: 0, created: 0, scanned: 0 });
 });
 
-function createDeps(calls: { stored: number; created: number; scanned: number; keys?: string[] }) {
+function createDeps(calls: { stored: number; created: number; scanned: number; enqueued?: number; keys?: string[] }) {
   return {
     claims: {
       getByIdOrThrow: async () => ({ employeeId: "employee-1" }),
@@ -101,6 +102,11 @@ function createDeps(calls: { stored: number; created: number; scanned: number; k
       }) => {
         calls.created += 1;
         return input;
+      },
+    },
+    jobs: {
+      enqueueJob: async () => {
+        calls.enqueued = (calls.enqueued ?? 0) + 1;
       },
     },
     audit: {

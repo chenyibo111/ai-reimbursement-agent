@@ -15,6 +15,7 @@ import { AgentConversationRepository } from "@/src/infrastructure/prisma/agent-c
 import { PrismaClaimRepository } from "@/src/infrastructure/prisma/claim-repository";
 import { createPrismaClient } from "@/src/infrastructure/prisma/client";
 import { PrismaReceiptRepository } from "@/src/infrastructure/prisma/receipt-repository";
+import { PrismaAsyncJobRepository } from "@/src/infrastructure/prisma/async-job-repository";
 import { loadConfig } from "@/src/server/config";
 import { getSessionActorId } from "@/src/server/session";
 
@@ -41,7 +42,7 @@ export async function POST(request: Request) {
         model: createChatModel(loadConfig(process.env)),
         preflightAttachment: (input) => preflightReceiptUpload(input, scanner),
         createClaim: ({ actorId: claimActorId, purpose }) => createClaimDraft({ actorId: claimActorId, purpose }, { claims, audit }),
-        uploadReceipt: (input) => uploadReceipt(input, { claims, receipts: new PrismaReceiptRepository(prisma), scanner, store: objects, audit }),
+        uploadReceipt: (input) => uploadReceipt(input, { claims, receipts: new PrismaReceiptRepository(prisma), jobs: new PrismaAsyncJobRepository(prisma), scanner, store: objects, audit }),
         extractReceipt: ({ actorId: extractionActorId, claimId, receiptId }) => extractUploadedReceipt({ prisma, actorId: extractionActorId, claimId, receiptId, objects, audit }),
         updatePurpose: async ({ actorId: claimActorId, claimId, value }) => {
           const claim = await claims.getByIdOrThrow(claimId);

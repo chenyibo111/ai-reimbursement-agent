@@ -87,6 +87,32 @@ export class PrismaAsyncJobRepository {
     });
   }
 
+  async getById(jobId: string): Promise<{ id: string; kind: AsyncJobKind; claimId: string | null; receiptId: string | null; policySourceId: string | null; employeeId: string | null } | null> {
+    const job = await this.prisma.asyncJob.findUnique({
+      where: { id: jobId },
+      include: { claim: { select: { employeeId: true } } },
+    });
+    if (!job) return null;
+    return { ...job, employeeId: job.claim?.employeeId ?? null };
+  }
+
+  async needsOcrReview(receiptId: string): Promise<boolean> {
+    const receipt = await this.prisma.receipt.findUnique({ where: { id: receiptId }, select: { extractionPayload: true } });
+    if (!receipt?.extractionPayload || typeof receipt.extractionPayload !== "object" || Array.isArray(receipt.extractionPayload)) return false;
+    return ["invoiceNumber", "issuedOn", "totalAmountCents"].some((field) => {
+      const value = (receipt.extractionPayload as Record<string, unknown>)[field];
+      return typeof value === "object" && value !== null && !Array.isArray(value) && typeof (value as { confidence?: unknown }).confidence === "number" && (value as { confidence: number }).confidence < 0.9;
+    });
+  }
+
+  async createOcrReviewCase(input: { jobId: string; claimId: string; receiptId: string; reasonCode: string }): Promise<void> {
+    try {
+      await this.prisma.reviewCase.create({ data: { kind: "RECEIPT_OCR", jobId: input.jobId, claimId: input.claimId, receiptId: input.receiptId, reasonCode: input.reasonCode } });
+    } catch (error) {
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
+    }
+  }
+
   private findActive(input: EnqueueAsyncJobInput): Promise<AsyncJob | null> {
     const where = input.kind === "RECEIPT_EXTRACTION"
       ? { kind: input.kind satisfies AsyncJobKind, receiptId: input.receiptId, status: { in: [...activeStatuses] } }

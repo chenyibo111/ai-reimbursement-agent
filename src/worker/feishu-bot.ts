@@ -20,6 +20,7 @@ import { AgentConversationRepository } from "@/src/infrastructure/prisma/agent-c
 import { FeishuBotRepository } from "@/src/infrastructure/prisma/feishu-bot-repository";
 import { PrismaPolicyKnowledgeRepository } from "@/src/infrastructure/prisma/policy-knowledge-repository";
 import { PrismaReceiptRepository } from "@/src/infrastructure/prisma/receipt-repository";
+import { PrismaAsyncJobRepository } from "@/src/infrastructure/prisma/async-job-repository";
 import { createClamAvFileSafetyScanner } from "@/src/infrastructure/security/file-safety-scanner";
 import { createS3ObjectStore } from "@/src/infrastructure/storage/object-store";
 import { loadConfig, validateFeishuWorkerEnvironment } from "@/src/server/config";
@@ -97,7 +98,7 @@ function createProcessDeps(input: {
       }) : undefined,
       preflightAttachment: (attachment) => preflightReceiptUpload(attachment, scanner),
       createClaim: ({ actorId, purpose }) => createClaimDraft({ actorId, purpose }, { claims, audit }),
-      uploadReceipt: (receiptInput) => uploadReceipt(receiptInput, { claims, receipts, audit, scanner, store: objects }),
+      uploadReceipt: (receiptInput) => uploadReceipt(receiptInput, { claims, receipts, jobs: new PrismaAsyncJobRepository(input.prisma), audit, scanner, store: objects }),
       extractReceipt: (extractInput) => extractReceipt(extractInput, {
         claims,
         receipts: {

@@ -109,11 +109,6 @@ async function handleAttachment(
     intake = await deps.conversations.updateIntake({ id: intake.id, status: "COLLECTING", submissionToken: null, submissionPreview: null });
   }
   const receipt = await deps.uploadReceipt({ actorId: input.actorId, claimId: intake.claimId!, ...input.attachment });
-  try {
-    await deps.extractReceipt?.({ actorId: input.actorId, claimId: intake.claimId!, receiptId: receipt.id });
-  } catch {
-    return persistReply(input, intake, "票据已安全保存，但识别暂时失败。你可以稍后重新识别或手动补充信息。", [], deps.conversations);
-  }
   return persistReply(input, intake, "票据已上传并进入识别流程。请继续补充本次报销事由。", [], deps.conversations);
 }
 

@@ -4,6 +4,7 @@ import { createPrismaAuditEventWriter } from "@/src/application/audit-event";
 import { uploadReceipt } from "@/src/application/upload-receipt";
 import { PrismaClaimRepository } from "@/src/infrastructure/prisma/claim-repository";
 import { createPrismaClient } from "@/src/infrastructure/prisma/client";
+import { PrismaAsyncJobRepository } from "@/src/infrastructure/prisma/async-job-repository";
 import { PrismaReceiptRepository } from "@/src/infrastructure/prisma/receipt-repository";
 import { createClamAvFileSafetyScanner } from "@/src/infrastructure/security/file-safety-scanner";
 import { createS3ObjectStore } from "@/src/infrastructure/storage/object-store";
@@ -33,6 +34,7 @@ export async function POST(request: Request, context: { params: Promise<{ claimI
       {
         claims: new PrismaClaimRepository(prisma),
         receipts: new PrismaReceiptRepository(prisma),
+        jobs: new PrismaAsyncJobRepository(prisma),
         audit: createPrismaAuditEventWriter(prisma),
         scanner: createClamAvFileSafetyScanner(process.env.CLAMAV_HOST ?? "localhost", Number(process.env.CLAMAV_PORT ?? 3310)),
         store: createS3ObjectStore({
