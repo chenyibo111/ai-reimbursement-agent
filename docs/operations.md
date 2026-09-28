@@ -72,6 +72,23 @@ docker compose restart feishu-bot-worker
 
 Worker 重启后会恢复未领取或可安全重试的事件。若 OCR、病毒扫描或对象存储不可用，先恢复相应依赖，再在 Web 工作台确认草稿和附件状态；不要通过删除数据库事件来“重试”。
 
+### OCR 结果主动通知
+
+飞书附件上传会创建 `ReceiptExtractionNotification` Outbox；它与 OCR `AsyncJob` 一一对应，仅保存原会话 `chatId`、关联 ID 和安全状态，不保存附件字节、对象键或飞书凭据。附件接收与识别结果分别是两条飞书消息：第二条由 `feishu-bot-worker` 在 OCR 任务进入 `SUCCEEDED`、`REVIEW_REQUIRED` 或 `CLOSED` 后投递。
+
+通知状态：`PENDING` 等待 OCR 结束，`PROCESSING` 已被机器人 Worker 领取，`RETRY_WAIT` 等待 1/5/30 分钟退避，`SENT` 已发送，`CLOSED` 因不可恢复的飞书投递错误或达到重试上限而停止。发送使用通知 ID 作为飞书消息 UUID；不要通过删除记录来重发。
+
+排障时先确认两个 Worker 都正常运行，再只读查询状态：
+
+```powershell
+docker compose ps
+docker compose logs --tail=200 job-worker
+docker compose logs --tail=200 feishu-bot-worker
+docker compose exec -T postgres psql -U reimbursement -d reimbursement -c 'SELECT "status", "attemptCount", "failureCode", "createdAt" FROM "ReceiptExtractionNotification" ORDER BY "createdAt" DESC LIMIT 20;'
+```
+
+验收：在已绑定的飞书账号单聊机器人上传一张完整票据，应先收到“正在识别”、后收到字段摘要；上传字段不完整的票据，应收到待确认字段和人工复核提示；从 Web 工作台上传同类文件不应新增通知记录或发送飞书消息。飞书机器人必须拥有发送消息权限，并保持 `APP_PUBLIC_URL` 为员工可访问的 HTTPS 地址。
+
 ### 跨渠道会话迁移、留存与回滚
 
 部署包含 `AgentConversation`、`AgentMessage` 和 `ReimbursementIntake` 的版本时，先备份 PostgreSQL，再执行 `npx prisma migrate deploy --config prisma7.config.ts`，随后同时滚动重启 `web` 与 `feishu-bot-worker`。Worker 与 Web 必须连接同一数据库，才能让员工私有 Web 会话和飞书单聊共享历史。群聊按员工和群聊 ID 隔离，排障时不得把群聊消息导出到员工私有会话或日志。
