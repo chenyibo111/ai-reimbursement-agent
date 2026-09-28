@@ -11,13 +11,14 @@
 | 模块 | 当前能力 |
 | --- | --- |
 | 报销单 | 创建草稿、编辑用途和费用字段、生成确认摘要、提交并查看提交快照 |
-| 票据 | 上传 JPG、PNG、PDF；文件签名校验、ClamAV 扫描、私有对象存储、OCR 识别、重新识别和删除草稿票据 |
+| 票据 | 上传 JPG、PNG、PDF；文件签名校验、ClamAV 扫描、私有对象存储、异步 OCR 识别、重新识别和删除草稿票据 |
 | 校验 | 必填字段、低置信度、同文件哈希、同员工已提交发票号，以及已发布的制度规则校验 |
 | AI 助手 | 独立私有会话、跨 Web/飞书单聊历史、政策依据回放、受控 Intake 办理与精确确认提交 |
 | 政策中心 | 管理员维护版本化的结构化规则，支持阻断与预警级别，并将提交时命中的规则写入不可变快照 |
 | 政策知识库 | 从获授权的飞书 Docx/Wiki 手动同步、切片、向量检索；回答只能引用命中的原文片段 |
 | 身份与飞书 | 飞书 OAuth 登录、仅开发环境的受限演示登录、长连接飞书机器人 Worker |
 | 审计与恢复 | 草稿写入、建议处理、提交和政策发布均有审计/快照；失败链路保留安全的错误分类 |
+| 任务与复核 | PostgreSQL 持久化任务、lease 领取与退避重试；低置信度/重复票据进入财务复核，政策同步失败进入管理员复核 |
 
 ## 用户路径
 
@@ -25,7 +26,7 @@
 
 1. 使用飞书 OAuth 登录（开发环境可使用受限演示登录）。
 2. 在 `/claims` 查看自己创建的报销单，或在 `/claims/new` 新建草稿。
-3. 上传票据；系统完成安全扫描、私有存储和 OCR 后回填候选费用信息。
+3. 上传票据；系统完成安全扫描与私有存储后创建 OCR 任务，后台 Worker 再回填候选费用信息。
 4. 在单据详情核对票据、费用、用途和校验结果；手动创建的草稿保持表单式编辑，不会被对话自动选中或修改。
 5. 修复阻断项，生成确认摘要后提交。系统以当前版本再次校验并写入不可变 `SubmissionSnapshot`。
 
@@ -45,6 +46,12 @@
 - 同步生成不可变文档快照和 `pgvector` 向量切片。内容未变时不重复嵌入，失败不会覆盖上一份活动快照。
 - AI 只能基于检索出的来源片段回答制度问题；未检索到证据时必须说明无法确认，而不是猜测规则。
 
+### 人工复核中心
+
+- 财务复核员和管理员可在 `/admin/reviews` 查看票据识别任务；普通员工不能访问该入口。
+- 复核员领取 OCR 任务后可确认、更正票据字段、创建面向员工的补充项或关闭任务；字段更正受报销单版本保护并写入审计记录。
+- 只有管理员能为政策来源同步任务重新排队。员工界面只展示安全状态（如“正在人工核验”），不会显示内部失败码。
+
 ## 核心架构
 
 ```text
@@ -54,7 +61,8 @@
        │        │
        │        └── Application use cases ── 草稿、票据、校验、建议、提交
        │                    │
-       └── 飞书长连接 Worker ───────────────┘
+       ├── 飞书长连接 Worker ───────────────┘
+       └── 异步任务 Worker ── OCR / 政策同步 / 人工复核分流
                     │
     ┌───────────────┼──────────────────────────────┐
     │               │                              │
@@ -69,7 +77,7 @@ PostgreSQL + pgvector  MinIO (私有票据)   ClamAV / PaddleOCR / Embedding Ser
 | 应用用例 | `src/application/` | 创建草稿、上传/识别票据、校验、建议、提交、飞书事件、政策同步 |
 | 领域模型 | `src/domain/` | 报销单、票据、校验、Agent、政策规则与来源约束 |
 | 基础设施 | `src/infrastructure/` | Prisma、MinIO/S3、OCR、Embedding、飞书 SDK、模型 Provider |
-| 后台进程 | `src/worker/` | 飞书机器人长连接、可选政策同步 |
+| 后台进程 | `src/worker/` | 飞书机器人长连接、持久化任务 Worker、角色初始化 |
 | 数据库 | `prisma/` | Prisma schema 和已提交的 PostgreSQL 迁移 |
 | 外部服务 | `ocr-service/`、`embedding-service/` | PaddleOCR HTTP 服务与 BGE-M3 Embedding 服务 |
 | 测试 | `tests/unit/`、`tests/integration/`、`tests/e2e/` | 领域/应用单测、PostgreSQL 集成测试、Playwright 流程测试 |
@@ -204,12 +212,29 @@ npm run feishu:worker
 
 机器人权限、群聊 `@机器人` 限制、故障恢复和验收清单见[飞书集成说明](docs/feishu-integration.md)。
 
-## 生产部署
+### 异步任务 Worker 与角色初始化
 
-Web 与 Worker 使用同一个 Docker 镜像，但分别运行 `npm run start` 与 `npm run feishu:worker`：
+Web 只负责创建任务；必须同时运行任务 Worker，才会处理 OCR 和政策来源同步：
 
 ```powershell
-docker compose up -d --build web feishu-bot-worker
+npm run dev
+npm run job:worker
+```
+
+首次部署后，为已确认的员工记录授予一个管理员角色（只执行一次，并妥善核对员工 ID）：
+
+```powershell
+npm run roles:bootstrap -- <employeeId>
+```
+
+角色保存在数据库中：`EMPLOYEE` 只能访问自己的报销单，`FINANCE_REVIEWER` 可处理 OCR 复核，`ADMIN` 可管理政策同步、角色和所有复核任务。旧的 `POLICY_ADMIN_FEISHU_OPEN_IDS` 白名单只作为迁移期兼容路径；完成角色初始化后应移除它。
+
+## 生产部署
+
+Web、飞书 Worker 与异步任务 Worker 使用同一个 Docker 镜像，分别运行 `npm run start`、`npm run feishu:worker` 与 `npm run job:worker`：
+
+```powershell
+docker compose up -d --build web feishu-bot-worker job-worker
 ```
 
 部署前应按以下顺序执行：
@@ -219,7 +244,7 @@ docker compose up -d --build web feishu-bot-worker
 3. 执行 `npx prisma migrate deploy --config prisma7.config.ts`。
 4. 确保 Web 的 `APP_PUBLIC_URL` 是员工可访问的 HTTPS 地址。
 5. 确认容器内服务主机名使用 `postgres`、`minio`、`clamav`、`ocr` 和 `embedding-service`。
-6. 启动 Web、Worker 和依赖服务，检查健康状态与 Worker 日志。
+6. 启动 Web、两个 Worker 和依赖服务，检查健康状态与 Worker 日志。
 
 更完整的迁移、监控、回滚与安全日志规范见[运维说明](docs/operations.md)。
 
@@ -230,7 +255,7 @@ docker compose up -d --build web feishu-bot-worker
 - 不信任浏览器传入的员工身份、管理员角色、草稿版本或字段目标；所有授权和版本校验在服务端完成。
 - Agent 只能在独立 Intake 中收集白名单字段；手动草稿不会被自动选中或修改。创建草稿、上传、识别和提交均经服务端用例与归属校验，提交只接受当前 `READY_TO_SUBMIT` Intake 的精确“确认提交”。
 - 重复文件哈希与同员工已提交的同发票号会形成阻断校验，避免重复报销与重复计入费用。
-- 政策管理员由 `POLICY_ADMIN_FEISHU_OPEN_IDS` 中的飞书 `open_id` 白名单控制；白名单为空时保持安全的只读状态。
+- 管理员、财务复核员角色由数据库中的 `Employee.role` 控制；迁移期可保留 `POLICY_ADMIN_FEISHU_OPEN_IDS` 作为旧政策管理入口的兼容白名单。
 - 政策知识库仅同步管理员显式登记且应用有权限读取的文档；同步、向量和日志均不暴露来源 token、原始附件或密钥。
 
 ## 开发、测试与常用命令
@@ -252,9 +277,10 @@ npm run build
 # 查看 Compose 解析结果
 docker compose config
 
-# 飞书机器人与政策同步后台任务
+# 飞书机器人、异步任务 Worker 与角色初始化
 npm run feishu:worker
-npm run policy:sync
+npm run job:worker
+npm run roles:bootstrap -- <employeeId>
 ```
 
 集成测试连接 Docker PostgreSQL：`postgresql://reimbursement:reimbursement@127.0.0.1:5433/reimbursement`。端到端测试会写入测试数据，应使用专用测试数据库或可清理的本地环境，不要指向生产实例。

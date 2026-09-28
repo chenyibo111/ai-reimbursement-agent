@@ -5,7 +5,7 @@ import { createPrismaClient } from "@/src/infrastructure/prisma/client";
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? "postgresql://reimbursement:reimbursement@127.0.0.1:5433/reimbursement_test";
 const prisma = createPrismaClient(databaseUrl);
-const employeeIds = ["async-employee", "deleted-target-employee", "queue-employee", "lease-employee", "retry-employee", "missing-employee"];
+const employeeIds = ["async-employee", "deleted-target-employee", "deleted-complete-employee", "queue-employee", "lease-employee", "retry-employee", "missing-employee"];
 
 beforeAll(async () => prisma.$connect());
 
@@ -50,6 +50,19 @@ it("closes an active extraction job before a deleted receipt clears its target",
   const job = await prisma.asyncJob.create({ data: { kind: "RECEIPT_EXTRACTION", claimId: claim.id, receiptId: receipt.id } });
 
   await prisma.receipt.delete({ where: { id: receipt.id } });
+
+  await expect(prisma.asyncJob.findUniqueOrThrow({ where: { id: job.id } })).resolves.toMatchObject({
+    status: "CLOSED",
+    failureCode: "TARGET_DELETED",
+    receiptId: null,
+  });
+});
+
+it("closes a completed extraction job before its deleted receipt clears the required target", async () => {
+  const target = await createExtractionTarget("deleted-complete");
+  const job = await prisma.asyncJob.create({ data: { kind: "RECEIPT_EXTRACTION", status: "SUCCEEDED", claimId: target.claimId, receiptId: target.receiptId } });
+
+  await prisma.receipt.delete({ where: { id: target.receiptId } });
 
   await expect(prisma.asyncJob.findUniqueOrThrow({ where: { id: job.id } })).resolves.toMatchObject({
     status: "CLOSED",
@@ -131,7 +144,7 @@ it("creates an admin-only policy review case when a policy sync exhausts retries
   await expect(prisma.reviewCase.findFirstOrThrow({ where: { jobId: job.id } })).resolves.toMatchObject({ kind: "POLICY_SYNC", status: "OPEN", reasonCode: "EMBEDDING_TIMEOUT", policySourceId: source.id });
 });
 
-async function createExtractionTarget(suffix: "queue" | "lease" | "retry" | "missing") {
+async function createExtractionTarget(suffix: "queue" | "lease" | "retry" | "missing" | "deleted-complete") {
   const employee = await prisma.employee.create({ data: { id: `${suffix}-employee`, displayName: `${suffix} 队列员工` } });
   const claim = await prisma.claimDraft.create({ data: { employeeId: employee.id } });
   const receipt = await prisma.receipt.create({

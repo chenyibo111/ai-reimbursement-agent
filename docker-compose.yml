@@ -122,6 +122,25 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  job-worker:
+    build: .
+    command: npm run job:worker
+    entrypoint: ["/bin/sh", "-c", "set -a; . /run/secrets/app_env; set +a; exec \"$$@\"", "--"]
+    secrets:
+      - app_env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      ocr:
+        condition: service_healthy
+      clamav:
+        condition: service_started
+    restart: unless-stopped
+
 volumes:
   postgres-data:
   minio-data:

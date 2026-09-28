@@ -15,7 +15,7 @@ npx prisma migrate deploy --config prisma7.config.ts
 POLICY_ADMIN_FEISHU_OPEN_IDS="ou_finance_a,ou_finance_b"
 ```
 
-仅格式正确的 `ou_...` 飞书 `open_id` 会被接受。空白、重复或无效值不会授予权限；白名单为空时是安全的只读状态，不会影响员工报销草稿和基础校验。
+仅格式正确的 `ou_...` 飞书 `open_id` 会被接受。空白、重复或无效值不会授予权限；白名单为空时是安全的只读状态，不会影响员工报销草稿和基础校验。该白名单仅是角色迁移期间的兼容方案；完成首次管理员初始化后，角色以数据库 `Employee.role` 为准。
 
 发布前由管理员在 `/admin/policies` 核对草稿规则、规则级别和生效日期。`BLOCKING` 会阻止确认与提交，`WARNING` 仅提示但会留在确认摘要和提交快照中。发布后不能直接修改版本；若需要撤回或修正制度，创建一份新的草稿并发布。这样会归档旧的已发布版本，但不会改写已提交报销单中的政策快照。
 
@@ -26,6 +26,29 @@ POLICY_ADMIN_FEISHU_OPEN_IDS="ou_finance_a,ou_finance_b"
 模型异常时，聊天接口返回可恢复错误，员工仍可通过工作台字段编辑继续处理。暂停真实模型时，将 `MODEL_PROVIDER` 切换为本地 Fixture 并重启服务；不要删除既有建议或审计记录。
 
 重点监控：OCR 失败率、上传安全扫描失败、模型 `TIMEOUT`/`UNAVAILABLE`、`MODEL_RESPONSE_REJECTED`、建议确认版本冲突和提交前阻断项数量。日志不得记录 API Key、对象键、原始票据内容或完整提示词。
+
+## 异步任务与人工复核运行
+
+部署前先执行 Prisma 迁移，再启动 `web`、`feishu-bot-worker` 与 `job-worker`。三个进程必须使用同一份受控密钥环境和同一 PostgreSQL 数据库；`job-worker` 领取 OCR 与政策来源同步任务，Web 只负责创建和查询任务。
+
+```powershell
+docker compose up -d --build web feishu-bot-worker job-worker
+docker compose logs -f job-worker
+```
+
+首次启用数据库角色时，确认目标员工 ID 后执行一次：
+
+```powershell
+npm run roles:bootstrap -- <employeeId>
+```
+
+该命令只在尚无管理员时提升指定员工，避免无意扩大权限。之后仅管理员可修改角色；系统拒绝移除最后一个管理员。
+
+任务状态含义如下：`PENDING` 等待领取，`RUNNING` 正在执行并持有 lease，`RETRY_WAIT` 按 1/5/30 分钟退避，`SUCCEEDED` 已完成，`REVIEW_REQUIRED` 需要人工判断，`CLOSED` 因目标不存在或明确关闭而终止。Worker 重启会回收过期 lease；不要通过直接修改任务状态或删除任务来“重试”。
+
+OCR 低置信度、重复票据和重试耗尽会创建 `RECEIPT_OCR` 复核任务，由财务复核员领取。更正字段时系统校验报销单版本、写入审计事件；若发生冲突，刷新任务和报销单后重新判断。政策同步重试耗尽会创建 `POLICY_SYNC` 任务，仅管理员可重新排队。员工端不显示失败码、对象键或原始错误。
+
+排障顺序：先确认 `docker compose ps` 中 `job-worker` 正在运行，再查看 `docker compose logs --tail=200 job-worker`；随后检查依赖服务健康与任务的安全状态/失败分类。不可通过清空 `AsyncJob`、`ReviewCase` 或迁移记录恢复服务；先修复 OCR、Embedding、数据库或飞书依赖，再让 Worker 按既有退避和复核流程处理。
 
 政策监控另包括：管理员 `403` 比例、草稿保存/发布版本冲突、发布审计事件、政策阻断与预警数量、以及无有效发布政策的持续时长。日志不得记录飞书 App Secret、完整规则配置、员工票据或向量内容。
 
