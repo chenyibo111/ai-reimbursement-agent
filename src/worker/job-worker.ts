@@ -2,6 +2,11 @@ import { runAsyncJobWorkerOnce } from "@/src/application/run-async-job-worker";
 import { processAsyncJob } from "@/src/application/process-async-job";
 import { extractReceipt } from "@/src/application/extract-receipt";
 import { createExtractReceiptDeps } from "@/src/application/create-extract-receipt-deps";
+import { syncPolicySource } from "@/src/application/sync-policy-source";
+import { createEmbeddingProvider } from "@/src/infrastructure/embedding/embedding-provider-factory";
+import { createFeishuPolicyDocumentClient } from "@/src/infrastructure/feishu/feishu-policy-document-client";
+import { PrismaPolicyKnowledgeRepository } from "@/src/infrastructure/prisma/policy-knowledge-repository";
+import { loadConfig } from "@/src/server/config";
 import { PrismaAsyncJobRepository } from "@/src/infrastructure/prisma/async-job-repository";
 import { createPrismaClient } from "@/src/infrastructure/prisma/client";
 
@@ -24,7 +29,20 @@ async function main() {
     while (!stopping) {
       const processed = await runAsyncJobWorkerOnce({
         jobs,
-        process: (job) => processAsyncJob(job, { jobs, extractReceipt: (input) => extractReceipt(input, extractDeps) }),
+        process: (job) => processAsyncJob(job, {
+          jobs,
+          extractReceipt: (input) => extractReceipt(input, extractDeps),
+          syncPolicySource: async ({ actorId, sourceId }) => {
+            const config = loadConfig(process.env);
+            if (!config.feishuOAuth || !config.embedding) throw new Error("policy sync configuration is incomplete");
+            return syncPolicySource({ actorId, sourceId }, {
+              sources: new PrismaPolicyKnowledgeRepository(prisma),
+              documents: createFeishuPolicyDocumentClient({ appId: config.feishuOAuth.appId, appSecret: config.feishuOAuth.appSecret }),
+              embeddings: createEmbeddingProvider(config),
+              now: () => new Date(),
+            });
+          },
+        }),
         now: () => new Date(),
         leaseMs: 60_000,
       });

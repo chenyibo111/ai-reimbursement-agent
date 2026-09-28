@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
 import { GET, POST } from "@/app/api/admin/policy-sources/route";
 import { PATCH } from "@/app/api/admin/policy-sources/[sourceId]/route";
+import { POST as syncPolicySource } from "@/app/api/admin/policy-sources/[sourceId]/sync/route";
 import { createPrismaClient } from "@/src/infrastructure/prisma/client";
 import { createSessionToken } from "@/src/server/session";
 const url = process.env.TEST_DATABASE_URL ?? "postgresql://reimbursement:reimbursement@127.0.0.1:5433/reimbursement_test";
@@ -26,6 +27,12 @@ it("restricts policy sources to allowlisted administrators and validates the exp
   const created = await response.json();
   expect(created).toEqual(expect.objectContaining({ type: "FEISHU_DOCX", enabled: true }));
   expect(created).not.toHaveProperty("resourceToken");
+
+  const sync = await syncPolicySource(new Request(`http://localhost/api/admin/policy-sources/${created.id}/sync`, {
+    method: "POST", headers: { cookie: `reimbursement_session=${token}` },
+  }), { params: Promise.resolve({ sourceId: created.id }) });
+  expect(sync.status).toBe(202);
+  await expect(sync.json()).resolves.toMatchObject({ sourceId: created.id, jobStatus: "PENDING" });
 
   const listed = await GET(new Request("http://localhost/api/admin/policy-sources", { headers: { cookie: `reimbursement_session=${token}` } }));
   expect(listed.status).toBe(200);

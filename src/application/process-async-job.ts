@@ -2,6 +2,7 @@ import type { AsyncJobKind } from "@/generated/prisma/client";
 
 import type { ExtractReceiptResult } from "@/src/application/extract-receipt";
 import type { AsyncJobProcessResult } from "@/src/application/run-async-job-worker";
+import { PolicySourceSyncError } from "@/src/application/sync-policy-source";
 
 type StoredAsyncJob = { id: string; kind: AsyncJobKind; claimId: string | null; receiptId: string | null; policySourceId: string | null; employeeId: string | null };
 
@@ -12,12 +13,22 @@ export type ProcessAsyncJobDeps = {
     createOcrReviewCase(input: { jobId: string; claimId: string; receiptId: string; reasonCode: string }): Promise<void>;
   };
   extractReceipt(input: { actorId: string; claimId: string; receiptId: string; system: true }): Promise<ExtractReceiptResult>;
+  syncPolicySource(input: { actorId: string; sourceId: string }): Promise<unknown>;
 };
 
 export async function processAsyncJob(job: { id: string; kind: AsyncJobKind }, deps: ProcessAsyncJobDeps): Promise<AsyncJobProcessResult> {
   const stored = await deps.jobs.getById(job.id);
   if (!stored || stored.kind !== job.kind) return { type: "CLOSED" };
-  if (stored.kind !== "RECEIPT_EXTRACTION" || !stored.claimId || !stored.receiptId) return { type: "CLOSED" };
+  if (stored.kind === "POLICY_SOURCE_SYNC") {
+    if (!stored.policySourceId) return { type: "CLOSED" };
+    try {
+      await deps.syncPolicySource({ actorId: "async-job-worker", sourceId: stored.policySourceId });
+      return { type: "SUCCEEDED" };
+    } catch (error) {
+      return { type: "RETRY_WAIT", failureCode: error instanceof PolicySourceSyncError ? error.code : "SYNC_FAILED" };
+    }
+  }
+  if (!stored.claimId || !stored.receiptId) return { type: "CLOSED" };
 
   try {
     const result = await deps.extractReceipt({ actorId: "async-job-worker", claimId: stored.claimId, receiptId: stored.receiptId, system: true });

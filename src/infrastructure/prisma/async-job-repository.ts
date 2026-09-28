@@ -64,7 +64,10 @@ export class PrismaAsyncJobRepository {
     const job = await this.prisma.asyncJob.findFirst({ where: { id: jobId, status: "RUNNING" } });
     if (!job) return;
     if (job.attemptCount >= job.maxAttempts) {
-      await this.markReviewRequired(jobId, "OCR_RETRY_EXHAUSTED");
+      await this.markReviewRequired(jobId, job.kind === "POLICY_SOURCE_SYNC" ? "POLICY_SYNC_RETRY_EXHAUSTED" : "OCR_RETRY_EXHAUSTED");
+      if (job.kind === "POLICY_SOURCE_SYNC" && job.policySourceId) {
+        await this.createPolicyReviewCase({ jobId: job.id, policySourceId: job.policySourceId, reasonCode: failureCode });
+      }
       return;
     }
     await this.prisma.asyncJob.updateMany({
@@ -108,6 +111,14 @@ export class PrismaAsyncJobRepository {
   async createOcrReviewCase(input: { jobId: string; claimId: string; receiptId: string; reasonCode: string }): Promise<void> {
     try {
       await this.prisma.reviewCase.create({ data: { kind: "RECEIPT_OCR", jobId: input.jobId, claimId: input.claimId, receiptId: input.receiptId, reasonCode: input.reasonCode } });
+    } catch (error) {
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
+    }
+  }
+
+  private async createPolicyReviewCase(input: { jobId: string; policySourceId: string; reasonCode: string }): Promise<void> {
+    try {
+      await this.prisma.reviewCase.create({ data: { kind: "POLICY_SYNC", jobId: input.jobId, policySourceId: input.policySourceId, reasonCode: input.reasonCode } });
     } catch (error) {
       if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
     }
