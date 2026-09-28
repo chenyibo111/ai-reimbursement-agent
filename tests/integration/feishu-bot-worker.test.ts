@@ -82,6 +82,7 @@ function createRuntime(messages: Map<string, FeishuInboundMessage>, replies: str
       return message;
     },
     async downloadResource() { throw new Error("attachment not used in this flow"); },
+    async sendText() { throw new Error("proactive messages are not used"); },
     async replyText(_messageId, text) { replies.push(text); },
     async replyCard() { throw new Error("card replies are not used"); },
   };

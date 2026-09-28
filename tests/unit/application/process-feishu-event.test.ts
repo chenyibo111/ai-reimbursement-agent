@@ -30,6 +30,7 @@ function fixture(overrides: Partial<ProcessFeishuEventDeps> = {}) {
         calls.download += 1;
         return { bytes: new Uint8Array([0xff, 0xd8, 0xff, 0]), filename: "receipt.jpg", mimeType: "image/jpeg" };
       },
+      sendText: async () => undefined,
       replyText: async () => undefined,
       replyCard: async () => undefined,
     },

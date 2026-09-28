@@ -3,6 +3,7 @@ import * as lark from "@larksuiteoapi/node-sdk";
 import type { Prisma } from "@/generated/prisma/client";
 import { createPrismaAuditEventWriter } from "@/src/application/audit-event";
 import { createClaimDraft } from "@/src/application/create-claim-draft";
+import { deliverReceiptExtractionNotificationOnce } from "@/src/application/deliver-receipt-extraction-notifications";
 import { extractReceipt } from "@/src/application/extract-receipt";
 import { processFeishuEvent, type ProcessFeishuEventDeps } from "@/src/application/process-feishu-event";
 import { runConversationTurn, type ConversationStore } from "@/src/application/run-conversation-turn";
@@ -35,6 +36,8 @@ async function main() {
   const prisma = createPrismaClient(databaseUrl);
   await prisma.$connect();
   const repository = new FeishuBotRepository(prisma);
+  const notificationRepository = new ReceiptExtractionNotificationRepository(prisma);
+  const conversations = new AgentConversationRepository(prisma);
   await repository.recoverProcessingEvents();
   const client = createFeishuBotClient({ appId: bot.appId, appSecret: bot.appSecret });
   let wsClient: lark.WSClient | undefined;
@@ -51,7 +54,18 @@ async function main() {
   wsClient = new lark.WSClient({ appId: bot.appId, appSecret: bot.appSecret, autoReconnect: true, loggerLevel: lark.LoggerLevel.error });
   await wsClient.start({ eventDispatcher: dispatcher });
 
-  const interval = setInterval(() => { void runtime.drainOnce(); }, 800);
+  const drainNotifications = () => deliverReceiptExtractionNotificationOnce({
+    notifications: notificationRepository,
+    client,
+    conversations,
+    publicAppUrl: bot.publicAppUrl,
+    now: () => new Date(),
+    leaseMs: 30_000,
+  });
+  const interval = setInterval(() => {
+    void runtime.drainOnce().catch(() => undefined);
+    void drainNotifications().catch(() => undefined);
+  }, 800);
   let stopping = false;
   const shutdown = async () => {
     if (stopping) return;

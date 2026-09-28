@@ -71,6 +71,29 @@ it("classifies provider failures without exposing response bodies or credentials
   await expect(client.replyText("om_123", "已收到")).rejects.toEqual(new FeishuBotClientError("UNAUTHORIZED"));
 });
 
+it("sends a new text message to the original chat with a caller-provided idempotency key", async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const client = createFeishuBotClient({
+    appId: "cli_test",
+    appSecret: "app-secret",
+    fetch: async (url, init) => {
+      calls.push({ url: url.toString(), init });
+      if (calls.length === 1) return json({ code: 0, tenant_access_token: "tenant-token", expire: 7200 });
+      return json({ code: 0, data: { message_id: "om-notification" } });
+    },
+  });
+
+  await expect(client.sendText("oc_123", "识别结果需要确认", "notification-1")).resolves.toBeUndefined();
+  expect(calls[1]).toMatchObject({
+    url: "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id",
+    init: {
+      method: "POST",
+      headers: { authorization: "Bearer tenant-token", "content-type": "application/json" },
+      body: JSON.stringify({ receive_id: "oc_123", msg_type: "text", content: JSON.stringify({ text: "识别结果需要确认" }), uuid: "notification-1" }),
+    },
+  });
+});
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
