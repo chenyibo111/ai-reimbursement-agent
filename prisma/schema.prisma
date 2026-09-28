@@ -48,6 +48,14 @@ enum AsyncJobStatus {
   CLOSED
 }
 
+enum ReceiptExtractionNotificationStatus {
+  PENDING
+  PROCESSING
+  RETRY_WAIT
+  SENT
+  CLOSED
+}
+
 enum ReviewCaseKind {
   RECEIPT_OCR
   POLICY_SYNC
@@ -163,6 +171,7 @@ model ClaimDraft {
   reimbursementIntakes ReimbursementIntake[]
   asyncJobs            AsyncJob[]
   reviewCases          ReviewCase[]
+  receiptExtractionNotifications ReceiptExtractionNotification[]
 
   @@index([employeeId, status])
 }
@@ -183,6 +192,7 @@ model Receipt {
   expenseItem       ExpenseItem?
   asyncJobs         AsyncJob[]
   reviewCases       ReviewCase[]
+  receiptExtractionNotifications ReceiptExtractionNotification[]
 
   @@index([claimId, contentHash])
 }
@@ -324,6 +334,7 @@ model AgentConversation {
   updatedAt              DateTime              @updatedAt
   messages               AgentMessage[]
   reimbursementIntakes   ReimbursementIntake[]
+  receiptExtractionNotifications ReceiptExtractionNotification[]
 
   @@unique([employeeId, kind, scopeKey])
   @@index([employeeId, lastActiveAt])
@@ -454,6 +465,7 @@ model AsyncJob {
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   reviewCases    ReviewCase[]
+  receiptExtractionNotification ReceiptExtractionNotification?
 
   @@index([status, availableAt])
   @@index([receiptId])
@@ -483,6 +495,34 @@ model ReviewCase {
 
   @@index([kind, status, createdAt])
   @@index([assignedReviewerId, status])
+}
+
+model ReceiptExtractionNotification {
+  id           String                            @id @default(cuid())
+  jobId        String                            @unique
+  job          AsyncJob                          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  receiptId    String?
+  receipt      Receipt?                          @relation(fields: [receiptId], references: [id], onDelete: SetNull)
+  claimId      String?
+  claim        ClaimDraft?                       @relation(fields: [claimId], references: [id], onDelete: SetNull)
+  conversationId String
+  conversation AgentConversation                 @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  channel      AgentMessageChannel               @default(FEISHU)
+  chatId       String
+  status       ReceiptExtractionNotificationStatus @default(PENDING)
+  attemptCount Int                               @default(0)
+  maxAttempts  Int                               @default(3)
+  availableAt  DateTime                          @default(now())
+  leaseUntil   DateTime?
+  failureCode  String?
+  sentAt       DateTime?
+  createdAt    DateTime                          @default(now())
+  updatedAt    DateTime                          @updatedAt
+
+  @@index([status, availableAt])
+  @@index([receiptId])
+  @@index([claimId])
+  @@index([conversationId])
 }
 
 model PolicyDocumentSnapshot {
