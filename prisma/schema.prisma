@@ -28,6 +28,38 @@ enum ReceiptStatus {
   FAILED
 }
 
+enum EmployeeRole {
+  EMPLOYEE
+  FINANCE_REVIEWER
+  ADMIN
+}
+
+enum AsyncJobKind {
+  RECEIPT_EXTRACTION
+  POLICY_SOURCE_SYNC
+}
+
+enum AsyncJobStatus {
+  PENDING
+  RUNNING
+  RETRY_WAIT
+  REVIEW_REQUIRED
+  SUCCEEDED
+  CLOSED
+}
+
+enum ReviewCaseKind {
+  RECEIPT_OCR
+  POLICY_SYNC
+}
+
+enum ReviewCaseStatus {
+  OPEN
+  CLAIMED
+  RESOLVED
+  CLOSED
+}
+
 enum ValidationSeverity {
   BLOCKING
   WARNING
@@ -99,11 +131,15 @@ model Employee {
   displayName          String
   department           String?
   feishuUserId         String?               @unique
+  role                 EmployeeRole          @default(EMPLOYEE)
   createdAt            DateTime              @default(now())
   claims               ClaimDraft[]
   feishuConversations  FeishuConversation[]
   agentConversations   AgentConversation[]
   reimbursementIntakes ReimbursementIntake[]
+  assignedReviewCases  ReviewCase[]
+
+  @@index([role])
 }
 
 model ClaimDraft {
@@ -125,6 +161,8 @@ model ClaimDraft {
   inboundEvents        InboundChannelEvent[]
   feishuConversations  FeishuConversation[]
   reimbursementIntakes ReimbursementIntake[]
+  asyncJobs            AsyncJob[]
+  reviewCases          ReviewCase[]
 
   @@index([employeeId, status])
 }
@@ -143,6 +181,8 @@ model Receipt {
   extractionVersion String?
   createdAt         DateTime      @default(now())
   expenseItem       ExpenseItem?
+  asyncJobs         AsyncJob[]
+  reviewCases       ReviewCase[]
 
   @@index([claimId, contentHash])
 }
@@ -389,8 +429,60 @@ model PolicySource {
   createdAt            DateTime                 @default(now())
   updatedAt            DateTime                 @updatedAt
   snapshots            PolicyDocumentSnapshot[]
+  asyncJobs            AsyncJob[]
+  reviewCases          ReviewCase[]
 
   @@index([enabled, updatedAt])
+}
+
+model AsyncJob {
+  id             String         @id @default(cuid())
+  kind           AsyncJobKind
+  status         AsyncJobStatus @default(PENDING)
+  claimId        String?
+  claim          ClaimDraft?    @relation(fields: [claimId], references: [id], onDelete: SetNull)
+  receiptId      String?
+  receipt        Receipt?       @relation(fields: [receiptId], references: [id], onDelete: SetNull)
+  policySourceId String?
+  policySource   PolicySource?  @relation(fields: [policySourceId], references: [id], onDelete: SetNull)
+  attemptCount   Int            @default(0)
+  maxAttempts    Int            @default(3)
+  availableAt    DateTime       @default(now())
+  leaseUntil     DateTime?
+  failureCode    String?
+  result         Json?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  reviewCases    ReviewCase[]
+
+  @@index([status, availableAt])
+  @@index([receiptId])
+  @@index([policySourceId])
+}
+
+model ReviewCase {
+  id                 String           @id @default(cuid())
+  kind               ReviewCaseKind
+  status             ReviewCaseStatus @default(OPEN)
+  jobId              String
+  job                AsyncJob         @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  claimId            String?
+  claim              ClaimDraft?      @relation(fields: [claimId], references: [id], onDelete: SetNull)
+  receiptId          String?
+  receipt            Receipt?         @relation(fields: [receiptId], references: [id], onDelete: SetNull)
+  policySourceId     String?
+  policySource       PolicySource?    @relation(fields: [policySourceId], references: [id], onDelete: SetNull)
+  reasonCode         String
+  assignedReviewerId String?
+  assignedReviewer   Employee?        @relation(fields: [assignedReviewerId], references: [id], onDelete: SetNull)
+  resolution         Json?
+  claimedAt          DateTime?
+  resolvedAt         DateTime?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@index([kind, status, createdAt])
+  @@index([assignedReviewerId, status])
 }
 
 model PolicyDocumentSnapshot {
