@@ -13,6 +13,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "feishu:worker": "tsx --env-file=.env.local src/worker/feishu-bot.ts",
+    "job:worker": "tsx --env-file=.env.local src/worker/job-worker.ts",
     "policy:sync": "tsx --env-file=.env.local src/worker/policy-sync.ts",
     "roles:bootstrap": "tsx --env-file=.env.local src/worker/role-bootstrap.ts"
   },
