@@ -107,6 +107,7 @@ function createDeps(calls: { stored: number; created: number; scanned: number; e
     jobs: {
       enqueueJob: async () => {
         calls.enqueued = (calls.enqueued ?? 0) + 1;
+        return { id: "job-1" };
       },
     },
     audit: {

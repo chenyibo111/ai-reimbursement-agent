@@ -36,6 +36,7 @@ export type ProcessFeishuEventDeps = {
     actorId: string;
     conversationId: string;
     channel: "FEISHU";
+    chatId: string;
     channelMessageId: string;
     message: string;
     attachment?: { filename: string; mimeType: string; bytes: Uint8Array };
@@ -77,6 +78,7 @@ export async function processFeishuEvent(
       actorId: employee.id,
       conversationId: conversation.id,
       channel: "FEISHU",
+    chatId: message.chatId,
       channelMessageId: message.messageId,
       message: normalizeMessage(message.text, Boolean(attachment)),
       ...(attachment ? { attachment } : {}),

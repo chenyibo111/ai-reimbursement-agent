@@ -26,7 +26,7 @@ function attachmentDeps(overrides: Partial<ProcessFeishuEventDeps> = {}) {
     },
     runConversationTurn: async (input) => {
       calls.turns += 1;
-      expect(input).toMatchObject({ actorId: "employee-1", conversationId: "private-1", channel: "FEISHU", channelMessageId: "om-1", message: "上传票据", attachment: { filename: "receipt.jpg", mimeType: "image/jpeg" } });
+      expect(input).toMatchObject({ actorId: "employee-1", conversationId: "private-1", channel: "FEISHU", chatId: "oc-1", channelMessageId: "om-1", message: "上传票据", attachment: { filename: "receipt.jpg", mimeType: "image/jpeg" } });
       return { reply: "票据已上传并进入识别流程。", citations: [], intake: { id: "intake-1", employeeId: "employee-1", conversationId: "private-1", status: "COLLECTING", claimId: "claim-1", collectedFields: {}, pendingFields: ["purpose"], submissionToken: null } };
     },
     ...overrides,

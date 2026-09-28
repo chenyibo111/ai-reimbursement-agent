@@ -25,7 +25,7 @@ export type UploadReceiptDeps = {
   store: Pick<ObjectStore, "put">;
   scanner: FileSafetyScanner;
   audit: AuditEventWriter;
-  jobs: { enqueueJob(input: { kind: "RECEIPT_EXTRACTION"; claimId: string; receiptId: string }): Promise<unknown> };
+  jobs: { enqueueJob(input: { kind: "RECEIPT_EXTRACTION"; claimId: string; receiptId: string }): Promise<{ id: string }> };
 };
 
 export async function preflightReceiptUpload(
@@ -38,7 +38,7 @@ export async function preflightReceiptUpload(
   if ((await scanner.scan(input.bytes)) !== "CLEAN") throw new Error("unsafe file");
 }
 
-export async function uploadReceipt(input: UploadReceiptInput, deps: UploadReceiptDeps): Promise<Receipt> {
+export async function uploadReceipt(input: UploadReceiptInput, deps: UploadReceiptDeps): Promise<Receipt & { jobId: string }> {
   const claim = await deps.claims.getByIdOrThrow(input.claimId);
   assertClaimOwner(input.actorId, claim);
   await preflightReceiptUpload(input, deps.scanner);
@@ -65,9 +65,9 @@ export async function uploadReceipt(input: UploadReceiptInput, deps: UploadRecei
     },
     deps.audit,
   );
-  await deps.jobs.enqueueJob({ kind: "RECEIPT_EXTRACTION", claimId: receipt.claimId, receiptId: receipt.id });
+  const job = await deps.jobs.enqueueJob({ kind: "RECEIPT_EXTRACTION", claimId: receipt.claimId, receiptId: receipt.id });
 
-  return receipt;
+  return { ...receipt, jobId: job.id };
 }
 
 function validateSizeAndMime(input: Pick<UploadReceiptInput, "mimeType" | "bytes">): void {
