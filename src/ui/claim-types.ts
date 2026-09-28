@@ -70,6 +70,7 @@ export function receiptStatusLabel(status: string) {
   return ({
     PENDING: "等待识别",
     EXTRACTING: "正在识别",
+    REVIEW_REQUIRED: "人工核验中",
     EXTRACTED: "已识别",
     FAILED: "识别失败",
   } as Record<string, string>)[status] ?? "处理中";

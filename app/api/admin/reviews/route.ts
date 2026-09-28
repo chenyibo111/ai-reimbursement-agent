@@ -14,13 +14,13 @@ export async function GET(request: Request) {
       orderBy: [{ status: "asc" }, { createdAt: "asc" }],
       include: {
         job: { select: { id: true, kind: true, status: true, failureCode: true } },
-        claim: { select: { id: true, employeeId: true, purpose: true } },
+        claim: { select: { id: true, employeeId: true, purpose: true, version: true } },
         receipt: { select: { id: true, originalFilename: true, status: true } },
         policySource: { select: { id: true, title: true } },
         assignedReviewer: { select: { id: true, displayName: true } },
       },
     });
-    return NextResponse.json({ reviews });
+    return NextResponse.json({ actor, reviews });
   } catch (error) {
     return reviewFailure(error);
   }

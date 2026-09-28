@@ -23,6 +23,7 @@ it("gives each uploaded receipt a stable name and a readable recognition status"
   expect(receiptDisplayName({ id: "receipt-123456", originalFilename: "  差旅发票.pdf  " })).toBe("差旅发票.pdf");
   expect(receiptStatusLabel("FAILED")).toBe("识别失败");
   expect(receiptStatusLabel("PENDING")).toBe("等待识别");
+  expect(receiptStatusLabel("REVIEW_REQUIRED")).toBe("人工核验中");
 });
 
 it("reads recognized values and confidence without inventing values for missing fields", () => {
