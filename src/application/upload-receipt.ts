@@ -17,6 +17,7 @@ export type UploadReceiptInput = {
   filename: string;
   mimeType: string;
   bytes: Uint8Array;
+  notificationTarget?: { conversationId: string; chatId: string };
 };
 
 export type UploadReceiptDeps = {
@@ -26,6 +27,7 @@ export type UploadReceiptDeps = {
   scanner: FileSafetyScanner;
   audit: AuditEventWriter;
   jobs: { enqueueJob(input: { kind: "RECEIPT_EXTRACTION"; claimId: string; receiptId: string }): Promise<{ id: string }> };
+  notifications?: { enqueueForFeishuUpload(input: { claimId: string; receiptId: string; conversationId: string; chatId: string }): Promise<{ id: string }> };
 };
 
 export async function preflightReceiptUpload(
@@ -65,9 +67,25 @@ export async function uploadReceipt(input: UploadReceiptInput, deps: UploadRecei
     },
     deps.audit,
   );
-  const job = await deps.jobs.enqueueJob({ kind: "RECEIPT_EXTRACTION", claimId: receipt.claimId, receiptId: receipt.id });
+  const job = input.notificationTarget
+    ? await enqueueFeishuReceiptExtraction(receipt, input.notificationTarget, deps)
+    : await deps.jobs.enqueueJob({ kind: "RECEIPT_EXTRACTION", claimId: receipt.claimId, receiptId: receipt.id });
 
   return { ...receipt, jobId: job.id };
+}
+
+async function enqueueFeishuReceiptExtraction(
+  receipt: Receipt,
+  target: NonNullable<UploadReceiptInput["notificationTarget"]>,
+  deps: UploadReceiptDeps,
+): Promise<{ id: string }> {
+  if (!deps.notifications) throw new Error("Feishu receipt notification queue is unavailable");
+  return deps.notifications.enqueueForFeishuUpload({
+    claimId: receipt.claimId,
+    receiptId: receipt.id,
+    conversationId: target.conversationId,
+    chatId: target.chatId,
+  });
 }
 
 function validateSizeAndMime(input: Pick<UploadReceiptInput, "mimeType" | "bytes">): void {

@@ -38,7 +38,6 @@ function createDeps(overrides: Partial<Record<string, unknown>> = {}) {
   };
   const createClaim = vi.fn(async () => ({ id: "agent-claim-1", version: 1 }));
   const uploadReceipt = vi.fn(async () => ({ id: "receipt-1", jobId: "ocr-job-1" }));
-  const onReceiptQueued = vi.fn(async () => undefined);
   const updatePurpose = vi.fn(async () => ({ version: 2 }));
   const requestSubmission = vi.fn(async () => ({ token: "confirmation-token", claimId: "agent-claim-1", claimVersion: 2, totalAmountCents: 12_345, receiptCount: 2, purpose: "客户拜访", issues: [] }));
   const submitClaim = vi.fn(async () => ({ submissionNumber: "RB20260001" }));
@@ -49,7 +48,6 @@ function createDeps(overrides: Partial<Record<string, unknown>> = {}) {
       createClaim,
       preflightAttachment: async () => undefined,
       uploadReceipt,
-      onReceiptQueued,
       updatePurpose,
       requestSubmission,
       submitClaim,
@@ -59,7 +57,6 @@ function createDeps(overrides: Partial<Record<string, unknown>> = {}) {
     appendMessage,
     createClaim,
     uploadReceipt,
-    onReceiptQueued,
     updatePurpose,
     requestSubmission,
     submitClaim,
@@ -94,21 +91,17 @@ it("creates one agent-owned claim on the first attachment and reuses it for late
   expect(getIntake()).toMatchObject({ claimId: "agent-claim-1" });
 });
 
-it("schedules an OCR result notification only for a Feishu attachment with a verified chat target", async () => {
-  const { deps, onReceiptQueued } = createDeps();
+it("passes an OCR notification target only for a Feishu attachment with a verified chat target", async () => {
+  const { deps, uploadReceipt } = createDeps();
   const attachment = { filename: "invoice.png", mimeType: "image/png", bytes: new Uint8Array([1, 2, 3]) };
 
   await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatId: "oc-receipt", channelMessageId: "om-upload", message: "上传发票", attachment }, deps);
   await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "上传发票", attachment }, deps);
 
-  expect(onReceiptQueued).toHaveBeenCalledTimes(1);
-  expect(onReceiptQueued).toHaveBeenCalledWith({
-    jobId: "ocr-job-1",
-    receiptId: "receipt-1",
-    claimId: "agent-claim-1",
-    conversationId: "conversation-1",
-    chatId: "oc-receipt",
-  });
+  expect(uploadReceipt).toHaveBeenNthCalledWith(1, expect.objectContaining({
+    notificationTarget: { conversationId: "conversation-1", chatId: "oc-receipt" },
+  }));
+  expect(uploadReceipt).toHaveBeenNthCalledWith(2, expect.not.objectContaining({ notificationTarget: expect.anything() }));
 });
 
 it("creates the first agent claim with a purpose collected before the attachment", async () => {

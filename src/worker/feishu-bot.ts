@@ -114,8 +114,15 @@ function createProcessDeps(input: {
       }) : undefined,
       preflightAttachment: (attachment) => preflightReceiptUpload(attachment, scanner),
       createClaim: ({ actorId, purpose }) => createClaimDraft({ actorId, purpose }, { claims, audit }),
-      uploadReceipt: (receiptInput) => uploadReceipt(receiptInput, { claims, receipts, jobs: new PrismaAsyncJobRepository(input.prisma), audit, scanner, store: objects }),
-      onReceiptQueued: (notification) => notifications.createForFeishuUpload(notification).then(() => undefined),
+      uploadReceipt: (receiptInput) => uploadReceipt(receiptInput, {
+        claims,
+        receipts,
+        jobs: new PrismaAsyncJobRepository(input.prisma),
+        notifications,
+        audit,
+        scanner,
+        store: objects,
+      }),
       extractReceipt: (extractInput) => extractReceipt(extractInput, {
         claims,
         receipts: {

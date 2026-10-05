@@ -10,10 +10,10 @@ export type FeishuBotClient = {
   replyCard(messageId: string, card: FeishuReplyCard): Promise<void>;
 };
 
-export type FeishuBotClientErrorCode = "UNAVAILABLE" | "UNAUTHORIZED" | "RESOURCE_NOT_FOUND" | "INVALID_RESPONSE";
+export type FeishuBotClientErrorCode = "UNAVAILABLE" | "UNAUTHORIZED" | "RESOURCE_NOT_FOUND" | "REJECTED" | "INVALID_RESPONSE";
 
 export class FeishuBotClientError extends Error {
-  constructor(public readonly code: FeishuBotClientErrorCode) {
+  constructor(public readonly code: FeishuBotClientErrorCode, public readonly providerCode?: string) {
     super(`feishu bot client ${code}`);
   }
 }
@@ -36,7 +36,8 @@ export function createFeishuBotClient(config: {
       body: JSON.stringify({ app_id: config.appId, app_secret: config.appSecret }),
     });
     const payload = await parseJson(response);
-    if (!response.ok || isProviderFailure(payload)) throw providerError(response.status);
+    if (!response.ok) throw providerError(response.status);
+    if (isProviderFailure(payload)) throw providerRejection(payload);
     const parsed = tenantTokenSchema.safeParse(payload);
     if (!parsed.success) throw new FeishuBotClientError("INVALID_RESPONSE");
     cachedToken = { value: parsed.data.tenant_access_token, expiresAt: Date.now() + Math.max(60, parsed.data.expire - 60) * 1000 };
@@ -55,7 +56,8 @@ export function createFeishuBotClient(config: {
     async getMessage(messageId) {
       const response = await authorizedFetch(`/open-apis/im/v1/messages/${encodeURIComponent(messageId)}`);
       const payload = await parseJson(response);
-      if (!response.ok || isProviderFailure(payload)) throw providerError(response.status);
+      if (!response.ok) throw providerError(response.status);
+      if (isProviderFailure(payload)) throw providerRejection(payload);
       const parsed = messageEnvelopeSchema.safeParse(payload);
       if (!parsed.success) throw new FeishuBotClientError("INVALID_RESPONSE");
       return normalizeMessage(parsed.data.data.items[0]);
@@ -79,7 +81,8 @@ export function createFeishuBotClient(config: {
         body: JSON.stringify({ receive_id: chatId, msg_type: "text", content: JSON.stringify({ text }), uuid }),
       });
       const payload = await parseJson(response);
-      if (!response.ok || isProviderFailure(payload)) throw providerError(response.status);
+      if (!response.ok) throw providerError(response.status);
+      if (isProviderFailure(payload)) throw providerRejection(payload);
     },
     async replyText(messageId, text) {
       await reply(messageId, "text", JSON.stringify({ text }));
@@ -96,7 +99,8 @@ export function createFeishuBotClient(config: {
       body: JSON.stringify({ msg_type: msgType, content }),
     });
     const payload = await parseJson(response);
-    if (!response.ok || isProviderFailure(payload)) throw providerError(response.status);
+    if (!response.ok) throw providerError(response.status);
+    if (isProviderFailure(payload)) throw providerRejection(payload);
   }
 }
 
@@ -170,6 +174,13 @@ function providerError(status: number): FeishuBotClientError {
   if (status === 401 || status === 403) return new FeishuBotClientError("UNAUTHORIZED");
   if (status === 404) return new FeishuBotClientError("RESOURCE_NOT_FOUND");
   return new FeishuBotClientError(status >= 500 || status === 0 ? "UNAVAILABLE" : "INVALID_RESPONSE");
+}
+
+function providerRejection(payload: unknown): FeishuBotClientError {
+  const providerCode = typeof payload === "object" && payload !== null && "code" in payload
+    ? String(payload.code)
+    : undefined;
+  return new FeishuBotClientError("REJECTED", providerCode);
 }
 
 function filenameFromDisposition(value: string | null): string | undefined {

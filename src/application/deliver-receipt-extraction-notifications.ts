@@ -39,7 +39,7 @@ export async function deliverReceiptExtractionNotificationOnce(deps: {
     });
     await deps.notifications.markSent(notification.id, now);
   } catch (error) {
-    if (error instanceof FeishuBotClientError && ["UNAUTHORIZED", "RESOURCE_NOT_FOUND"].includes(error.code)) {
+    if (error instanceof FeishuBotClientError && ["UNAUTHORIZED", "RESOURCE_NOT_FOUND", "REJECTED"].includes(error.code)) {
       await deps.notifications.close(notification.id, `FEISHU_DELIVERY_${error.code}`);
     } else {
       await deps.notifications.markRetryWait(notification.id, "FEISHU_DELIVERY_UNAVAILABLE", now);

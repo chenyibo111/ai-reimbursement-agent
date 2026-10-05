@@ -94,6 +94,22 @@ it("sends a new text message to the original chat with a caller-provided idempot
   });
 });
 
+it("preserves a nonzero Feishu business code returned with HTTP 200 as a terminal rejection", async () => {
+  let calls = 0;
+  const client = createFeishuBotClient({
+    appId: "cli_test",
+    appSecret: "app-secret",
+    fetch: async () => {
+      calls += 1;
+      return calls === 1
+        ? json({ code: 0, tenant_access_token: "tenant-token", expire: 7200 })
+        : json({ code: 230001, msg: "chat unavailable" });
+    },
+  });
+
+  await expect(client.sendText("oc_missing", "识别完成", "notification-missing")).rejects.toMatchObject({ code: "REJECTED", providerCode: "230001" });
+});
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }

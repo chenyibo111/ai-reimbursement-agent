@@ -25,6 +25,31 @@ export type ClaimedReceiptExtractionNotification = {
 export class ReceiptExtractionNotificationRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
+  async enqueueForFeishuUpload(input: { claimId: string; receiptId: string; conversationId: string; chatId: string }): Promise<{ id: string }> {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(async (tx) => {
+          const existing = await tx.asyncJob.findFirst({
+            where: { kind: "RECEIPT_EXTRACTION", receiptId: input.receiptId, status: { in: ["PENDING", "RUNNING", "RETRY_WAIT"] } },
+            orderBy: { createdAt: "asc" },
+          });
+          const job = existing ?? await tx.asyncJob.create({
+            data: { kind: "RECEIPT_EXTRACTION", claimId: input.claimId, receiptId: input.receiptId },
+          });
+          await tx.receiptExtractionNotification.upsert({
+            where: { jobId: job.id },
+            create: { jobId: job.id, receiptId: input.receiptId, claimId: input.claimId, conversationId: input.conversationId, chatId: input.chatId, channel: "FEISHU" },
+            update: {},
+          });
+          return { id: job.id };
+        });
+      } catch (error) {
+        if (!isUniqueConstraint(error) || attempt === 1) throw error;
+      }
+    }
+    throw new Error("unable to enqueue Feishu receipt extraction notification");
+  }
+
   async createForFeishuUpload(input: { jobId: string; receiptId: string; claimId: string; conversationId: string; chatId: string }) {
     try {
       return await this.prisma.receiptExtractionNotification.create({

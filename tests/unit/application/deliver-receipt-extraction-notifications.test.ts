@@ -1,6 +1,7 @@
 import { expect, it, vi } from "vitest";
 
 import { deliverReceiptExtractionNotificationOnce } from "@/src/application/deliver-receipt-extraction-notifications";
+import { FeishuBotClientError } from "@/src/infrastructure/feishu/feishu-bot-client";
 
 const notification = {
   id: "notification-1",
@@ -70,4 +71,13 @@ it("returns without sending when no terminal OCR notification is available and r
   const unavailable = createDeps({ send: async () => { throw new Error("network unavailable"); } });
   await expect(deliverReceiptExtractionNotificationOnce(unavailable.deps)).resolves.toBe(true);
   expect(unavailable.markRetryWait).toHaveBeenCalledWith("notification-1", "FEISHU_DELIVERY_UNAVAILABLE", new Date("2099-09-28T10:00:00.000Z"));
+});
+
+it("closes a notification when Feishu rejects an otherwise successful HTTP request", async () => {
+  const rejected = createDeps({ send: async () => { throw new FeishuBotClientError("REJECTED", "230001"); } });
+
+  await expect(deliverReceiptExtractionNotificationOnce(rejected.deps)).resolves.toBe(true);
+
+  expect(rejected.close).toHaveBeenCalledWith("notification-1", "FEISHU_DELIVERY_REJECTED");
+  expect(rejected.markRetryWait).not.toHaveBeenCalled();
 });

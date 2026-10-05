@@ -35,8 +35,7 @@ export type RunConversationTurnDeps = {
   searchPolicy?: (query: string) => Promise<PolicyCitation[]>;
   createClaim?: (input: { actorId: string; purpose?: string }) => Promise<{ id: string; version: number }>;
   preflightAttachment?: (input: { filename: string; mimeType: string; bytes: Uint8Array }) => Promise<void>;
-  uploadReceipt?: (input: { actorId: string; claimId: string; filename: string; mimeType: string; bytes: Uint8Array }) => Promise<{ id: string; jobId?: string }>;
-  onReceiptQueued?: (input: { jobId: string; receiptId: string; claimId: string; conversationId: string; chatId: string }) => Promise<void>;
+  uploadReceipt?: (input: { actorId: string; claimId: string; filename: string; mimeType: string; bytes: Uint8Array; notificationTarget?: { conversationId: string; chatId: string } }) => Promise<{ id: string; jobId?: string }>;
   extractReceipt?: (input: { actorId: string; claimId: string; receiptId: string }) => Promise<unknown>;
   updatePurpose?: (input: { actorId: string; claimId: string; value: string }) => Promise<{ version: number }>;
   requestSubmission?: (input: { actorId: string; claimId: string }) => Promise<{ token: string; claimId: string; claimVersion?: number; totalAmountCents?: number; receiptCount?: number; purpose?: string | null; issues?: unknown[] }>;
@@ -109,10 +108,12 @@ async function handleAttachment(
   if (intake.status === "READY_TO_SUBMIT") {
     intake = await deps.conversations.updateIntake({ id: intake.id, status: "COLLECTING", submissionToken: null, submissionPreview: null });
   }
-  const receipt = await deps.uploadReceipt({ actorId: input.actorId, claimId: intake.claimId!, ...input.attachment });
-  if (input.channel === "FEISHU" && input.chatId && receipt.jobId && deps.onReceiptQueued) {
-    await deps.onReceiptQueued({ jobId: receipt.jobId, receiptId: receipt.id, claimId: intake.claimId!, conversationId: input.conversationId, chatId: input.chatId });
-  }
+  await deps.uploadReceipt({
+    actorId: input.actorId,
+    claimId: intake.claimId!,
+    ...input.attachment,
+    ...(input.channel === "FEISHU" && input.chatId ? { notificationTarget: { conversationId: input.conversationId, chatId: input.chatId } } : {}),
+  });
   return persistReply(input, intake, "票据已上传并进入识别流程。请继续补充本次报销事由。", [], deps.conversations);
 }
 

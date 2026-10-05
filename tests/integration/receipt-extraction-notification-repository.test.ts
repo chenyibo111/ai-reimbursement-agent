@@ -48,6 +48,19 @@ it("does not deliver a pending OCR job and recovers an expired notification leas
   await expect(prisma.receiptExtractionNotification.findUniqueOrThrow({ where: { id: notification.id } })).resolves.toMatchObject({ status: "RETRY_WAIT", leaseUntil: null });
 });
 
+it("creates the OCR job and its Feishu notification in one durable transaction", async () => {
+  const employee = await prisma.employee.create({ data: { id: "notification-employee", displayName: "通知员工" } });
+  const claim = await prisma.claimDraft.create({ data: { employeeId: employee.id } });
+  const receipt = await prisma.receipt.create({ data: { claimId: claim.id, objectKey: "claims/notification-atomic", contentHash: "notification-atomic", mimeType: "image/png" } });
+  const conversation = await prisma.agentConversation.create({ data: { employeeId: employee.id, kind: "PRIVATE", scopeKey: "private" } });
+  const repository = new ReceiptExtractionNotificationRepository(prisma);
+
+  const job = await repository.enqueueForFeishuUpload({ claimId: claim.id, receiptId: receipt.id, conversationId: conversation.id, chatId: "oc-atomic" });
+
+  await expect(prisma.asyncJob.findUniqueOrThrow({ where: { id: job.id } })).resolves.toMatchObject({ kind: "RECEIPT_EXTRACTION", status: "PENDING", claimId: claim.id, receiptId: receipt.id });
+  await expect(prisma.receiptExtractionNotification.findUniqueOrThrow({ where: { jobId: job.id } })).resolves.toMatchObject({ claimId: claim.id, receiptId: receipt.id, conversationId: conversation.id, chatId: "oc-atomic", status: "PENDING" });
+});
+
 async function createTarget(status: "PENDING" | "SUCCEEDED") {
   const employee = await prisma.employee.create({ data: { id: "notification-employee", displayName: "通知员工" } });
   const claim = await prisma.claimDraft.create({ data: { employeeId: employee.id } });
