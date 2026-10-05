@@ -20,6 +20,14 @@ Agent 的信任链路为：服务端从草稿构造脱敏上下文 → 模型返
 
 模型从不接收数据库 ID、对象键、原始附件、Cookie 或密钥。`expense-1` 等目标引用仅是上下文中的公开别名，服务端保留其与 `ExpenseItem` 的映射。
 
+## 运行可观测性
+
+应用服务输出白名单结构化 JSON 日志，由 Alloy 从 Docker stdout 收集并写入 Loki；Grafana 只经私有运维入口查询 Loki。运行日志与 PostgreSQL 业务审计分离：前者用于诊断并按 30 天留存，后者保存提交、任务和复核的可追溯事实。
+
+日志关联字段包括 `requestId`、`jobId`、`claimId`、`receiptId`、`traceId` 与 `spanId`。其中前四者和 Trace 字段是 JSON 正文而非 Loki 标签；标签只保留低基数的服务、环境、级别、事件和任务种类。日志序列化器会丢弃未知字段，因此对象键、附件字节、Cookie、token、飞书 open_id、OCR 原文、提示词和向量不得写入平台。
+
+当前 Trace 边界兼容 W3C `traceparent`：Web 请求可安全提取 `traceId` 和 `spanId` 写入现有日志字段，但本期不部署 OpenTelemetry Collector 或 Tempo。后续接入 OpenTelemetry 时应沿用这些字段，并保持 Loki 查询和告警规则不变。
+
 ## 禁止的行为
 
 - 模型直接修改字段、删除附件、生成提交确认或提交报销单。

@@ -32,3 +32,11 @@ compactor:
   retention_enabled: true
   delete_request_store: filesystem
 
+ruler:
+  enable_api: true
+  storage:
+    type: local
+    local:
+      directory: /etc/loki/rules
+  rule_path: /tmp/loki/rules
+

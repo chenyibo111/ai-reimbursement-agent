@@ -1,0 +1,47 @@
+groups:
+  - name: reimbursement-observability
+    rules:
+      - alert: JobWorkerHeartbeatMissing
+        expr: absent_over_time({service="job-worker", event="worker.heartbeat"}[5m])
+        for: 5m
+        labels:
+          severity: critical
+          service: job-worker
+        annotations:
+          summary: 异步任务 Worker 已超过 5 分钟没有心跳
+
+      - alert: ReceiptExtractionQueueDelayed
+        expr: max_over_time({service="job-worker", event="job.claimed", jobKind="RECEIPT_EXTRACTION"} | json | unwrap durationMs [15m]) > 900000
+        for: 5m
+        labels:
+          severity: warning
+          service: job-worker
+        annotations:
+          summary: 有票据识别任务领取前等待超过 15 分钟
+
+      - alert: OcrFailureRateHigh
+        expr: (sum(count_over_time({service="ocr", level=~"warn|error"}[10m])) / sum(count_over_time({service="ocr", event=~"ocr.extract.(completed|failed|rejected)"}[10m]))) > 0.2 and sum(count_over_time({service="ocr", event=~"ocr.extract.(completed|failed|rejected)"}[10m])) >= 10
+        for: 5m
+        labels:
+          severity: warning
+          service: ocr
+        annotations:
+          summary: OCR 十分钟失败率超过 20%，且样本量不少于 10
+
+      - alert: ReviewQueueGrowing
+        expr: sum(count_over_time({service="job-worker", event="job.completed"} | json | status="REVIEW_REQUIRED" [30m])) > 20
+        for: 5m
+        labels:
+          severity: warning
+          service: job-worker
+        annotations:
+          summary: 三十分钟内新增人工复核任务超过 20 个
+
+      - alert: ObservabilityPipelineFailed
+        expr: sum(count_over_time({service=~"alloy|loki", level="error"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: observability
+        annotations:
+          summary: Loki 或 Alloy 日志采集链路出现错误

@@ -10,7 +10,7 @@ export type AsyncJobProcessResult =
 export type AsyncJobWorkerDependencies = {
   jobs: {
     recoverExpiredLeases(now: Date): Promise<number>;
-    claimNextJob(now: Date, leaseMs: number): Promise<Pick<AsyncJob, "id" | "kind" | "status"> | null>;
+    claimNextJob(now: Date, leaseMs: number): Promise<Pick<AsyncJob, "id" | "kind" | "status"> & { createdAt?: Date } | null>;
     markSucceeded(jobId: string): Promise<void>;
     markRetryWait(jobId: string, failureCode: string, now: Date): Promise<void>;
     markReviewRequired(jobId: string, failureCode: string): Promise<void>;
@@ -29,7 +29,11 @@ export async function runAsyncJobWorkerOnce(deps: AsyncJobWorkerDependencies): P
   const job = await deps.jobs.claimNextJob(now, deps.leaseMs);
   if (!job) return false;
 
-  deps.logger?.info("job.claimed", "异步任务已领取", { jobId: job.id, jobKind: job.kind });
+  deps.logger?.info("job.claimed", "异步任务已领取", {
+    jobId: job.id,
+    jobKind: job.kind,
+    ...(job.createdAt ? { durationMs: Math.max(0, now.getTime() - job.createdAt.getTime()) } : {}),
+  });
   const result = await deps.process({ id: job.id, kind: job.kind });
   if (result.type === "SUCCEEDED") await deps.jobs.markSucceeded(job.id);
   if (result.type === "RETRY_WAIT") await deps.jobs.markRetryWait(job.id, result.failureCode, deps.now());

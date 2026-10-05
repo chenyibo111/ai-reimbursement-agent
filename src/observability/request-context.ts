@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { traceContextFromHeaders, type TraceLogContext } from "@/src/observability/trace-context";
 
-export type RequestContext = {
+export type RequestContext = TraceLogContext & {
   requestId: string;
 };
 
@@ -14,7 +15,7 @@ export function getRequestId(request: Request): string {
 }
 
 export async function withRequestContext(request: Request, handler: RequestHandler): Promise<Response> {
-  const context = { requestId: getRequestId(request) };
+  const context = { requestId: getRequestId(request), ...traceContextFromHeaders(request.headers) };
   const response = await handler(context);
   response.headers.set("x-request-id", context.requestId);
   return response;

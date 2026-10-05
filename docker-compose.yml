@@ -149,6 +149,7 @@ services:
     volumes:
       - ./observability/loki-config.yml:/etc/loki/config.yml:ro
       - loki-data:/loki
+      - ./observability/loki-rules.yml:/etc/loki/rules/fake/loki-rules.yml:ro
     expose:
       - "3100"
     deploy:

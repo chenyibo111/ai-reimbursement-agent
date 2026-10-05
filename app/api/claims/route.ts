@@ -12,7 +12,7 @@ export const runtime = "nodejs";
 const logger = createLogger("web");
 
 export async function GET(request: Request) {
-  return withRequestContext(request, async ({ requestId }) => {
+  return withRequestContext(request, async ({ requestId, traceId, spanId }) => {
     const startedAt = Date.now();
     try {
       const actorId = getSessionActorId(request);
@@ -31,25 +31,25 @@ export async function GET(request: Request) {
       });
       const items = claims.map((claim) => ({ id: claim.id, status: claim.status, purpose: claim.purpose, updatedAt: claim.updatedAt, totalAmountCents: claim.expenseItems.reduce((sum, item) => sum + item.amountCents, 0), submissionNumber: claim.submissions[0]?.submissionNumber ?? null, submittedAt: claim.submissions[0]?.submittedAt ?? null }));
       const response = NextResponse.json({ items, total: items.length });
-      logger.info("http.request.completed", "报销单列表请求完成", { requestId, status: response.status, durationMs: Date.now() - startedAt });
+      logger.info("http.request.completed", "报销单列表请求完成", { requestId, traceId, spanId, status: response.status, durationMs: Date.now() - startedAt });
       return response;
     } catch (error) {
       const response = errorResponse(error);
-      logger.warn("http.request.failed", "报销单列表请求失败", { requestId, status: response.status, durationMs: Date.now() - startedAt, failureCode: getFailureCode(error) });
+      logger.warn("http.request.failed", "报销单列表请求失败", { requestId, traceId, spanId, status: response.status, durationMs: Date.now() - startedAt, failureCode: getFailureCode(error) });
       return response;
     }
   });
 }
 
 export async function POST(request: Request) {
-  return withRequestContext(request, async ({ requestId }) => {
+  return withRequestContext(request, async ({ requestId, traceId, spanId }) => {
     const startedAt = Date.now();
     try {
       const actorId = getSessionActorId(request);
       const body = (await request.json()) as { purpose?: unknown };
       if (body.purpose !== undefined && typeof body.purpose !== "string") {
         const response = NextResponse.json({ error: "purpose must be a string" }, { status: 400 });
-        logger.warn("http.request.rejected", "创建报销单请求参数无效", { requestId, status: response.status, durationMs: Date.now() - startedAt, failureCode: "invalid_request" });
+        logger.warn("http.request.rejected", "创建报销单请求参数无效", { requestId, traceId, spanId, status: response.status, durationMs: Date.now() - startedAt, failureCode: "invalid_request" });
         return response;
       }
 
@@ -63,11 +63,11 @@ export async function POST(request: Request) {
         { id: claim.id, status: claim.status, version: claim.version },
         { status: 201 },
       );
-      logger.info("http.request.completed", "创建报销单请求完成", { requestId, claimId: claim.id, status: response.status, durationMs: Date.now() - startedAt });
+      logger.info("http.request.completed", "创建报销单请求完成", { requestId, traceId, spanId, claimId: claim.id, status: response.status, durationMs: Date.now() - startedAt });
       return response;
     } catch (error) {
       const response = errorResponse(error);
-      logger.warn("http.request.failed", "创建报销单请求失败", { requestId, status: response.status, durationMs: Date.now() - startedAt, failureCode: getFailureCode(error) });
+      logger.warn("http.request.failed", "创建报销单请求失败", { requestId, traceId, spanId, status: response.status, durationMs: Date.now() - startedAt, failureCode: getFailureCode(error) });
       return response;
     }
   });

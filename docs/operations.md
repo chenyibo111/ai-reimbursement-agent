@@ -52,6 +52,26 @@ OCR 低置信度、重复票据和重试耗尽会创建 `RECEIPT_OCR` 复核任�
 
 政策监控另包括：管理员 `403` 比例、草稿保存/发布版本冲突、发布审计事件、政策阻断与预警数量、以及无有效发布政策的持续时长。日志不得记录飞书 App Secret、完整规则配置、员工票据或向量内容。
 
+## 日志平台与失败告警
+
+日志平台由 Loki、Grafana 和 Alloy 组成，使用 Docker 内网通信；Grafana 与 Loki 均不得暴露主机端口。仅通过受控反向代理、企业 VPN 或临时的运维端口转发访问 Grafana，禁止把 Loki API 或 Grafana 管理端口直接发布到互联网。
+
+启动或更新平台：
+
+```powershell
+docker compose --profile observability up -d loki alloy grafana
+docker compose --profile observability ps
+docker compose --profile observability logs --tail=200 alloy loki grafana
+```
+
+首次部署前，在未提交的 `.env.local` 或生产 Secret 中设置 `GRAFANA_ADMIN_USER` 与高强度的 `GRAFANA_ADMIN_PASSWORD`。Grafana 默认禁用匿名访问和用户自行注册。平台日志由 Docker volume 保存 30 天；这一留存不会删除 PostgreSQL 中的 `AuditEvent`、`AsyncJob` 或 `ReviewCase` 业务事实。
+
+Grafana Explore 选择 `Loki` 数据源，以 `{service="job-worker"} | json | jobId="<任务 ID>"` 查询任务链路，或按响应头 `x-request-id` 查询 Web 请求。`jobId`、`claimId`、`receiptId` 仅在 JSON 正文中解析，绝不能提升为 Loki 标签。Loki 标签只允许 `service`、`environment`、`level`、`event` 和 `jobKind`。
+
+内置告警覆盖：任务 Worker 五分钟无心跳、票据任务领取前等待超过十五分钟、OCR 十分钟失败率超过 20%（最少十个样本）、三十分钟新增人工复核超过 20 个、以及 Loki/Alloy 采集错误。规则会在 Loki Ruler 中计算；要实际通知管理员，生产环境需在受控网络中把 Ruler 对接 Alertmanager、邮件或飞书群机器人 Webhook。Webhook 仅发送规则名、严重级别、仪表盘链接和安全失败码，不能发送票据、会话内容、对象键或凭据。
+
+排障顺序：先确认 `alloy`、`loki`、`grafana` 三个容器都运行，再检查 Alloy 是否能访问只读 Docker Socket、Loki 是否可接收日志、Grafana 是否已加载 `Loki` 数据源和“任务运行总览”仪表盘。不要通过清理 `loki-data` 来处理单一应用异常；它仅用于保留期或容量治理，业务审计以 PostgreSQL 为准。
+
 ## 政策知识库运行
 
 先备份 PostgreSQL，再部署 pgvector 迁移；不得重建 `postgres-data` 卷。Embedding 服务使用 `knowledge` Compose profile 和 `embedding-models` 缓存卷，生产环境仅通过 Docker 内网访问，不得发布主机端口。开发机以宿主机运行 Web 时，可叠加 `docker-compose.local.yml`，将端口仅绑定到 `127.0.0.1:8081`，并使用 CPU PyTorch；该覆盖文件不得用于生产。首次同步会下载 BGE-M3 模型；生产 GPU 可使用独立构建的 GPU 镜像及 `docker-compose.gpu.yml`。来源同步失败时保留最近活动快照，排查时只记录来源 ID 与安全错误分类，不记录文档正文、token 或向量。
