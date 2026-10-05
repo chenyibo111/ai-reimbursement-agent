@@ -119,7 +119,7 @@ it("closes a running job when its target is no longer available", async () => {
   const target = await createExtractionTarget("missing");
   const repository = new PrismaAsyncJobRepository(prisma);
   const created = await repository.enqueueJob({ kind: "RECEIPT_EXTRACTION", claimId: target.claimId, receiptId: target.receiptId });
-  await repository.claimNextJob(new Date("2026-09-28T04:00:00.000Z"), 60_000);
+  await repository.claimNextJob(new Date("2099-09-28T04:00:00.000Z"), 60_000);
 
   await repository.closeMissingTarget(created.id);
 

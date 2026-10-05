@@ -55,6 +55,30 @@ it("only the assigned reviewer can resolve OCR corrections and every correction 
   await expect(prisma.claimDraft.findUniqueOrThrow({ where: { id: review.claimId } })).resolves.toMatchObject({ version: 1 });
 });
 
+it("creates the missing expense item when a reviewer supplies a low-confidence receipt amount", async () => {
+  const review = await createOcrReview();
+  await prisma.expenseItem.delete({ where: { id: review.expenseId } });
+  await claimReview(requestFor("reviewer-a", "POST"), { params: Promise.resolve({ reviewId: review.id }) });
+
+  const response = await resolveReview(
+    requestFor("reviewer-a", "POST", {
+      action: "CORRECT_FIELDS",
+      expectedVersion: 0,
+      corrections: { invoiceNumber: "REVIEW-INV-NEW", issuedOn: "2026-09-18", totalAmountCents: 10123 },
+    }),
+    { params: Promise.resolve({ reviewId: review.id }) },
+  );
+
+  expect(response.status).toBe(200);
+  await expect(prisma.expenseItem.findFirstOrThrow({ where: { claimId: review.claimId, receiptId: review.receiptId } })).resolves.toMatchObject({
+    invoiceNumber: "REVIEW-INV-NEW",
+    amountCents: 10123,
+    invoiceSource: "USER_ENTERED",
+    issuedOnSource: "USER_ENTERED",
+    amountSource: "USER_ENTERED",
+  });
+});
+
 it("turns a reviewer request into a claim clarification instead of exposing internal failure details", async () => {
   const review = await createOcrReview();
   await claimReview(requestFor("reviewer-a", "POST"), { params: Promise.resolve({ reviewId: review.id }) });

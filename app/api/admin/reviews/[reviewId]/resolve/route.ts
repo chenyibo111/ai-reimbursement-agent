@@ -50,10 +50,26 @@ async function resolve(prisma: PrismaClient, input: { reviewId: string; actorId:
       if (!review.claimId || !review.receiptId) throw new Error("invalid review correction");
       const claim = await tx.claimDraft.updateMany({ where: { id: review.claimId, version: input.expectedVersion ?? -1 }, data: { version: { increment: 1 } } });
       if (claim.count !== 1) throw new Error("version conflict");
-      const expense = await tx.expenseItem.findFirst({ where: { claimId: review.claimId, receiptId: review.receiptId }, select: { id: true } });
-      if (!expense) throw new Error("invalid review correction");
+      let expense = await tx.expenseItem.findFirst({ where: { claimId: review.claimId, receiptId: review.receiptId }, select: { id: true } });
+      if (!expense) {
+        const totalAmountCents = input.corrections.totalAmountCents;
+        if (typeof totalAmountCents !== "number") throw new Error("invalid review correction");
+        expense = await tx.expenseItem.create({
+          data: {
+            claimId: review.claimId,
+            receiptId: review.receiptId,
+            amountCents: totalAmountCents,
+            amountSource: "USER_ENTERED",
+            invoiceNumber: typeof input.corrections.invoiceNumber === "string" ? input.corrections.invoiceNumber : null,
+            invoiceSource: typeof input.corrections.invoiceNumber === "string" ? "USER_ENTERED" : null,
+            issuedOn: typeof input.corrections.issuedOn === "string" ? new Date(input.corrections.issuedOn) : null,
+            issuedOnSource: typeof input.corrections.issuedOn === "string" ? "USER_ENTERED" : null,
+          },
+          select: { id: true },
+        });
+      }
       for (const [field, value] of Object.entries(input.corrections) as Array<[CorrectionField, string | number]>) {
-        await tx.expenseItem.update({ where: { id: expense.id }, data: expensePatch(field, value) });
+        if (expense) await tx.expenseItem.update({ where: { id: expense.id }, data: expensePatch(field, value) });
         await tx.auditEvent.create({ data: { claimId: review.claimId, actorId: input.actorId, type: "REVIEW_FIELD_CORRECTED", payload: { reviewId: review.id, expenseItemId: expense.id, field, value, source: "USER_ENTERED" } } });
       }
     }
