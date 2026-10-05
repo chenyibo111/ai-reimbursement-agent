@@ -54,6 +54,32 @@ it("renders a recovery card for resolved alerts", () => {
   expect(JSON.stringify(renderFeishuAlertCard(batch!))).toContain("AI 报销系统告警已恢复");
 });
 
+it("labels each mixed alert item with its own status and matching time", () => {
+  const batch = parseAlertmanagerWebhook({
+    status: "firing",
+    alerts: [
+      {
+        status: "firing",
+        labels: { alertname: "JobWorkerHeartbeatMissing", severity: "critical", service: "job-worker" },
+        annotations: { summary: "Worker 无心跳" },
+        startsAt: "2026-10-06T00:00:00.000Z",
+      },
+      {
+        status: "resolved",
+        labels: { alertname: "OcrFailureRateHigh", severity: "warning", service: "ocr" },
+        annotations: { summary: "OCR 已恢复" },
+        startsAt: "2026-10-06T00:00:00.000Z",
+        endsAt: "2026-10-06T00:05:00.000Z",
+      },
+    ],
+  });
+
+  const serialized = JSON.stringify(renderFeishuAlertCard(batch!));
+  expect(serialized).toContain("状态：告警中");
+  expect(serialized).toContain("状态：已恢复");
+  expect(serialized).toContain("恢复时间：");
+});
+
 it("rejects an invalid Alertmanager webhook payload", () => {
   expect(parseAlertmanagerWebhook({ status: "firing", alerts: [] })).toBeNull();
   expect(parseAlertmanagerWebhook({ status: "unknown" })).toBeNull();

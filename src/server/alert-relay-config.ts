@@ -19,7 +19,12 @@ export function readAlertRelayConfig(env: Record<string, string | undefined>): A
   if (
     parsed.protocol !== "https:"
     || parsed.hostname !== "open.feishu.cn"
+    || Boolean(parsed.port)
+    || Boolean(parsed.username)
+    || Boolean(parsed.password)
     || !parsed.pathname.startsWith("/open-apis/bot/v2/hook/")
+    || !parsed.pathname.slice("/open-apis/bot/v2/hook/".length)
+    || parsed.pathname.slice("/open-apis/bot/v2/hook/".length).includes("/")
   ) {
     throw new Error(invalidWebhookMessage);
   }

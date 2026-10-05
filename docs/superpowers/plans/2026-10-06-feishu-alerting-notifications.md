@@ -54,7 +54,7 @@
 - Consumes: Alertmanager v4 webhook JSON 负载。
 - Produces: `parseAlertmanagerWebhook(value: unknown): AlertBatch | null` 与 `renderFeishuAlertCard(batch: AlertBatch): FeishuCard`，供 Task 2 HTTP 服务调用。
 
-- [ ] **Step 1: 写入卡片转换失败测试**
+- [x] **Step 1: 写入卡片转换失败测试**
 
 ```ts
 it("renders only approved firing fields and excludes sensitive labels", () => {
@@ -72,25 +72,25 @@ it("renders only approved firing fields and excludes sensitive labels", () => {
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `npm test -- tests/unit/observability/alert-relay.test.ts`
 Expected: FAIL，因为模块尚不存在。
 
-- [ ] **Step 3: 实现负载和卡片纯函数**
+- [x] **Step 3: 实现负载和卡片纯函数**
 
 在 `src/observability/alert-relay.ts` 定义 `AlertItem`、`AlertBatch`、`FeishuCard`；只接受 `alertname`、`severity`、`service`、`summary`、`startsAt`、`endsAt` 和状态。卡片标题固定为“AI 报销系统告警”或“AI 报销系统告警已恢复”，并显示数量、每条安全摘要与时间。
 
-- [ ] **Step 4: 扩展日志服务类型并补充测试**
+- [x] **Step 4: 扩展日志服务类型并补充测试**
 
 将 `LogService` 扩展为包含 `"alert-relay"`，保持既有字段白名单不扩大；验证未知日志字段仍被删除。
 
-- [ ] **Step 5: 运行相关单元测试确认通过**
+- [x] **Step 5: 运行相关单元测试确认通过**
 
 Run: `npm test -- tests/unit/observability/alert-relay.test.ts tests/unit/observability/logger.test.ts`
 Expected: PASS。
 
-- [ ] **Step 6: 提交 Task 1**
+- [x] **Step 6: 提交 Task 1**
 
 ```powershell
 git add src/observability/alert-relay.ts src/observability/logger.ts tests/unit/observability/alert-relay.test.ts tests/unit/observability/logger.test.ts
@@ -110,7 +110,7 @@ git commit -m "feat: render safe Feishu alert cards"
 - Consumes: Task 1 的 `parseAlertmanagerWebhook`、`renderFeishuAlertCard` 和 `createLogger`。
 - Produces: `readAlertRelayConfig(env): AlertRelayConfig`、`createAlertRelayServer(options)`；`npm run alert:relay:container` 可作为 Compose 命令启动。
 
-- [ ] **Step 1: 写入配置校验失败测试**
+- [x] **Step 1: 写入配置校验失败测试**
 
 ```ts
 expect(() => readAlertRelayConfig({})).toThrow("FEISHU_ALERT_WEBHOOK_URL is required");
@@ -118,29 +118,29 @@ expect(() => readAlertRelayConfig({ FEISHU_ALERT_WEBHOOK_URL: "http://open.feish
 expect(readAlertRelayConfig({ FEISHU_ALERT_WEBHOOK_URL: "https://open.feishu.cn/open-apis/bot/v2/hook/x" })).toMatchObject({ port: 8082 });
 ```
 
-- [ ] **Step 2: 写入 HTTP 行为失败测试**
+- [x] **Step 2: 写入 HTTP 行为失败测试**
 
 用注入的 `fetch` 和 `createLogger` fake 覆盖：`GET /health` 返回 200；非法方法/负载返回 405/400；飞书 2xx 返回 200；飞书非 2xx 或超时返回 502；日志与响应均不包含 Webhook 或敏感标签。
 
-- [ ] **Step 3: 运行新增测试确认失败**
+- [x] **Step 3: 运行新增测试确认失败**
 
 Run: `npm test -- tests/unit/server/alert-relay-config.test.ts tests/unit/worker/alert-relay.test.ts`
 Expected: FAIL，因为配置和运行入口尚不存在。
 
-- [ ] **Step 4: 实现 `readAlertRelayConfig`**
+- [x] **Step 4: 实现 `readAlertRelayConfig`**
 
 实现 `readAlertRelayConfig(env: NodeJS.ProcessEnv): AlertRelayConfig`。默认端口为 `8082`；要求 Webhook 为 `https:`、主机为 `open.feishu.cn` 且路径以 `/open-apis/bot/v2/hook/` 开头。错误信息只描述配置名和格式，不回显值。
 
-- [ ] **Step 5: 实现 `createAlertRelayServer` 与 Worker 入口**
+- [x] **Step 5: 实现 `createAlertRelayServer` 与 Worker 入口**
 
 实现 `createAlertRelayServer(options: AlertRelayServerOptions): http.Server`。仅接收 `POST /alertmanager`，限制 JSON body 为 256 KiB，调用 Task 1 纯函数并向配置 URL 发 JSON。飞书失败或异常统一返回 502；安全日志使用事件 `alert.delivery.completed`、`alert.delivery.failed` 和允许字段 `count`、`status`、`durationMs`、`failureCode`。在 Worker 入口读取配置并监听端口；向 `package.json` 新增 `alert:relay:container`。
 
-- [ ] **Step 6: 运行 Task 2 测试确认通过**
+- [x] **Step 6: 运行 Task 2 测试确认通过**
 
 Run: `npm test -- tests/unit/server/alert-relay-config.test.ts tests/unit/worker/alert-relay.test.ts`
 Expected: PASS。
 
-- [ ] **Step 7: 提交 Task 2**
+- [x] **Step 7: 提交 Task 2**
 
 ```powershell
 git add src/server/alert-relay-config.ts src/worker/alert-relay.ts package.json tests/unit/server/alert-relay-config.test.ts tests/unit/worker/alert-relay.test.ts
@@ -160,7 +160,7 @@ git commit -m "feat: add Feishu alert relay runtime"
 - Consumes: Task 2 的 `npm run alert:relay:container`，固定监听 `8082`、`/health` 与 `/alertmanager`。
 - Produces: `docker compose --profile observability up -d --build` 可启动完整、无主机端口的告警投递链路。
 
-- [ ] **Step 1: 写入 Compose/配置契约失败测试**
+- [x] **Step 1: 写入 Compose/配置契约失败测试**
 
 ```ts
 expect(compose).toMatch(/alertmanager:[\s\S]*?profiles:\s*\["observability"\]/);
@@ -172,25 +172,25 @@ expect(alertmanager).toContain("group_wait: 30s");
 expect(alertmanager).toContain("repeat_interval: 4h");
 ```
 
-- [ ] **Step 2: 运行配置契约测试确认失败**
+- [x] **Step 2: 运行配置契约测试确认失败**
 
 Run: `npm test -- tests/integration/observability-compose.test.ts tests/integration/observability-alerting-compose.test.ts`
 Expected: FAIL，因为 Alertmanager 与 Relay 尚未定义。
 
-- [ ] **Step 3: 新增 Alertmanager 配置**
+- [x] **Step 3: 新增 Alertmanager 配置**
 
 创建 `observability/alertmanager.yml`：默认路由按 `alertname`、`service`、`severity` 分组，使用 30 秒/5 分钟/4 小时窗口；webhook receiver 指向 `http://alert-relay:8082/alertmanager` 并设置 `send_resolved: true`；定义 `critical` 抑制同名同服务 `warning` 的规则。
 
-- [ ] **Step 4: 配置 Loki Ruler 与 Compose 服务**
+- [x] **Step 4: 配置 Loki Ruler 与 Compose 服务**
 
 在 `ruler` 配置加入 `alertmanager_url: http://alertmanager:9093`。在 Compose 中新增 `quay.io/prometheus/alertmanager:v0.28.1`（挂载只读配置、`expose: 9093`）和 Relay（复用项目 Dockerfile、`app_env` Secret、`npm run alert:relay:container`、`expose: 8082`、无 `ports`）；Relay `/health` 成功后再启动 Alertmanager。两个服务均属于 `observability` profile，设置适度内存限制和 `unless-stopped` 重启策略。
 
-- [ ] **Step 5: 运行配置契约测试确认通过**
+- [x] **Step 5: 运行配置契约测试确认通过**
 
 Run: `npm test -- tests/integration/observability-compose.test.ts tests/integration/observability-alerting-compose.test.ts`
 Expected: PASS。
 
-- [ ] **Step 6: 提交 Task 3**
+- [x] **Step 6: 提交 Task 3**
 
 ```powershell
 git add observability/alertmanager.yml observability/loki-config.yml docker-compose.yml tests/integration/observability-compose.test.ts tests/integration/observability-alerting-compose.test.ts
@@ -209,35 +209,35 @@ git commit -m "feat: route observability alerts to relay"
 - Consumes: Tasks 1–3 的环境变量、Compose profile 和 HTTP 端点。
 - Produces: 管理员可不暴露凭据地部署、检查、演练与回滚告警投递链路。
 
-- [ ] **Step 1: 写入文档/安全约束失败测试**
+- [x] **Step 1: 写入文档/安全约束失败测试**
 
 扩展现有 observability 测试，断言 `.env.example` 只有空 `FEISHU_ALERT_WEBHOOK_URL`、操作文档包含 Alertmanager/Relay 启动与无害演练命令、并明确没有固定域名时不发送 Grafana 外链。
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `npm test -- tests/integration/observability-alerts.test.ts`
 Expected: FAIL，因为部署文档和示例变量尚未更新。
 
-- [ ] **Step 3: 更新示例配置与运维/架构文档**
+- [x] **Step 3: 更新示例配置与运维/架构文档**
 
 在 `.env.example` 添加空的 `FEISHU_ALERT_WEBHOOK_URL`。文档说明建立专用告警群、将值写入未提交 Secret、启动 `docker compose --profile observability up -d --build`、检查 Relay/Alertmanager 健康、使用测试规则演练、查看失败日志及安全回滚。禁止文档要求用户贴出 Webhook；明确当前不含外部 Grafana 链接。
 
-- [ ] **Step 4: 运行 Task 4 测试确认通过**
+- [x] **Step 4: 运行 Task 4 测试确认通过**
 
 Run: `npm test -- tests/integration/observability-alerts.test.ts`
 Expected: PASS。
 
-- [ ] **Step 5: 执行全量静态与测试验证**
+- [x] **Step 5: 执行全量静态与测试验证**
 
 Run: `npx tsc --noEmit; npm test`
 Expected: TypeScript 退出码 0；Vitest 全部通过。
 
-- [ ] **Step 6: 验证 Compose 配置可解析且不开放端口**
+- [x] **Step 6: 验证 Compose 配置可解析且不开放端口**
 
 Run: `docker compose --profile observability config`
 Expected: 配置解析成功；普通 profile 不依赖 Alertmanager/Relay；Alertmanager 与 Relay 没有主机 `ports`。缺少 Webhook 的运行时失败已由 Task 2 配置单元测试覆盖。
 
-- [ ] **Step 7: 提交 Task 4**
+- [x] **Step 7: 提交 Task 4**
 
 ```powershell
 git add .env.example docs/operations.md docs/architecture.md tests/integration/observability-alerts.test.ts

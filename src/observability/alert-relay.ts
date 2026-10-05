@@ -93,13 +93,16 @@ export function renderFeishuAlertCard(batch: AlertBatch): FeishuCard {
             { is_short: true, text: { tag: "lark_md", content: `**告警数量**\n${batch.alerts.length}` } },
           ],
         },
-        ...batch.alerts.map((alert) => ({
-          tag: "div",
-          text: {
-            tag: "lark_md",
-            content: `**${alert.alertName}**\n服务：${alert.service}\n级别：${alert.severity}\n${alert.summary}\n${resolved ? "恢复时间" : "触发时间"}：${alertTime(alert)}`,
-          },
-        })),
+        ...batch.alerts.map((alert) => {
+          const itemResolved = alert.status === "resolved";
+          return {
+            tag: "div",
+            text: {
+              tag: "plain_text",
+              content: `${alert.alertName}\n状态：${itemResolved ? "已恢复" : "告警中"}\n服务：${alert.service}\n级别：${alert.severity}\n${alert.summary}\n${itemResolved ? "恢复时间" : "触发时间"}：${alertTime(alert)}`,
+            },
+          };
+        }),
       ],
     },
   };
