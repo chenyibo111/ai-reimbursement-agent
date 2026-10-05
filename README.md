@@ -308,6 +308,15 @@ npm run roles:bootstrap -- <employeeId>
 - [跨渠道 Agent 会话设计](docs/superpowers/specs/2026-09-27-cross-channel-agent-conversation-design.md)
 - [跨渠道 Agent 会话实施计划](docs/superpowers/plans/2026-09-27-cross-channel-agent-conversations.md)
 
+### 待办：固定域名后的飞书深链登录
+
+**前置条件：** 部署稳定的 HTTPS 域名（例如固定域名的 Cloudflare Tunnel）。`trycloudflare.com` 快速隧道会在进程停止后失效且每次生成新域名，不适合作为 OAuth 回调或员工工作台链接。
+
+- 为所有工作台路由增加服务端认证守卫；没有有效会话时自动进入飞书 OAuth，而不是显示 `unauthenticated` 错误。
+- 仅允许站内相对路径作为登录后的 `returnTo`，OAuth 回调后返回原始报销单、复核单或管理页面，防止开放重定向。
+- 将 `APP_PUBLIC_URL` 和 `FEISHU_REDIRECT_URI` 切换为固定 HTTPS 域名，并在飞书开放平台登记完全相同的回调地址。
+- 验收：从飞书消息打开具体 `/claims/<id>`，未登录用户完成授权后回到同一报销单；已登录用户直接进入；外部 `returnTo` 被忽略并回退到 `/claims`。
+
 ## 许可证
 
 本仓库采用 [MIT License](LICENSE)。
