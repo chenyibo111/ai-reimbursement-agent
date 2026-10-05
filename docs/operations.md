@@ -62,6 +62,7 @@ OCR 低置信度、重复票据和重试耗尽会创建 `RECEIPT_OCR` 复核任�
 docker compose --profile observability up -d loki alloy grafana
 docker compose --profile observability ps
 docker compose --profile observability logs --tail=200 alloy loki grafana
+docker compose exec -T loki wget -qO- http://localhost:3100/prometheus/api/v1/rules
 ```
 
 首次部署前，在未提交的 `.env.local` 或生产 Secret 中设置 `GRAFANA_ADMIN_USER` 与高强度的 `GRAFANA_ADMIN_PASSWORD`。Grafana 默认禁用匿名访问和用户自行注册。平台日志由 Docker volume 保存 30 天；这一留存不会删除 PostgreSQL 中的 `AuditEvent`、`AsyncJob` 或 `ReviewCase` 业务事实。
@@ -71,6 +72,8 @@ Grafana Explore 选择 `Loki` 数据源，以 `{service="job-worker"} | json | j
 内置告警覆盖：任务 Worker 五分钟无心跳、票据任务领取前等待超过十五分钟、OCR 十分钟失败率超过 20%（最少十个样本）、三十分钟新增人工复核超过 20 个、以及 Loki/Alloy 采集错误。规则会在 Loki Ruler 中计算；要实际通知管理员，生产环境需在受控网络中把 Ruler 对接 Alertmanager、邮件或飞书群机器人 Webhook。Webhook 仅发送规则名、严重级别、仪表盘链接和安全失败码，不能发送票据、会话内容、对象键或凭据。
 
 排障顺序：先确认 `alloy`、`loki`、`grafana` 三个容器都运行，再检查 Alloy 是否能访问只读 Docker Socket、Loki 是否可接收日志、Grafana 是否已加载 `Loki` 数据源和“任务运行总览”仪表盘。不要通过清理 `loki-data` 来处理单一应用异常；它仅用于保留期或容量治理，业务审计以 PostgreSQL 为准。
+
+规则加载和评估应以 `http://localhost:3100/prometheus/api/v1/rules` 的容器内响应为准：每条规则应为 `health: "ok"` 且 `lastError` 为空。不要只依赖 `docker compose logs --tail=100 loki`，因为规则加载日志只在 Loki 启动阶段输出，后续会被周期评估日志覆盖。
 
 ## 政策知识库运行
 
