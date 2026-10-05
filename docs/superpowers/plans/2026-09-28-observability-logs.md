@@ -44,11 +44,11 @@
 - Consumes async job `jobId` 与安全失败码。
 - Produces `createLogger(service)`, `withRequestContext`, `logJobEvent`，输出单行 JSON。
 
-- [ ] Write failing tests for stable JSON fields, `x-request-id` propagation, `jobId` correlation and secret-field removal.
-- [ ] Run `npm test -- --run tests/unit/observability/logger.test.ts tests/integration/api/request-correlation.test.ts` and verify failure.
-- [ ] Implement allowlisted logger/context wrappers; replace direct `console.log/error` in the owned services.
-- [ ] Rerun focused tests; expect PASS.
-- [ ] Commit `feat: add structured application logging`.
+- [x] Write failing tests for stable JSON fields, `x-request-id` propagation, `jobId` correlation and secret-field removal.
+- [x] Run `npm test -- --run tests/unit/observability/logger.test.ts tests/integration/api/request-correlation.test.ts` and verify failure.
+- [x] Implement allowlisted logger/context wrappers; replace direct `console.log/error` in the owned services.
+- [x] Rerun focused tests; expect PASS.
+- [x] Commit `feat: add structured application logging`.
 
 ### Task 2: Loki、Alloy、Grafana Compose 基础设施
 
@@ -64,11 +64,11 @@
 - Consumes Task 1 stdout JSON contract.
 - Produces Docker services `loki`, `alloy`, `grafana` and datasource `Loki`.
 
-- [ ] Write failing Compose assertion that services, read-only socket mount, 30-day retention, low-cardinality relabel rules and absence of public Loki/Grafana `ports` exist.
-- [ ] Run `docker compose config` and the test; verify failure.
-- [ ] Implement single-node Loki/Alloy/Grafana configuration and persistent volumes.
-- [ ] Rerun `docker compose config` and focused test; expect PASS.
-- [ ] Commit `feat: add self-hosted log observability stack`.
+- [x] Write failing Compose assertion that services, read-only socket mount, 30-day retention, low-cardinality relabel rules and absence of public Loki/Grafana `ports` exist.
+- [x] Run `docker compose config` and the test; verify failure.
+- [x] Implement single-node Loki/Alloy/Grafana configuration and persistent volumes.
+- [x] Rerun `docker compose config` and focused test; expect PASS.
+- [x] Commit `feat: add self-hosted log observability stack`.
 
 ### Task 3: Grafana 仪表盘与任务 Worker 健康事件
 
@@ -83,11 +83,11 @@
 - Consumes JSON events from Task 1 and Compose datasource from Task 2.
 - Produces dashboard panels for job lifecycle, OCR failures, worker heartbeat and web/Feishu errors.
 
-- [ ] Write failing tests for heartbeat event, required dashboard LogQL fields and no sensitive query expansion.
-- [ ] Run focused tests and verify failure.
-- [ ] Implement stable heartbeat/lifecycle logging and provisioned dashboard JSON.
-- [ ] Rerun focused tests; expect PASS.
-- [ ] Commit `feat: add job runtime observability dashboard`.
+- [x] Write failing tests for heartbeat event, required dashboard LogQL fields and no sensitive query expansion.
+- [x] Run focused tests and verify failure.
+- [x] Implement stable heartbeat/lifecycle logging and provisioned dashboard JSON.
+- [x] Rerun focused tests; expect PASS.
+- [x] Commit `feat: add job runtime observability dashboard`.
 
 ### Task 4: Loki 告警规则、操作文档与 OpenTelemetry 预留
 
@@ -103,11 +103,11 @@
 - Consumes dashboard/query fields from Tasks 1–3.
 - Produces windowed alert rules and trace-field compatible log context without requiring Tempo deployment.
 
-- [ ] Write failing assertions for the five initial alerts, duration/minimum-sample safeguards, 30-day runbook, protected access and OpenTelemetry-compatible `traceId/spanId` field handling.
-- [ ] Run focused test and verify failure.
-- [ ] Implement rules, documented notification integration points, runbook and no-op trace context boundary.
-- [ ] Run `npm test`, `npm run build`, `docker compose config` and observability test suite; expect PASS.
-- [ ] Commit `docs: document log observability operations`.
+- [x] Write failing assertions for the five initial alerts, duration/minimum-sample safeguards, 30-day runbook, protected access and OpenTelemetry-compatible `traceId/spanId` field handling.
+- [x] Run focused test and verify failure.
+- [x] Implement rules, documented notification integration points, runbook and no-op trace context boundary.
+- [x] Run `npm test`, `npm run build`, `docker compose config` and observability test suite; expect PASS in the Linux container image; local Windows `next build` remains blocked by the machine application-control policy.
+- [x] Commit `docs: document log observability operations`.
 
 ## Plan Self-Review
 
