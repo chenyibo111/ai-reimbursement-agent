@@ -1,0 +1,51 @@
+{
+  "uid": "ai-reimbursement-job-runtime",
+  "title": "任务运行总览",
+  "tags": ["ai-reimbursement", "operations"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "logs",
+      "title": "异步任务生命周期",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{ "refId": "A", "expr": "{service=\"job-worker\"} | json | event=~\"job.(claimed|completed)\"" }],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "OCR 失败量（10 分钟）",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{ "refId": "A", "expr": "sum(count_over_time({service=\"ocr\", level=~\"warn|error\"} | json [10m]))" }],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "任务 Worker 最近心跳",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{ "refId": "A", "expr": "count_over_time({service=\"job-worker\", event=\"worker.heartbeat\"} [5m])" }],
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 8 }
+    },
+    {
+      "id": 4,
+      "type": "logs",
+      "title": "按任务 ID 检索",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{ "refId": "A", "expr": "{service=\"job-worker\"} | json | jobId != \"\"" }],
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Web 与飞书 Worker 错误（5 分钟）",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{ "refId": "A", "expr": "sum(count_over_time({service=~\"web|feishu-worker\", level=\"error\"} | json [5m]))" }],
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 8 }
+    }
+  ]
+}

@@ -10,6 +10,7 @@ import { loadConfig } from "@/src/server/config";
 import { PrismaAsyncJobRepository } from "@/src/infrastructure/prisma/async-job-repository";
 import { createPrismaClient } from "@/src/infrastructure/prisma/client";
 import { createLogger } from "@/src/observability/logger";
+import { createWorkerHeartbeat } from "@/src/observability/worker-heartbeat";
 
 const pollIntervalMs = Number(process.env.JOB_WORKER_POLL_INTERVAL_MS ?? 1_000);
 const logger = createLogger("job-worker");
@@ -21,6 +22,7 @@ async function main() {
   const prisma = createPrismaClient(databaseUrl);
   const jobs = new PrismaAsyncJobRepository(prisma);
   const extractDeps = createExtractReceiptDeps(prisma);
+  const heartbeat = createWorkerHeartbeat(logger);
   let stopping = false;
   const stop = () => { stopping = true; };
   process.once("SIGINT", stop);
@@ -30,6 +32,7 @@ async function main() {
     await prisma.$connect();
     logger.info("worker.started", "异步任务 Worker 已启动");
     while (!stopping) {
+      heartbeat.emitIfDue();
       const processed = await runAsyncJobWorkerOnce({
         jobs,
         process: (job) => processAsyncJob(job, {

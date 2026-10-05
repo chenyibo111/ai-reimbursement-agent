@@ -26,6 +26,7 @@ import { ReceiptExtractionNotificationRepository } from "@/src/infrastructure/pr
 import { createClamAvFileSafetyScanner } from "@/src/infrastructure/security/file-safety-scanner";
 import { createS3ObjectStore } from "@/src/infrastructure/storage/object-store";
 import { createLogger } from "@/src/observability/logger";
+import { createWorkerHeartbeat } from "@/src/observability/worker-heartbeat";
 import { loadConfig, validateFeishuWorkerEnvironment } from "@/src/server/config";
 import { createFeishuBotRuntime } from "@/src/worker/feishu-bot-runtime";
 
@@ -57,6 +58,7 @@ async function main() {
   wsClient = new lark.WSClient({ appId: bot.appId, appSecret: bot.appSecret, autoReconnect: true, loggerLevel: lark.LoggerLevel.error });
   await wsClient.start({ eventDispatcher: dispatcher });
   logger.info("worker.started", "飞书机器人 Worker 已启动");
+  const heartbeat = createWorkerHeartbeat(logger, { message: "飞书机器人 Worker 心跳正常" });
 
   const drainNotifications = () => deliverReceiptExtractionNotificationOnce({
     notifications: notificationRepository,
@@ -67,6 +69,7 @@ async function main() {
     leaseMs: 30_000,
   });
   const interval = setInterval(() => {
+    heartbeat.emitIfDue();
     void runtime.drainOnce().catch(() => {
       logger.warn("event.drain.failed", "飞书事件队列处理失败", { failureCode: "event_drain_failed" });
     });
