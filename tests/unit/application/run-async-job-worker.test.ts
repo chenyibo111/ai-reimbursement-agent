@@ -43,3 +43,33 @@ it("marks a claimed job successful after the processor completes", async () => {
   expect(processed).toBe(true);
   expect(state.status).toBe("SUCCEEDED");
 });
+
+it("emits lifecycle events with the job correlation fields", async () => {
+  const events: Array<{ event: string; fields?: Record<string, unknown> }> = [];
+
+  await runAsyncJobWorkerOnce({
+    jobs: {
+      recoverExpiredLeases: async () => 1,
+      claimNextJob: async () => ({ id: "job-2", kind: "RECEIPT_EXTRACTION" as const, status: "RUNNING" as const }),
+      markSucceeded: async () => undefined,
+      markRetryWait: async () => undefined,
+      markReviewRequired: async () => undefined,
+      closeMissingTarget: async () => undefined,
+    },
+    process: async () => ({ type: "SUCCEEDED" as const }),
+    now: () => new Date("2026-09-28T05:00:00.000Z"),
+    leaseMs: 60_000,
+    logger: {
+      info: (event, _message, fields) => events.push({ event, fields }),
+      debug: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+    },
+  });
+
+  expect(events).toEqual([
+    { event: "job.lease.recovered", fields: { count: 1 } },
+    { event: "job.claimed", fields: { jobId: "job-2", jobKind: "RECEIPT_EXTRACTION" } },
+    { event: "job.completed", fields: { jobId: "job-2", jobKind: "RECEIPT_EXTRACTION", status: "SUCCEEDED" } },
+  ]);
+});

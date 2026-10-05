@@ -9,8 +9,10 @@ import { PrismaPolicyKnowledgeRepository } from "@/src/infrastructure/prisma/pol
 import { loadConfig } from "@/src/server/config";
 import { PrismaAsyncJobRepository } from "@/src/infrastructure/prisma/async-job-repository";
 import { createPrismaClient } from "@/src/infrastructure/prisma/client";
+import { createLogger } from "@/src/observability/logger";
 
 const pollIntervalMs = Number(process.env.JOB_WORKER_POLL_INTERVAL_MS ?? 1_000);
+const logger = createLogger("job-worker");
 
 async function main() {
   const databaseUrl = process.env.DATABASE_URL;
@@ -26,6 +28,7 @@ async function main() {
 
   try {
     await prisma.$connect();
+    logger.info("worker.started", "异步任务 Worker 已启动");
     while (!stopping) {
       const processed = await runAsyncJobWorkerOnce({
         jobs,
@@ -45,15 +48,17 @@ async function main() {
         }),
         now: () => new Date(),
         leaseMs: 60_000,
+        logger,
       });
       if (!processed) await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
     }
   } finally {
+    logger.info("worker.stopped", "异步任务 Worker 已停止");
     await prisma.$disconnect();
   }
 }
 
 void main().catch(() => {
-  console.error("Async job worker failed");
+  logger.error("worker.failed", "异步任务 Worker 意外退出", { failureCode: "worker_failed" });
   process.exitCode = 1;
 });

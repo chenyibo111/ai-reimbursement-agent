@@ -25,8 +25,11 @@ import { PrismaAsyncJobRepository } from "@/src/infrastructure/prisma/async-job-
 import { ReceiptExtractionNotificationRepository } from "@/src/infrastructure/prisma/receipt-extraction-notification-repository";
 import { createClamAvFileSafetyScanner } from "@/src/infrastructure/security/file-safety-scanner";
 import { createS3ObjectStore } from "@/src/infrastructure/storage/object-store";
+import { createLogger } from "@/src/observability/logger";
 import { loadConfig, validateFeishuWorkerEnvironment } from "@/src/server/config";
 import { createFeishuBotRuntime } from "@/src/worker/feishu-bot-runtime";
+
+const logger = createLogger("feishu-worker");
 
 async function main() {
   const bot = validateFeishuWorkerEnvironment(process.env);
@@ -53,6 +56,7 @@ async function main() {
   dispatcher.register({ "im.message.receive_v1": (event) => runtime.onEvent(event) });
   wsClient = new lark.WSClient({ appId: bot.appId, appSecret: bot.appSecret, autoReconnect: true, loggerLevel: lark.LoggerLevel.error });
   await wsClient.start({ eventDispatcher: dispatcher });
+  logger.info("worker.started", "飞书机器人 Worker 已启动");
 
   const drainNotifications = () => deliverReceiptExtractionNotificationOnce({
     notifications: notificationRepository,
@@ -63,8 +67,12 @@ async function main() {
     leaseMs: 30_000,
   });
   const interval = setInterval(() => {
-    void runtime.drainOnce().catch(() => undefined);
-    void drainNotifications().catch(() => undefined);
+    void runtime.drainOnce().catch(() => {
+      logger.warn("event.drain.failed", "飞书事件队列处理失败", { failureCode: "event_drain_failed" });
+    });
+    void drainNotifications().catch(() => {
+      logger.warn("notification.drain.failed", "票据识别通知处理失败", { failureCode: "notification_drain_failed" });
+    });
   }, 800);
   let stopping = false;
   const shutdown = async () => {
@@ -73,6 +81,7 @@ async function main() {
     clearInterval(interval);
     await runtime.stop();
     await prisma.$disconnect();
+    logger.info("worker.stopped", "飞书机器人 Worker 已停止");
   };
   process.once("SIGINT", () => { void shutdown(); });
   process.once("SIGTERM", () => { void shutdown(); });
@@ -152,10 +161,7 @@ function createProcessDeps(input: {
   };
 }
 
-void main().catch((error: unknown) => {
-  const message = error instanceof Error && error.message === "FEISHU_BOT_ENABLED=true is required to start the Feishu worker"
-    ? error.message
-    : "Feishu bot worker failed to start";
-  console.error(message);
+void main().catch(() => {
+  logger.error("worker.failed", "飞书机器人 Worker 启动或运行失败", { failureCode: "worker_failed" });
   process.exitCode = 1;
 });
