@@ -150,12 +150,52 @@ services:
       - ./observability/loki-config.yml:/etc/loki/config.yml:ro
       - loki-data:/loki
       - ./observability/loki-rules.yml:/etc/loki/rules/fake/loki-rules.yml:ro
+    depends_on:
+      alertmanager:
+        condition: service_started
     expose:
       - "3100"
     deploy:
       resources:
         limits:
           memory: 1024M
+    restart: unless-stopped
+
+  alert-relay:
+    build: .
+    profiles: ["observability"]
+    command: npm run alert:relay:container
+    entrypoint: ["node", "/app/scripts/docker-runtime.mjs"]
+    secrets:
+      - app_env
+    expose:
+      - "8082"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8082/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    restart: unless-stopped
+
+  alertmanager:
+    image: quay.io/prometheus/alertmanager:v0.28.1
+    profiles: ["observability"]
+    command: --config.file=/etc/alertmanager/alertmanager.yml
+    volumes:
+      - ./observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    expose:
+      - "9093"
+    depends_on:
+      alert-relay:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
     restart: unless-stopped
 
   alloy:

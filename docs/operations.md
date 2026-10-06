@@ -54,24 +54,39 @@ OCR 低置信度、重复票据和重试耗尽会创建 `RECEIPT_OCR` 复核任�
 
 ## 日志平台与失败告警
 
-日志平台由 Loki、Grafana 和 Alloy 组成，使用 Docker 内网通信；Grafana 与 Loki 均不得暴露主机端口。仅通过受控反向代理、企业 VPN 或临时的运维端口转发访问 Grafana，禁止把 Loki API 或 Grafana 管理端口直接发布到互联网。
+日志平台由 Loki、Grafana、Alloy、Alertmanager 与 `alert-relay` 组成，使用 Docker 内网通信；Grafana、Loki、Alertmanager 与 Relay 均不得暴露主机端口。仅通过受控反向代理、企业 VPN 或临时的运维端口转发访问 Grafana，禁止把 Loki API 或 Grafana 管理端口直接发布到互联网。
+
+实际告警发送前，创建一个专用告警群并为该群添加飞书群机器人。将机器人的 Webhook 地址仅写入未提交的 `.env.local` 或生产 Secret：
+
+```dotenv
+FEISHU_ALERT_WEBHOOK_URL="https://open.feishu.cn/open-apis/bot/v2/hook/..."
+```
+
+不要在聊天、工单、代码、日志或截图中粘贴该地址；它相当于向该群发送消息的凭据。缺少或格式错误时 `alert-relay` 会启动失败，普通 Web 与业务 Worker 不受影响。
 
 启动或更新平台：
 
 ```powershell
-docker compose --profile observability up -d loki alloy grafana
+docker compose --profile observability up -d --build
 docker compose --profile observability ps
-docker compose --profile observability logs --tail=200 alloy loki grafana
+docker compose --profile observability logs --tail=200 alloy loki grafana alertmanager alert-relay
 docker compose exec -T loki wget -qO- http://localhost:3100/prometheus/api/v1/rules
+docker compose run --rm --no-deps --entrypoint amtool alertmanager check-config /etc/alertmanager/alertmanager.yml
 ```
 
 首次部署前，在未提交的 `.env.local` 或生产 Secret 中设置 `GRAFANA_ADMIN_USER` 与高强度的 `GRAFANA_ADMIN_PASSWORD`。Grafana 默认禁用匿名访问和用户自行注册。平台日志由 Docker volume 保存 30 天；这一留存不会删除 PostgreSQL 中的 `AuditEvent`、`AsyncJob` 或 `ReviewCase` 业务事实。
 
 Grafana Explore 选择 `Loki` 数据源，以 `{service="job-worker"} | json | jobId="<任务 ID>"` 查询任务链路，或按响应头 `x-request-id` 查询 Web 请求。`jobId`、`claimId`、`receiptId` 仅在 JSON 正文中解析，绝不能提升为 Loki 标签。Loki 标签只允许 `service`、`environment`、`level`、`event` 和 `jobKind`。
 
-内置告警覆盖：任务 Worker 五分钟无心跳、票据任务领取前等待超过十五分钟、OCR 十分钟失败率超过 20%（最少十个样本）、三十分钟新增人工复核超过 20 个、以及 Loki/Alloy 采集错误。规则会在 Loki Ruler 中计算；要实际通知管理员，生产环境需在受控网络中把 Ruler 对接 Alertmanager、邮件或飞书群机器人 Webhook。Webhook 仅发送规则名、严重级别、仪表盘链接和安全失败码，不能发送票据、会话内容、对象键或凭据。
+内置告警覆盖：任务 Worker 五分钟无心跳、票据任务领取前等待超过十五分钟、OCR 十分钟失败率超过 20%（最少十个样本）、三十分钟新增人工复核超过 20 个、以及 Loki/Alloy 采集错误。规则由 Loki Ruler 计算，Alertmanager 负责聚合、抑制和重试，`alert-relay` 负责发送飞书卡片。Webhook 仅发送规则名、严重级别、服务、摘要和安全时间信息，不能发送票据、会话内容、对象键或凭据。
 
-排障顺序：先确认 `alloy`、`loki`、`grafana` 三个容器都运行，再检查 Alloy 是否能访问只读 Docker Socket、Loki 是否可接收日志、Grafana 是否已加载 `Loki` 数据源和“任务运行总览”仪表盘。不要通过清理 `loki-data` 来处理单一应用异常；它仅用于保留期或容量治理，业务审计以 PostgreSQL 为准。
+验收时仅在测试环境创建一条含固定 `summary` 的无害测试规则，等待 30 秒分组窗口后确认专用告警群收到卡片；将规则恢复为正常状态后，确认收到“已恢复”卡片。不要通过停止生产 Worker、上传异常票据或直接制造业务失败来触发演练。飞书投递失败时，查看 `docker compose logs --tail=200 alertmanager alert-relay`，由 Alertmanager 重试；不要通过重启业务服务、清空 `loki-data` 或重新生成 Webhook 来处理单次投递失败。
+
+当前没有固定域名和受控的 Grafana 外部入口，飞书告警卡片不会附带外部仪表盘链接。固定域名、反向代理和 Grafana SSO 就绪后，再单独评审并加入只读运维链接。
+
+排障顺序：先确认 `alloy`、`loki`、`grafana`、`alertmanager` 与 `alert-relay` 都运行，再检查 Alloy 是否能访问只读 Docker Socket、Loki 是否可接收日志、Alertmanager 是否加载路由、Relay 是否健康，以及 Grafana 是否已加载 `Loki` 数据源和“任务运行总览”仪表盘。不要通过清理 `loki-data` 来处理单一应用异常；它仅用于保留期或容量治理，业务审计以 PostgreSQL 为准。
+
+若要回滚通知能力，停止并移除 `alertmanager` 与 `alert-relay` 服务即可；Loki 仍会计算规则但不会投递外部消息。不得删除 Loki 数据卷、业务数据库或既有告警规则。
 
 规则加载和评估应以 `http://localhost:3100/prometheus/api/v1/rules` 的容器内响应为准：每条规则应为 `health: "ok"` 且 `lastError` 为空。不要只依赖 `docker compose logs --tail=100 loki`，因为规则加载日志只在 Loki 启动阶段输出，后续会被周期评估日志覆盖。
 

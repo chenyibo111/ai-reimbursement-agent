@@ -24,6 +24,8 @@ Agent 的信任链路为：服务端从草稿构造脱敏上下文 → 模型返
 
 应用服务输出白名单结构化 JSON 日志，由 Alloy 从 Docker stdout 收集并写入 Loki；Grafana 只经私有运维入口查询 Loki。运行日志与 PostgreSQL 业务审计分离：前者用于诊断并按 30 天留存，后者保存提交、任务和复核的可追溯事实。
 
+Loki Ruler 将告警规则状态发送给 Docker 内网的 Alertmanager，由它负责按规则名、服务和严重级别分组、去重、抑制与重试。内部 `alert-relay` 仅接收 Alertmanager webhook，白名单化告警字段后才调用飞书专用告警群 Webhook；该 Relay、Alertmanager、Loki 与 Grafana 都不暴露主机端口。飞书消息不含业务数据、原始日志或凭据。当前没有固定域名和受控 Grafana 外部入口，因此告警卡片不提供外部仪表盘链接。
+
 日志关联字段包括 `requestId`、`jobId`、`claimId`、`receiptId`、`traceId` 与 `spanId`。其中前四者和 Trace 字段是 JSON 正文而非 Loki 标签；标签只保留低基数的服务、环境、级别、事件和任务种类。日志序列化器会丢弃未知字段，因此对象键、附件字节、Cookie、token、飞书 open_id、OCR 原文、提示词和向量不得写入平台。
 
 当前 Trace 边界兼容 W3C `traceparent`：Web 请求可安全提取 `traceId` 和 `spanId` 写入现有日志字段，但本期不部署 OpenTelemetry Collector 或 Tempo。后续接入 OpenTelemetry 时应沿用这些字段，并保持 Loki 查询和告警规则不变。

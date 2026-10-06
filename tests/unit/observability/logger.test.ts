@@ -31,3 +31,18 @@ it("emits a single allowlisted JSON log record without sensitive or unknown fiel
   expect(record).not.toHaveProperty("objectKey");
   expect(record).not.toHaveProperty("arbitrary");
 });
+
+it("supports the alert relay without expanding the log field allowlist", () => {
+  const write = vi.fn();
+  const logger = createLogger("alert-relay", { write });
+
+  logger.info("alert.delivery.completed", "告警已投递", {
+    count: 2,
+    status: 200,
+    webhook: "must-not-appear",
+  });
+
+  const record = JSON.parse(write.mock.calls[0]![0]) as Record<string, unknown>;
+  expect(record).toMatchObject({ service: "alert-relay", count: 2, status: 200 });
+  expect(record).not.toHaveProperty("webhook");
+});

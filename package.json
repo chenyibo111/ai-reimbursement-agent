@@ -16,6 +16,7 @@
     "feishu:worker:container": "tsx src/worker/feishu-bot.ts",
     "job:worker": "tsx --env-file=.env.local src/worker/job-worker.ts",
     "job:worker:container": "tsx src/worker/job-worker.ts",
+    "alert:relay:container": "tsx src/worker/alert-relay.ts",
     "policy:sync": "tsx --env-file=.env.local src/worker/policy-sync.ts",
     "roles:bootstrap": "tsx --env-file=.env.local src/worker/role-bootstrap.ts"
   },
