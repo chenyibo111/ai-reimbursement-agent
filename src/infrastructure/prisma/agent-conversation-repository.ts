@@ -158,7 +158,7 @@ export class AgentConversationRepository {
   async updateIntake(input: UpdateReimbursementIntakeInput): Promise<ReimbursementIntake> {
     const data: Prisma.ReimbursementIntakeUpdateInput = {};
     if (input.status !== undefined) data.status = input.status;
-    if ("claimId" in input) data.claim = input.claimId ? { connect: { id: input.claimId } } : { disconnect: true };
+    if ("claimId" in input) data.claimId = input.claimId ?? null;
     if (input.collectedFields !== undefined) data.collectedFields = normalizeSnapshot(input.collectedFields) ?? {};
     if (input.pendingFields !== undefined) data.pendingFields = input.pendingFields;
     if ("submissionToken" in input) data.submissionToken = input.submissionToken ?? null;

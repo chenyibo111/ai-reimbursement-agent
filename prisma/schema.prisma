@@ -168,7 +168,6 @@ model ClaimDraft {
   agentProposals       AgentFieldProposal[]
   inboundEvents        InboundChannelEvent[]
   feishuConversations  FeishuConversation[]
-  reimbursementIntakes ReimbursementIntake[]
   asyncJobs            AsyncJob[]
   reviewCases          ReviewCase[]
   receiptExtractionNotifications ReceiptExtractionNotification[]
@@ -376,7 +375,6 @@ model ReimbursementIntake {
   employee               Employee                  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   status                 ReimbursementIntakeStatus @default(COLLECTING)
   claimId                String?
-  claim                  ClaimDraft?               @relation(fields: [claimId], references: [id], onDelete: SetNull)
   conversationId         String
   conversation           AgentConversation         @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   collectedFields        Json                      @default("{}")
