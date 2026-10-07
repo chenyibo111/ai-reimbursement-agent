@@ -12,3 +12,11 @@ func EmployeeIsActive(pool *pgxpool.Pool) func(context.Context, string) (bool, e
 		return active, err
 	}
 }
+
+func EmployeeRole(pool *pgxpool.Pool) func(context.Context, string) (string, error) {
+	return func(ctx context.Context, employeeID string) (string, error) {
+		var role string
+		err := pool.QueryRow(ctx, `SELECT role FROM reimbursement.employees WHERE id = $1`, employeeID).Scan(&role)
+		return role, err
+	}
+}

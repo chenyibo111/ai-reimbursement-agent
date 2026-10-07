@@ -3,6 +3,42 @@ info:
   title: AI Reimbursement API
   version: 1.0.0
 paths:
+  /api/v1/admin/policies/publish:
+    post:
+      operationId: publishPolicy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, effectiveDate]
+              properties:
+                id: { type: string }
+                effectiveDate: { type: string, format: date }
+      responses:
+        "201": { description: Policy published }
+        default: { $ref: "#/components/responses/Error" }
+  /api/v1/admin/reviews/{reviewId}/resolve:
+    post:
+      operationId: resolveReviewCase
+      parameters:
+        - name: reviewId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resolution]
+              properties:
+                resolution: { type: string, minLength: 1 }
+      responses:
+        "200": { description: Review case resolved }
+        default: { $ref: "#/components/responses/Error" }
   /api/v1/claims:
     get:
       operationId: listClaims

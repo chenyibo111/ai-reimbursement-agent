@@ -60,4 +60,6 @@ export const reimbursementApi = {
     request<SubmissionRequest>(`/api/v1/claims/${encodeURIComponent(claimId)}/submission-requests`, { method: "POST", body: { version }, idempotent: true }),
   submit: (claimId: string, confirmationToken: string) =>
     request<SubmissionSnapshot>(`/api/v1/claims/${encodeURIComponent(claimId)}/submit`, { method: "POST", body: { confirmationToken }, idempotent: true }),
+  publishPolicy: (id: string, effectiveDate: string) => request<{ id: string; status: string }>("/api/v1/admin/policies/publish", { method: "POST", body: { id, effectiveDate }, idempotent: true }),
+  resolveReview: (reviewId: string, resolution: string) => request<{ id: string; status: string }>(`/api/v1/admin/reviews/${encodeURIComponent(reviewId)}/resolve`, { method: "POST", body: { resolution }, idempotent: true }),
 };

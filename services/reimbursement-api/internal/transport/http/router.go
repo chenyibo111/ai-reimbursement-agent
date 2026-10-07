@@ -32,6 +32,7 @@ type Dependencies struct {
 	Submissions SubmissionService
 	Receipts    ReceiptService
 	Auth        ActorResolver
+	Admin       AdminServices
 }
 
 func NewRouter(dependencies Dependencies) http.Handler {
@@ -47,6 +48,11 @@ func NewRouter(dependencies Dependencies) http.Handler {
 	mux.HandleFunc("POST /api/v1/claims/{claimId}/receipts", handler.finalizeReceiptUpload)
 	mux.HandleFunc("POST /api/v1/claims/{claimId}/submission-requests", handler.requestSubmission)
 	mux.HandleFunc("POST /api/v1/claims/{claimId}/submit", handler.submitClaim)
+	if dependencies.Admin.Policies != nil && dependencies.Admin.Reviews != nil && dependencies.Admin.Role != nil {
+		admin := &adminHandler{services: dependencies.Admin}
+		mux.HandleFunc("POST /api/v1/admin/policies/publish", admin.publishPolicy)
+		mux.HandleFunc("POST /api/v1/admin/reviews/{reviewId}/resolve", admin.resolveReview)
+	}
 	mux.HandleFunc("GET /healthz", func(response http.ResponseWriter, _ *http.Request) { response.WriteHeader(http.StatusNoContent) })
 	if dependencies.Auth == nil {
 		dependencies.Auth = StaticActorResolver{}

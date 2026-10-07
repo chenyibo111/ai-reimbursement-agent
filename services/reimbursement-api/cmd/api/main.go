@@ -68,6 +68,7 @@ func main() {
 		Claims:      application.NewClaimService(claimRepository, application.SecureIDGenerator{}),
 		Submissions: application.NewSubmissionService(store.NewPostgresSubmissionRepository(pool), nil),
 		Receipts:    application.NewReceiptService(claimRepository, store.NewPostgresReceiptRepository(pool), objects, infrastructure.NewClamAVScanner(clamAddress), infrastructure.NewHTTPReceiptOCRClient(ocrURL), application.SecureIDGenerator{}),
+		Admin: transport.AdminServices{Policies: application.NewPolicyRuleService(store.NewPostgresPolicyRuleRepository(pool)), Reviews: application.NewReviewCaseService(store.NewPostgresReviewCaseRepository(pool)), Role: store.EmployeeRole(pool)},
 		Auth:        resolver,
 	})
 	address := os.Getenv("PORT")
