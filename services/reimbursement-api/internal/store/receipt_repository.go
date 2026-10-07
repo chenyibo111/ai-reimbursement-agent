@@ -48,6 +48,17 @@ func (repository *PostgresReceiptRepository) FindOwned(ctx context.Context, rece
 	`, receiptID, claimID, actorID))
 }
 
+// FindByID is reserved for trusted asynchronous workers. HTTP handlers must
+// use FindOwned so a client cannot discover another employee's receipt.
+func (repository *PostgresReceiptRepository) FindByID(ctx context.Context, receiptID string) (domain.Receipt, error) {
+	return scanReceipt(repository.pool.QueryRow(ctx, `
+		SELECT id, claim_id, owner_id, filename, content_type, expected_size, object_key,
+		       content_hash, status, invoice_number, ocr_confidence, created_at, updated_at
+		FROM reimbursement.receipts
+		WHERE id = $1
+	`, receiptID))
+}
+
 func (repository *PostgresReceiptRepository) FindByContentHash(ctx context.Context, hash string) (domain.Receipt, error) {
 	return scanReceipt(repository.pool.QueryRow(ctx, `
 		SELECT id, claim_id, owner_id, filename, content_type, expected_size, object_key,

@@ -160,6 +160,49 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  nats:
+    image: nats:2.10-alpine
+    profiles: ["migration"]
+    command: ["-c", "/etc/nats/jetstream.conf"]
+    volumes:
+      - ./infra/nats/jetstream.conf:/etc/nats/jetstream.conf:ro
+      - nats-data:/data
+    expose: ["4222"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8222/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  reimbursement-worker:
+    build: ./services/reimbursement-api
+    profiles: ["migration"]
+    entrypoint: ["/usr/local/bin/reimbursement-entrypoint", "/usr/local/bin/reimbursement-worker"]
+    environment:
+      REIMBURSEMENT_DATABASE_URL: ${REIMBURSEMENT_DATABASE_URL:-}
+      NATS_URL: nats://nats:4222
+      S3_ENDPOINT: http://minio:9000
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: "3310"
+      OCR_SERVICE_URL: http://ocr:8000
+    secrets:
+      - app_env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      ocr:
+        condition: service_healthy
+      clamav:
+        condition: service_started
+    restart: unless-stopped
+
   loki:
     image: grafana/loki:3.2.1
     profiles: ["observability"]
@@ -256,6 +299,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  nats-data:
   postgres-data:
   minio-data:
   ocr-models:
