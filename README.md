@@ -324,3 +324,8 @@ npm run roles:bootstrap -- <employeeId>
 ## 许可证
 
 本仓库采用 [MIT License](LICENSE)。
+# AI Reimbursement Agent
+
+## React + Go 迁移
+
+迁移采用按员工和渠道灰度的单写入方策略。执行生产演练前，请阅读 [切流 Runbook](docs/migration/react-go-cutover-runbook.md) 与 [旧写路径退役清单](docs/migration/legacy-retirement-checklist.md)。不要通过删除数据、反向同步或停止 OCR 进行回滚。
