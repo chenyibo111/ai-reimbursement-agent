@@ -20,10 +20,4 @@ export CLAMAV_HOST="clamav"
 export CLAMAV_PORT="3310"
 export OCR_SERVICE_URL="http://ocr:8000"
 
-# Keep the local Compose profile operable with its existing session secret.
-# Production should still provision the dedicated reimbursement JWT secret.
-if [ -z "${REIMBURSEMENT_AUTH_HS256_SECRET:-}" ] && [ -n "${SESSION_SECRET:-}" ]; then
-  export REIMBURSEMENT_AUTH_HS256_SECRET="$SESSION_SECRET"
-fi
-
 exec "$@"
