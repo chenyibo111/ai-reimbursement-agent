@@ -1,5 +1,9 @@
 # AI Reimbursement Agent
 
+## React + Go migration
+
+The current Next.js application remains the active product while the new architecture is built behind a migration profile. `services/reimbursement-api` will become the sole writer for reimbursement data, `apps/web` will become the React client, and `services/agent` will call the Go API through a typed tool boundary. Do not route employee traffic to the migration profile until its cutover runbook and reconciliation checks are complete.
+
 面向中国单企业员工的 AI 报销服务。它把“上传票据、识别票据、补齐报销信息、校验制度、生成并提交报销单”组织成一条可审计、可人工确认的链路。
 
 项目当前提供独立 Web 工作台，并可选接入飞书 OAuth、飞书机器人和以飞书文档为来源的报销政策知识库。

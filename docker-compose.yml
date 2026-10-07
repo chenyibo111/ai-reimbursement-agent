@@ -142,6 +142,20 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  reimbursement-api:
+    build: ./services/reimbursement-api
+    profiles: ["migration"]
+    environment:
+      REIMBURSEMENT_DATABASE_URL: ${REIMBURSEMENT_DATABASE_URL:-}
+    secrets:
+      - app_env
+    expose:
+      - "8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   loki:
     image: grafana/loki:3.2.1
     profiles: ["observability"]

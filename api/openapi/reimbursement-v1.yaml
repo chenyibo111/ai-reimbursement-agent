@@ -1,0 +1,176 @@
+openapi: 3.1.0
+info:
+  title: AI Reimbursement API
+  version: 1.0.0
+paths:
+  /api/v1/claims:
+    get:
+      operationId: listClaims
+      responses:
+        "200":
+          description: Claim list
+    post:
+      operationId: createClaim
+      parameters:
+        - $ref: "#/components/parameters/Idempotency-Key"
+      responses:
+        "201":
+          description: Draft created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Claim"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/claims/{claimId}/uploads:
+    post:
+      operationId: createUploadSession
+      parameters:
+        - $ref: "#/components/parameters/ClaimId"
+        - $ref: "#/components/parameters/Idempotency-Key"
+      responses:
+        "201":
+          description: Upload session created
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/claims/{claimId}/receipts:
+    post:
+      operationId: finalizeReceiptUpload
+      parameters:
+        - $ref: "#/components/parameters/ClaimId"
+        - $ref: "#/components/parameters/Idempotency-Key"
+      responses:
+        "202":
+          description: Receipt accepted for extraction
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/claims/{claimId}/validation:
+    get:
+      operationId: getClaimValidation
+      parameters:
+        - $ref: "#/components/parameters/ClaimId"
+      responses:
+        "200":
+          description: Current validation result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [issues]
+                properties:
+                  issues:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ValidationIssue"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/claims/{claimId}/submission-requests:
+    post:
+      operationId: requestSubmission
+      parameters:
+        - $ref: "#/components/parameters/ClaimId"
+        - $ref: "#/components/parameters/Idempotency-Key"
+      responses:
+        "201":
+          description: Submission confirmation issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmissionRequest"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/claims/{claimId}/submit:
+    post:
+      operationId: submitClaim
+      parameters:
+        - $ref: "#/components/parameters/ClaimId"
+        - $ref: "#/components/parameters/Idempotency-Key"
+      responses:
+        "201":
+          description: Claim submitted
+        default:
+          $ref: "#/components/responses/Error"
+components:
+  parameters:
+    ClaimId:
+      name: claimId
+      in: path
+      required: true
+      schema:
+        type: string
+    Idempotency-Key:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+  responses:
+    Error:
+      description: Safe business error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  schemas:
+    Claim:
+      type: object
+      required: [id, status, version, purpose]
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [DRAFT, PROCESSING, NEEDS_INFORMATION, AWAITING_CONFIRMATION, SUBMITTED]
+        version:
+          type: integer
+          minimum: 0
+        purpose:
+          type: [string, "null"]
+    Receipt:
+      type: object
+      required: [id, claimId, status, originalFilename]
+      properties:
+        id:
+          type: string
+        claimId:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, EXTRACTING, EXTRACTED, FAILED]
+        originalFilename:
+          type: string
+    ValidationIssue:
+      type: object
+      required: [code, severity, message]
+      properties:
+        code:
+          type: string
+        severity:
+          type: string
+          enum: [BLOCKING, WARNING]
+        message:
+          type: string
+    SubmissionRequest:
+      type: object
+      required: [confirmationToken, claimId, claimVersion, totalAmountCents]
+      properties:
+        confirmationToken:
+          type: string
+        claimId:
+          type: string
+        claimVersion:
+          type: integer
+        totalAmountCents:
+          type: integer
+    ErrorResponse:
+      type: object
+      required: [code, message, requestId]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        requestId:
+          type: string
