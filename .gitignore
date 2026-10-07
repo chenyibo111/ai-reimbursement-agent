@@ -5,6 +5,8 @@ node_modules/
 playwright-report/
 test-results/
 generated/
+!apps/web/src/api/generated/
+!apps/web/src/api/generated/*.ts
 *.tsbuildinfo
 .worktrees/
 .npm-cache/

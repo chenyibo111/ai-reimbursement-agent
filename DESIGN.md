@@ -52,7 +52,7 @@ components:
 - **Memorable signature:** “处理脉络”侧栏用一条卷宗式竖向轨迹连接草稿、票据、待补与提交状态。
 - **Restraint:** 表单、表格和错误提示保持直接，不使用拟物票据图案或装饰性渐变。
 - **Anti-references:** 不做传统财务系统的多栏密集录入台，也不把对话窗口伪装成能绕过校验的助手。
-- **Token ownership/runtime mapping:** `app/globals.css` 是运行时 CSS 变量的唯一实现；本文件记录相同语义值并通过 CSS 变量被页面和组件消费。
+- **Token ownership/runtime mapping:** 新 React 报销入口由 `apps/web/src/styles.css` 实现运行时样式与语义值；遗留 Next.js 页面暂继续使用 `app/globals.css`，直至切流任务完成。本文件记录两者共同的语义值，React 不读取或覆盖遗留页面样式。
 
 ## Colors
 

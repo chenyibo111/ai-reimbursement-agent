@@ -12,25 +12,26 @@
 | Domain / scope | Authoritative source | Source type | Reviewed date |
 |---|---|---|---|
 | 草稿、票据、提交生命周期 | `docs/superpowers/specs/2026-09-20-ai-reimbursement-agent-design.md` | 产品与技术设计 | 2026-09-23 |
-| 会话和员工归属 | `src/server/session.ts`、`src/server/authorization.ts` | 服务端契约 | 2026-09-23 |
+| React 报销工作台与员工归属 | `apps/web/src`、`services/reimbursement-api` 的 `/api/v1` | Go API 契约 | 2026-10-07 |
+| 会话和员工归属（遗留） | `src/server/session.ts`、`src/server/authorization.ts` | 服务端契约 | 2026-09-23 |
 | 跨渠道私有会话与受控办理 | `docs/superpowers/specs/2026-09-27-cross-channel-agent-conversation-design.md`、`app/api/conversations/private/*` | 产品与 API 契约 | 2026-09-27 |
 
 ## Visual contract
 
 - Project `DESIGN.md`: `DESIGN.md`
-- Token ownership model: `app/globals.css` 为运行时变量源，`DESIGN.md` 镜像其语义值和意图。
+- Token ownership model: React 报销入口以 `apps/web/src/styles.css` 为运行时样式源；遗留 Next.js 页面继续由 `app/globals.css` 承担。`DESIGN.md` 镜像二者共同的语义值和意图。
 - Supported themes: 浅色。
 
 ## Canonical UI Map
 
 | Capability | Canonical owner | Source of truth | Allowed variants | Verification |
 |---|---|---|---|---|
-| Form | `src/ui` 表单组件 | 本文件与 API 契约 | 创建 / 编辑 | 浏览器 E2E |
-| Scrollbar | `app/globals.css` | `DESIGN.md` | 无 | 真实浏览器 |
+| Form | `apps/web/src/routes` 表单组件 | 本文件与 Go `/api/v1` 契约 | 创建 / 编辑 | 浏览器 E2E |
+| Scrollbar | `apps/web/src/styles.css` | `DESIGN.md` | 无 | 真实浏览器 |
 | Select/Listbox | 原生 `<select>` | 浏览器平台控件 | 报销单列表的状态筛选 | 真实浏览器；接受平台自有下拉层 |
 | Date | 原生 `input[type=date]` | 浏览器平台控件 | 费用明细日期编辑 | 真实浏览器；接受平台自有日历层 |
 | Toast | 页面内 `role=status` | 本文件 | success / error | 浏览器 E2E |
-| CRUD | `/api/claims` 路由 | 服务端 API | 创建草稿 / 更新字段 / 提交 | 完整流程 E2E |
+| CRUD | Go `/api/v1/claims` | Go 服务端 API | 创建草稿 / 上传 / 校验 / 提交 | 完整流程 E2E |
 | 政策管理 | `/api/admin/policies` 路由与 `src/ui/policy-version-editor.tsx` | 服务端政策版本与白名单授权 | 创建草稿 / 保存规则 / 发布版本 | 政策管理 E2E |
 | 政策知识来源 | `/api/admin/policy-sources` 路由与 `src/ui/policy-source-manager.tsx` | 服务端来源、快照与白名单授权 | 添加 / 停用 / 重新启用 / 手动同步 | 来源管理 E2E |
 | 私有 Agent 会话 | `src/ui/agent-conversation-widget.tsx` | `/api/conversations/private/*` 与服务端会话归属 | 折叠 / 展开 / 附件 / 确认提交 | 单元测试、浏览器键盘与窄屏复核 |
