@@ -3,7 +3,7 @@ import { expect, it } from "vitest";
 import { processFeishuEvent, type ProcessFeishuEventDeps } from "@/src/application/process-feishu-event";
 
 function fixture(overrides: Partial<ProcessFeishuEventDeps> = {}) {
-  const calls = { findEmployee: 0, private: 0, group: 0, turn: [] as Array<Record<string, unknown>>, download: 0 };
+  const calls = { findEmployee: 0, private: 0, group: 0, deliveryTargets: [] as Array<{ conversationId: string; chatId: string }>, turn: [] as Array<Record<string, unknown>>, download: 0 };
   const deps: ProcessFeishuEventDeps = {
     botOpenId: "ou-bot",
     publicAppUrl: "https://reimbursement.example.test",
@@ -23,6 +23,7 @@ function fixture(overrides: Partial<ProcessFeishuEventDeps> = {}) {
         calls.group += 1;
         return { id: "group-employee-1-oc-1" };
       },
+      recordFeishuDeliveryTarget: async (input) => { calls.deliveryTargets.push(input); },
     },
     client: {
       getMessage: async () => ({ messageId: "om-1", chatId: "oc-1", chatType: "p2p", senderOpenId: "ou-employee", messageType: "text", text: "住宿报销规则是什么", mentions: [], attachments: [] }),
@@ -80,6 +81,7 @@ it("routes private policy questions into the shared private conversation without
 
   expect(result).toMatchObject({ kind: "AGENT_REPLIED", claimId: null });
   expect(calls.private).toBe(1);
+  expect(calls.deliveryTargets).toEqual([{ conversationId: "private-employee-1", chatId: "oc-1" }]);
   expect(calls.turn).toEqual([expect.objectContaining({ conversationId: "private-employee-1", channelMessageId: "om-1", channel: "FEISHU", message: "住宿报销规则是什么" })]);
   if (result.kind !== "AGENT_REPLIED") throw new Error("agent reply expected");
   expect(result.replyText).toContain("政策依据：差旅制度（住宿）");
@@ -97,6 +99,7 @@ it("uses a per-employee group conversation only for mentioned group messages", a
     client: { ...fixture().deps.client, getMessage: async () => ({ messageId: "om-1", chatId: "oc-team", chatType: "group", senderOpenId: "ou-employee", messageType: "text", text: "@机器人 报销政策", mentions: [], attachments: [] }) },
     conversations: {
       getOrCreatePrivate: fixture().deps.conversations.getOrCreatePrivate,
+      recordFeishuDeliveryTarget: fixture().deps.conversations.recordFeishuDeliveryTarget,
       getOrCreateGroup: async (employeeId, chatId) => {
         calls.group += 1;
         expect([employeeId, chatId]).toEqual(["employee-1", "oc-team"]);

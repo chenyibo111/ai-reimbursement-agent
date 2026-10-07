@@ -1,6 +1,6 @@
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
-export type LogService = "web" | "job-worker" | "feishu-worker" | "ocr" | "alert-relay";
+export type LogService = "web" | "job-worker" | "feishu-worker" | "agent-event-worker" | "ocr" | "alert-relay";
 
 type LogValue = string | number | boolean | null;
 

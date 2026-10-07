@@ -203,6 +203,22 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  agent-event-worker:
+    build: .
+    profiles: ["migration"]
+    command: npm run agent:events:worker:container
+    entrypoint: ["node", "/app/scripts/docker-runtime.mjs"]
+    secrets:
+      - app_env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      reimbursement-api:
+        condition: service_started
+    restart: unless-stopped
+
   loki:
     image: grafana/loki:3.2.1
     profiles: ["observability"]

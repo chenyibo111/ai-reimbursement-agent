@@ -12,7 +12,7 @@ discovery.relabel "reimbursement" {
 
   rule {
     source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
-    regex         = "(web|feishu-bot-worker|job-worker|ocr|reimbursement-api|reimbursement-worker|nats|alloy|loki|alertmanager|alert-relay)"
+    regex         = "(web|feishu-bot-worker|job-worker|agent-event-worker|ocr|reimbursement-api|reimbursement-worker|nats|alloy|loki|alertmanager|alert-relay)"
     action        = "keep"
   }
 

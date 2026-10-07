@@ -30,6 +30,7 @@ export type ProcessFeishuEventDeps = {
   conversations: {
     getOrCreatePrivate(employeeId: string): Promise<Conversation>;
     getOrCreateGroup(employeeId: string, chatId: string): Promise<Conversation>;
+    recordFeishuDeliveryTarget(input: { conversationId: string; chatId: string }): Promise<void>;
   };
   client: FeishuBotClient;
   runConversationTurn(input: {
@@ -70,6 +71,7 @@ export async function processFeishuEvent(
   const conversation = message.chatType === "group"
     ? await deps.conversations.getOrCreateGroup(employee.id, message.chatId)
     : await deps.conversations.getOrCreatePrivate(employee.id);
+  await deps.conversations.recordFeishuDeliveryTarget({ conversationId: conversation.id, chatId: message.chatId });
   const attachment = await downloadFirstAttachment(message, deps.client);
   if (attachment instanceof Error) return failed(true, "附件暂未下载完成，请稍后重试或在工作台上传。");
 

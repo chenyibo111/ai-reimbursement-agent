@@ -14,6 +14,7 @@ function attachmentDeps(overrides: Partial<ProcessFeishuEventDeps> = {}) {
     conversations: {
       getOrCreatePrivate: async () => ({ id: "private-1" }),
       getOrCreateGroup: async () => ({ id: "group-1" }),
+      recordFeishuDeliveryTarget: async () => undefined,
     },
     client: {
       getMessage: async () => ({ messageId: "om-1", chatId: "oc-1", chatType: "p2p", senderOpenId: "ou-employee", messageType: "image", text: "", mentions: [], attachments: [{ fileKey: "img-1", resourceType: "image", filename: "receipt.jpg" }] }),

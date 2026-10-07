@@ -325,6 +325,7 @@ model AgentConversation {
   employee               Employee              @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   scopeKey               String
   kind                   AgentConversationKind
+  latestFeishuChatId     String?
   summary                String                @default("")
   summaryThroughSequence Int                   @default(0)
   nextSequence           Int                   @default(1)
@@ -367,6 +368,17 @@ model AgentToolCall {
   completedAt    DateTime @default(now())
 
   @@index([conversationId, completedAt])
+}
+
+// Agent-owned at-least-once event-consumption ledger. It prevents a NATS
+// redelivery from producing duplicate user-facing channel notifications.
+model AgentProcessedEvent {
+  eventId      String
+  consumerName String
+  processedAt  DateTime @default(now())
+
+  @@id([eventId, consumerName])
+  @@index([processedAt])
 }
 
 model ReimbursementIntake {
