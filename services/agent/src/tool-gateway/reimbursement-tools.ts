@@ -5,7 +5,7 @@ export type ToolCall = ToolCallContext & { name: ReimbursementToolName; argument
 
 export interface ToolCallResultStore {
   findCompleted(toolCallId: string): Promise<Record<string, unknown> | null>;
-  saveCompleted(toolCallId: string, result: Record<string, unknown>): Promise<void>;
+  saveCompleted(input: { toolCallId: string; conversationId: string; toolName: ReimbursementToolName; result: Record<string, unknown> }): Promise<void>;
 }
 
 export class ReimbursementToolGateway {
@@ -27,7 +27,7 @@ export class ReimbursementToolGateway {
       case "request_submission_confirmation": result = { confirmation: await this.port.requestSubmissionConfirmation({ ...context, claimId: requiredString(call.arguments, "claimId"), version: requiredNumber(call.arguments, "version") }) }; break;
       case "submit_claim": result = { submission: await this.port.submitClaim({ ...context, claimId: requiredString(call.arguments, "claimId"), confirmationToken: requiredString(call.arguments, "confirmationToken") }) }; break;
     }
-    await this.results.saveCompleted(call.toolCallId, result);
+    await this.results.saveCompleted({ toolCallId: call.toolCallId, conversationId: call.conversationId, toolName: call.name, result });
     return result;
   }
 }

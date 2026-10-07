@@ -358,6 +358,18 @@ model AgentMessage {
   @@index([conversationId, createdAt])
 }
 
+// Agent-owned idempotency record. It intentionally stores only the tool result
+// snapshot and no relation to reimbursement tables.
+model AgentToolCall {
+  toolCallId     String   @id
+  conversationId String
+  toolName       String
+  result         Json
+  completedAt    DateTime @default(now())
+
+  @@index([conversationId, completedAt])
+}
+
 model ReimbursementIntake {
   id                     String                    @id @default(cuid())
   employeeId             String
