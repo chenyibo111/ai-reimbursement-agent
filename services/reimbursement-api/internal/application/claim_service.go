@@ -36,8 +36,24 @@ type ClaimView = domain.Claim
 type ClaimRepository interface {
 	Create(context.Context, domain.Claim, ClaimAudit, ClaimOutboxEvent) error
 	FindOwned(context.Context, string, string) (domain.Claim, error)
+	ListOwned(context.Context, string, int) ([]domain.Claim, error)
 	Update(context.Context, domain.Claim, int64, ClaimAudit, ClaimOutboxEvent) error
 	Delete(context.Context, string, string, int64, ClaimAudit, ClaimOutboxEvent) error
+}
+
+func (service *ClaimService) ListClaims(ctx context.Context, actorID string, limit int) ([]ClaimView, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	claims, err := service.repository.ListOwned(ctx, actorID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list claims: %w", err)
+	}
+	views := make([]ClaimView, 0, len(claims))
+	for _, claim := range claims {
+		views = append(views, claim.Clone())
+	}
+	return views, nil
 }
 
 type ClaimAudit struct {
@@ -174,6 +190,18 @@ func (repository *MemoryClaimRepository) FindOwned(_ context.Context, claimID st
 		return domain.Claim{}, ErrClaimNotFound
 	}
 	return claim.Clone(), nil
+}
+
+func (repository *MemoryClaimRepository) ListOwned(_ context.Context, actorID string, limit int) ([]domain.Claim, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	claims := make([]domain.Claim, 0, limit)
+	for _, claim := range repository.claims {
+		if claim.OwnerID == actorID {
+			claims = append(claims, claim.Clone())
+		}
+	}
+	return claims, nil
 }
 
 func (repository *MemoryClaimRepository) Update(_ context.Context, claim domain.Claim, expectedVersion int64, audit ClaimAudit, event ClaimOutboxEvent) error {

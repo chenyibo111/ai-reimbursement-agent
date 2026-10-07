@@ -59,14 +59,20 @@ func TestDelegatedAgentResolverRequiresServiceKeyJTIChannelAndActiveEmployee(t *
 	bearer, _ := NewHS256BearerResolver("test-secret", "reimbursement-api")
 	bearer.now = func() int64 { return time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC).Unix() }
 	resolver, err := NewDelegatedAgentResolver(bearer, "agent-key", EmployeeActivityFunc(func(context.Context, string) (bool, error) { return true, nil }))
-	if err != nil { t.Fatalf("create delegated resolver: %v", err) }
+	if err != nil {
+		t.Fatalf("create delegated resolver: %v", err)
+	}
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
 	request.Header.Set("X-Agent-Service-Key", "agent-key")
-	request.Header.Set("Authorization", "Bearer "+signedTestToken("test-secret", map[string]any{"sub":"employee-1","aud":"reimbursement-api","exp":bearer.now()+60,"jti":"tool-call-1","channel":"agent"}))
+	request.Header.Set("Authorization", "Bearer "+signedTestToken("test-secret", map[string]any{"sub": "employee-1", "aud": "reimbursement-api", "exp": bearer.now() + 60, "jti": "tool-call-1", "channel": "agent"}))
 	actor, err := resolver.Resolve(request)
-	if err != nil || actor.ID != "employee-1" { t.Fatalf("expected delegated employee, got %#v err=%v", actor, err) }
+	if err != nil || actor.ID != "employee-1" {
+		t.Fatalf("expected delegated employee, got %#v err=%v", actor, err)
+	}
 	request.Header.Set("X-Agent-Service-Key", "wrong")
-	if _, err = resolver.Resolve(request); !errors.Is(err, ErrUnauthenticated) { t.Fatalf("expected key rejection, got %v", err) }
+	if _, err = resolver.Resolve(request); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("expected key rejection, got %v", err)
+	}
 }
 
 func signedTestToken(secret string, claims map[string]any) string {
@@ -110,8 +116,25 @@ func TestGetClaimReturnsActorScopedClaim(t *testing.T) {
 		t.Fatalf("expected 200, got %d", response.Code)
 	}
 	var body map[string]any
-	if err := json.NewDecoder(response.Body).Decode(&body); err != nil { t.Fatalf("decode response: %v", err) }
-	if body["id"] != "claim-1" || body["ownerId"] != "employee-1" { t.Fatalf("unexpected claim response: %#v", body) }
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["id"] != "claim-1" || body["ownerId"] != "employee-1" {
+		t.Fatalf("unexpected claim response: %#v", body)
+	}
+}
+
+func TestListClaimsReturnsOnlyAuthenticatedActorsClaims(t *testing.T) {
+	handler := NewRouter(Dependencies{Claims: fakeClaims{}, Auth: StaticActorResolver{}})
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/claims", nil)
+	request.Header.Set("Authorization", "Bearer employee-1")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.Code)
+	}
 }
 
 type fakeClaims struct{}
@@ -119,8 +142,16 @@ type fakeClaims struct{}
 func (fakeClaims) CreateClaim(_ context.Context, actor string, command application.CreateClaimCommand) (application.ClaimView, error) {
 	return application.ClaimView{ID: "claim-1", OwnerID: actor, Status: domain.ClaimStatusDraft, Purpose: command.Purpose, Version: 1}, nil
 }
+func (fakeClaims) ListClaims(_ context.Context, actorID string, _ int) ([]application.ClaimView, error) {
+	if actorID != "employee-1" {
+		return nil, application.ErrClaimNotFound
+	}
+	return []application.ClaimView{{ID: "claim-1", OwnerID: actorID, Status: domain.ClaimStatusDraft, Purpose: "客户拜访", Version: 1}}, nil
+}
 func (fakeClaims) GetClaim(_ context.Context, actorID string, claimID string) (application.ClaimView, error) {
-	if actorID != "employee-1" || claimID != "claim-1" { return application.ClaimView{}, application.ErrClaimNotFound }
+	if actorID != "employee-1" || claimID != "claim-1" {
+		return application.ClaimView{}, application.ErrClaimNotFound
+	}
 	return application.ClaimView{ID: claimID, OwnerID: actorID, Status: domain.ClaimStatusDraft, Purpose: "客户拜访", Version: 1}, nil
 }
 func (fakeClaims) UpdateClaim(context.Context, string, string, int64, application.PatchClaimCommand) (application.ClaimView, error) {

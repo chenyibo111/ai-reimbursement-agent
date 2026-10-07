@@ -10,6 +10,7 @@ import (
 
 type ClaimService interface {
 	CreateClaim(ctx context.Context, actorID string, command application.CreateClaimCommand) (application.ClaimView, error)
+	ListClaims(ctx context.Context, actorID string, limit int) ([]application.ClaimView, error)
 	GetClaim(ctx context.Context, actorID string, claimID string) (application.ClaimView, error)
 	UpdateClaim(ctx context.Context, actorID string, claimID string, expectedVersion int64, command application.PatchClaimCommand) (application.ClaimView, error)
 }
@@ -36,6 +37,7 @@ func NewRouter(dependencies Dependencies) http.Handler {
 	mux := http.NewServeMux()
 	handler := &claimsHandler{claims: dependencies.Claims, submissions: dependencies.Submissions, receipts: dependencies.Receipts}
 	mux.HandleFunc("POST /api/v1/claims", handler.createClaim)
+	mux.HandleFunc("GET /api/v1/claims", handler.listClaims)
 	mux.HandleFunc("GET /api/v1/claims/{claimId}", handler.getClaim)
 	mux.HandleFunc("GET /api/v1/claims/{claimId}/validation", handler.validateClaim)
 	mux.HandleFunc("POST /api/v1/claims/{claimId}/uploads", handler.createUploadSession)

@@ -50,24 +50,34 @@ func (repository *PostgresClaimRepository) Create(ctx context.Context, claim dom
 }
 
 func (repository *PostgresClaimRepository) FindOwned(ctx context.Context, claimID string, actorID string) (domain.Claim, error) {
-	var claim domain.Claim
-	var participants []byte
-	var expenseCategory *string
-	var projectCode *string
-	err := repository.pool.QueryRow(ctx, `
+	claim, err := scanClaim(repository.pool.QueryRow(ctx, `
 		SELECT id, owner_id, status, purpose, expense_category, participants, project_code,
 		       version, created_at, updated_at
 		FROM reimbursement.claims
 		WHERE id = $1 AND owner_id = $2
-	`, claimID, actorID).Scan(
-		&claim.ID, &claim.OwnerID, &claim.Status, &claim.Purpose, &expenseCategory, &participants,
-		&projectCode, &claim.Version, &claim.CreatedAt, &claim.UpdatedAt,
-	)
+	`, claimID, actorID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Claim{}, application.ErrClaimNotFound
 	}
 	if err != nil {
 		return domain.Claim{}, fmt.Errorf("query owned claim: %w", err)
+	}
+	return claim, nil
+}
+
+type claimRow interface{ Scan(...any) error }
+
+func scanClaim(row claimRow) (domain.Claim, error) {
+	var claim domain.Claim
+	var participants []byte
+	var expenseCategory *string
+	var projectCode *string
+	err := row.Scan(
+		&claim.ID, &claim.OwnerID, &claim.Status, &claim.Purpose, &expenseCategory, &participants,
+		&projectCode, &claim.Version, &claim.CreatedAt, &claim.UpdatedAt,
+	)
+	if err != nil {
+		return domain.Claim{}, err
 	}
 	if expenseCategory != nil {
 		claim.ExpenseCategory = *expenseCategory
@@ -79,6 +89,26 @@ func (repository *PostgresClaimRepository) FindOwned(ctx context.Context, claimI
 		return domain.Claim{}, fmt.Errorf("decode participants: %w", err)
 	}
 	return claim, nil
+}
+
+func (repository *PostgresClaimRepository) ListOwned(ctx context.Context, actorID string, limit int) ([]domain.Claim, error) {
+	rows, err := repository.pool.Query(ctx, `
+		SELECT id, owner_id, status, purpose, expense_category, participants, project_code, version, created_at, updated_at
+		FROM reimbursement.claims WHERE owner_id = $1 ORDER BY created_at DESC LIMIT $2
+	`, actorID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list owned claims: %w", err)
+	}
+	defer rows.Close()
+	claims := []domain.Claim{}
+	for rows.Next() {
+		claim, err := scanClaim(rows)
+		if err != nil {
+			return nil, err
+		}
+		claims = append(claims, claim)
+	}
+	return claims, rows.Err()
 }
 
 func (repository *PostgresClaimRepository) Update(ctx context.Context, claim domain.Claim, expectedVersion int64, audit application.ClaimAudit, event application.ClaimOutboxEvent) error {

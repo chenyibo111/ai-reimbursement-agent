@@ -4,6 +4,27 @@ info:
   version: 1.0.0
 paths:
   /api/v1/claims:
+    get:
+      operationId: listClaims
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        "200":
+          description: Actor-owned claim page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Claim" }
+        default:
+          $ref: "#/components/responses/Error"
     post:
       operationId: createClaim
       parameters:

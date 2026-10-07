@@ -3,6 +3,7 @@ package transport
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/application"
@@ -12,6 +13,21 @@ type claimsHandler struct {
 	claims      ClaimService
 	submissions SubmissionService
 	receipts    ReceiptService
+}
+
+func (handler *claimsHandler) listClaims(response http.ResponseWriter, request *http.Request) {
+	actor, _ := ActorFromContext(request.Context())
+	limit, _ := strconv.Atoi(request.URL.Query().Get("limit"))
+	claims, err := handler.claims.ListClaims(request.Context(), actor.ID, limit)
+	if err != nil {
+		writeMappedError(response, err)
+		return
+	}
+	items := make([]map[string]any, 0, len(claims))
+	for _, claim := range claims {
+		items = append(items, claimResponse(claim))
+	}
+	writeJSON(response, http.StatusOK, map[string]any{"items": items})
 }
 
 func (handler *claimsHandler) createUploadSession(response http.ResponseWriter, request *http.Request) {
