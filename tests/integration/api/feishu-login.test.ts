@@ -19,3 +19,10 @@ it("rejects a callback when state differs from the HttpOnly cookie", async () =>
   const response = await GET(new Request("http://localhost/api/auth/feishu/callback?code=code&state=wrong", { headers: { cookie: "reimbursement_oauth_state=expected" } }));
   expect(response.status).toBe(400);
 });
+
+it("stores only a safe local return path during OAuth login", async () => {
+  process.env.FEISHU_APP_ID = "cli_test";
+  process.env.FEISHU_REDIRECT_URI = "http://localhost/api/auth/feishu/callback";
+  const response = await login(new Request("http://localhost/api/auth/feishu/login?returnTo=//evil.example"));
+  expect(response.headers.getSetCookie().join("\n")).toContain("reimbursement_oauth_return_to=/claims");
+});

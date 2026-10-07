@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { createPrismaClient } from "@/src/infrastructure/prisma/client";
 import { sessionCookie } from "@/src/server/auth-cookies";
+import { ensureFeishuIdentity } from "@/src/server/employee-identity";
 
 export const runtime = "nodejs";
 
@@ -23,6 +24,9 @@ export async function POST(_request: Request) {
       update: { displayName, ...(feishuUserId ? { feishuUserId } : {}) },
       create: { id: employeeId, displayName, ...(feishuUserId ? { feishuUserId } : {}) },
     });
+    if (employee.feishuUserId) {
+      await ensureFeishuIdentity({ openId: employee.feishuUserId, displayName: employee.displayName });
+    }
     const response = NextResponse.json({ employeeId: employee.id });
     response.headers.append("Set-Cookie", sessionCookie(employee.id, sessionSecret, false));
     return response;
