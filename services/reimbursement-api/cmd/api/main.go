@@ -50,9 +50,18 @@ func main() {
 	if os.Getenv("REIMBURSEMENT_DEV_AUTH") == "true" {
 		resolver = transport.StaticActorResolver{}
 	} else {
-		resolver, err = transport.NewHS256BearerResolver(os.Getenv("REIMBURSEMENT_AUTH_HS256_SECRET"), "reimbursement-api")
-		if err != nil {
-			log.Fatalf("configure bearer authentication: %v", err)
+		bearer, bearerErr := transport.NewHS256BearerResolver(os.Getenv("REIMBURSEMENT_AUTH_HS256_SECRET"), "reimbursement-api")
+		if bearerErr != nil {
+			log.Fatalf("configure bearer authentication: %v", bearerErr)
+		}
+		if serviceKey := strings.TrimSpace(os.Getenv("REIMBURSEMENT_AGENT_SERVICE_KEY")); serviceKey != "" {
+			agent, agentErr := transport.NewDelegatedAgentResolver(bearer, serviceKey, transport.EmployeeActivityFunc(store.EmployeeIsActive(pool)))
+			if agentErr != nil {
+				log.Fatalf("configure delegated agent authentication: %v", agentErr)
+			}
+			resolver = transport.NewCombinedActorResolver(bearer, agent)
+		} else {
+			resolver = bearer
 		}
 	}
 	router := transport.NewRouter(transport.Dependencies{

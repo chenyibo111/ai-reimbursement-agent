@@ -54,6 +54,20 @@ func TestHS256BearerResolverRejectsWrongAudienceAndAcceptsEmployeeSubject(t *tes
 	}
 }
 
+func TestDelegatedAgentResolverRequiresServiceKeyJTIChannelAndActiveEmployee(t *testing.T) {
+	bearer, _ := NewHS256BearerResolver("test-secret", "reimbursement-api")
+	bearer.now = func() int64 { return time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC).Unix() }
+	resolver, err := NewDelegatedAgentResolver(bearer, "agent-key", EmployeeActivityFunc(func(context.Context, string) (bool, error) { return true, nil }))
+	if err != nil { t.Fatalf("create delegated resolver: %v", err) }
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.Header.Set("X-Agent-Service-Key", "agent-key")
+	request.Header.Set("Authorization", "Bearer "+signedTestToken("test-secret", map[string]any{"sub":"employee-1","aud":"reimbursement-api","exp":bearer.now()+60,"jti":"tool-call-1","channel":"agent"}))
+	actor, err := resolver.Resolve(request)
+	if err != nil || actor.ID != "employee-1" { t.Fatalf("expected delegated employee, got %#v err=%v", actor, err) }
+	request.Header.Set("X-Agent-Service-Key", "wrong")
+	if _, err = resolver.Resolve(request); !errors.Is(err, ErrUnauthenticated) { t.Fatalf("expected key rejection, got %v", err) }
+}
+
 func signedTestToken(secret string, claims map[string]any) string {
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))
 	payload, _ := json.Marshal(claims)
