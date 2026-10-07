@@ -2,10 +2,13 @@ package application
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/domain"
 )
@@ -214,6 +217,16 @@ func (repository *MemoryClaimRepository) SetStatusForTest(claimID string, status
 type SequentialIDGenerator struct {
 	mu   sync.Mutex
 	next int
+}
+
+type SecureIDGenerator struct{}
+
+func (SecureIDGenerator) Next() string {
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err != nil {
+		return "claim-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	}
+	return "claim-" + hex.EncodeToString(bytes)
 }
 
 func NewSequentialIDGenerator() *SequentialIDGenerator { return &SequentialIDGenerator{} }
