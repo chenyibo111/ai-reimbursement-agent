@@ -50,25 +50,29 @@ func main() {
 	if os.Getenv("REIMBURSEMENT_DEV_AUTH") == "true" {
 		resolver = transport.StaticActorResolver{}
 	} else {
-		bearer, bearerErr := transport.NewHS256BearerResolver(os.Getenv("REIMBURSEMENT_AUTH_HS256_SECRET"), "reimbursement-api")
-		if bearerErr != nil {
-			log.Fatalf("configure bearer authentication: %v", bearerErr)
+		web, webErr := transport.NewWebBearerResolver(os.Getenv("REIMBURSEMENT_AUTH_HS256_SECRET"), "reimbursement-api")
+		if webErr != nil {
+			log.Fatalf("configure bearer authentication: %v", webErr)
 		}
 		if serviceKey := strings.TrimSpace(os.Getenv("REIMBURSEMENT_AGENT_SERVICE_KEY")); serviceKey != "" {
+			bearer, bearerErr := transport.NewHS256BearerResolver(os.Getenv("REIMBURSEMENT_AUTH_HS256_SECRET"), "reimbursement-api")
+			if bearerErr != nil {
+				log.Fatalf("configure delegated agent authentication: %v", bearerErr)
+			}
 			agent, agentErr := transport.NewDelegatedAgentResolver(bearer, serviceKey, transport.EmployeeActivityFunc(store.EmployeeIsActive(pool)))
 			if agentErr != nil {
 				log.Fatalf("configure delegated agent authentication: %v", agentErr)
 			}
-			resolver = transport.NewCombinedActorResolver(bearer, agent)
+			resolver = transport.NewCombinedActorResolver(web, agent)
 		} else {
-			resolver = bearer
+			resolver = web
 		}
 	}
 	router := transport.NewRouter(transport.Dependencies{
 		Claims:      application.NewClaimService(claimRepository, application.SecureIDGenerator{}),
 		Submissions: application.NewSubmissionService(store.NewPostgresSubmissionRepository(pool), nil),
 		Receipts:    application.NewReceiptService(claimRepository, store.NewPostgresReceiptRepository(pool), objects, infrastructure.NewClamAVScanner(clamAddress), infrastructure.NewHTTPReceiptOCRClient(ocrURL), application.SecureIDGenerator{}),
-		Admin: transport.AdminServices{Policies: application.NewPolicyRuleService(store.NewPostgresPolicyRuleRepository(pool)), Reviews: application.NewReviewCaseService(store.NewPostgresReviewCaseRepository(pool)), Role: store.EmployeeRole(pool)},
+		Admin:       transport.AdminServices{Policies: application.NewPolicyRuleService(store.NewPostgresPolicyRuleRepository(pool)), Reviews: application.NewReviewCaseService(store.NewPostgresReviewCaseRepository(pool)), Role: store.EmployeeRole(pool)},
 		Auth:        resolver,
 	})
 	address := os.Getenv("PORT")

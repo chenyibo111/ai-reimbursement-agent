@@ -37,21 +37,33 @@ func TestCreateClaimRequiresAuthenticationAndIdempotencyKey(t *testing.T) {
 	}
 }
 
-func TestHS256BearerResolverRejectsWrongAudienceAndAcceptsEmployeeSubject(t *testing.T) {
-	resolver, err := NewHS256BearerResolver("test-secret", "reimbursement-api")
+func TestWebBearerResolverRejectsCrossChannelMalformedAndUntrustedClaims(t *testing.T) {
+	resolver, err := NewWebBearerResolver("test-secret", "reimbursement-api")
 	if err != nil {
 		t.Fatalf("create resolver: %v", err)
 	}
 	resolver.now = func() int64 { return time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC).Unix() }
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
-	request.Header.Set("Authorization", "Bearer "+signedTestToken("test-secret", map[string]any{"sub": "employee-1", "aud": "reimbursement-api", "exp": resolver.now() + 60}))
+	request.Header.Set("Authorization", "Bearer "+signedTestToken("test-secret", map[string]any{"sub": "employee-1", "role": "EMPLOYEE", "aud": "reimbursement-api", "iat": resolver.now() - 1, "channel": "web", "exp": resolver.now() + 60}))
 	actor, err := resolver.Resolve(request)
-	if err != nil || actor.ID != "employee-1" {
+	if err != nil || actor.ID != "employee-1" || actor.Role != "EMPLOYEE" || actor.Channel != "web" {
 		t.Fatalf("expected employee actor, got %#v err=%v", actor, err)
 	}
-	request.Header.Set("Authorization", "Bearer "+signedTestToken("test-secret", map[string]any{"sub": "employee-1", "aud": "other", "exp": resolver.now() + 60}))
+	for _, claims := range []map[string]any{
+		{"sub": "employee-1", "role": "EMPLOYEE", "aud": "other", "channel": "web", "exp": resolver.now() + 60},
+		{"sub": "employee-1", "role": "EMPLOYEE", "aud": "reimbursement-api", "channel": "agent", "exp": resolver.now() + 60},
+		{"sub": "employee-1", "role": "UNKNOWN", "aud": "reimbursement-api", "channel": "web", "exp": resolver.now() + 60},
+		{"sub": "employee-1", "role": "EMPLOYEE", "aud": "reimbursement-api", "iat": 0, "channel": "web", "exp": resolver.now() + 60},
+		{"sub": "employee-1", "role": "EMPLOYEE", "aud": "reimbursement-api", "channel": "web", "exp": resolver.now() - 1},
+	} {
+		request.Header.Set("Authorization", "Bearer "+signedTestToken("test-secret", claims))
+		if _, err = resolver.Resolve(request); !errors.Is(err, ErrUnauthenticated) {
+			t.Fatalf("expected unauthenticated for %#v, got %v", claims, err)
+		}
+	}
+	request.Header.Set("Authorization", "Bearer "+signedTestToken("wrong-secret", map[string]any{"sub": "employee-1", "role": "EMPLOYEE", "aud": "reimbursement-api", "channel": "web", "exp": resolver.now() + 60}))
 	if _, err = resolver.Resolve(request); !errors.Is(err, ErrUnauthenticated) {
-		t.Fatalf("expected unauthenticated, got %v", err)
+		t.Fatalf("expected signed token rejection, got %v", err)
 	}
 }
 
@@ -64,7 +76,7 @@ func TestDelegatedAgentResolverRequiresServiceKeyJTIChannelAndActiveEmployee(t *
 	}
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
 	request.Header.Set("X-Agent-Service-Key", "agent-key")
-	request.Header.Set("Authorization", "Bearer "+signedTestToken("test-secret", map[string]any{"sub": "employee-1", "aud": "reimbursement-api", "exp": bearer.now() + 60, "jti": "tool-call-1", "channel": "agent"}))
+	request.Header.Set("Authorization", "Bearer "+signedTestToken("test-secret", map[string]any{"sub": "employee-1", "role": "EMPLOYEE", "aud": "reimbursement-api", "iat": bearer.now() - 1, "exp": bearer.now() + 60, "jti": "tool-call-1", "channel": "agent"}))
 	actor, err := resolver.Resolve(request)
 	if err != nil || actor.ID != "employee-1" {
 		t.Fatalf("expected delegated employee, got %#v err=%v", actor, err)
@@ -72,6 +84,30 @@ func TestDelegatedAgentResolverRequiresServiceKeyJTIChannelAndActiveEmployee(t *
 	request.Header.Set("X-Agent-Service-Key", "wrong")
 	if _, err = resolver.Resolve(request); !errors.Is(err, ErrUnauthenticated) {
 		t.Fatalf("expected key rejection, got %v", err)
+	}
+}
+
+func TestCombinedActorResolverDoesNotTreatWebTokenAsDelegatedAgent(t *testing.T) {
+	web, _ := NewWebBearerResolver("test-secret", "reimbursement-api")
+	web.now = func() int64 { return time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC).Unix() }
+	base, _ := NewHS256BearerResolver("test-secret", "reimbursement-api")
+	base.now = web.now
+	agent, _ := NewDelegatedAgentResolver(base, "agent-key", EmployeeActivityFunc(func(context.Context, string) (bool, error) { return true, nil }))
+	resolver := NewCombinedActorResolver(web, agent)
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.Header.Set("X-Agent-Service-Key", "agent-key")
+	request.Header.Set("Authorization", "Bearer "+signedTestToken("test-secret", map[string]any{"sub": "employee-1", "role": "EMPLOYEE", "aud": "reimbursement-api", "iat": web.now() - 1, "channel": "web", "exp": web.now() + 60}))
+	if _, err := resolver.Resolve(request); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("expected web token to be rejected as delegated agent, got %v", err)
+	}
+}
+
+func TestAdminAuthorizationRequiresMatchingTokenAndStoredRole(t *testing.T) {
+	handler := &adminHandler{services: AdminServices{Role: func(context.Context, string) (string, error) { return "ADMIN", nil }}}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/policies/publish", nil)
+	request = request.WithContext(context.WithValue(request.Context(), actorContextKey{}, Actor{ID: "employee-1", Role: "FINANCE_REVIEWER", Channel: "web"}))
+	if _, ok := handler.authorize(request); ok {
+		t.Fatal("expected mismatched token and stored role to be forbidden")
 	}
 }
 

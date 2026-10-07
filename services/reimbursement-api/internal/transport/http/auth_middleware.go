@@ -16,7 +16,11 @@ import (
 
 var ErrUnauthenticated = errors.New("unauthenticated")
 
-type Actor struct{ ID string }
+type Actor struct {
+	ID      string
+	Role    string
+	Channel string
+}
 
 type ActorResolver interface {
 	Resolve(*http.Request) (Actor, error)
@@ -40,7 +44,7 @@ func (StaticActorResolver) Resolve(request *http.Request) (Actor, error) {
 	if value == "" || value == request.Header.Get("Authorization") {
 		return Actor{}, ErrUnauthenticated
 	}
-	return Actor{ID: value}, nil
+	return Actor{ID: value, Role: "EMPLOYEE", Channel: "web"}, nil
 }
 
 type HS256BearerResolver struct {
@@ -49,6 +53,8 @@ type HS256BearerResolver struct {
 	now      func() int64
 }
 
+type WebBearerResolver struct{ *HS256BearerResolver }
+
 func NewHS256BearerResolver(secret string, audience string) (*HS256BearerResolver, error) {
 	if strings.TrimSpace(secret) == "" {
 		return nil, fmt.Errorf("bearer token secret is required")
@@ -56,35 +62,65 @@ func NewHS256BearerResolver(secret string, audience string) (*HS256BearerResolve
 	return &HS256BearerResolver{secret: []byte(secret), audience: audience, now: func() int64 { return time.Now().Unix() }}, nil
 }
 
+func NewWebBearerResolver(secret string, audience string) (*WebBearerResolver, error) {
+	bearer, err := NewHS256BearerResolver(secret, audience)
+	if err != nil {
+		return nil, err
+	}
+	return &WebBearerResolver{HS256BearerResolver: bearer}, nil
+}
+
 func (resolver *HS256BearerResolver) Resolve(request *http.Request) (Actor, error) {
+	claims, err := resolver.claims(request)
+	if err != nil {
+		return Actor{}, err
+	}
+	return Actor{ID: claims.Subject, Role: claims.Role, Channel: claims.Channel}, nil
+}
+
+func (resolver *WebBearerResolver) Resolve(request *http.Request) (Actor, error) {
+	actor, err := resolver.HS256BearerResolver.Resolve(request)
+	if err != nil || actor.Channel != "web" {
+		return Actor{}, ErrUnauthenticated
+	}
+	return actor, nil
+}
+
+type bearerClaims struct {
+	Subject   string `json:"sub"`
+	Role      string `json:"role"`
+	Channel   string `json:"channel"`
+	Audience  any    `json:"aud"`
+	IssuedAt  int64  `json:"iat"`
+	ExpiresAt int64  `json:"exp"`
+	JTI       string `json:"jti"`
+}
+
+func (resolver *HS256BearerResolver) claims(request *http.Request) (bearerClaims, error) {
 	value := strings.TrimSpace(request.Header.Get("Authorization"))
 	if !strings.HasPrefix(value, "Bearer ") {
-		return Actor{}, ErrUnauthenticated
+		return bearerClaims{}, ErrUnauthenticated
 	}
 	parts := strings.Split(strings.TrimSpace(strings.TrimPrefix(value, "Bearer ")), ".")
 	if len(parts) != 3 {
-		return Actor{}, ErrUnauthenticated
+		return bearerClaims{}, ErrUnauthenticated
 	}
 	signed := parts[0] + "." + parts[1]
 	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil {
-		return Actor{}, ErrUnauthenticated
+		return bearerClaims{}, ErrUnauthenticated
 	}
 	mac := hmac.New(sha256.New, resolver.secret)
 	_, _ = mac.Write([]byte(signed))
 	if !hmac.Equal(signature, mac.Sum(nil)) {
-		return Actor{}, ErrUnauthenticated
+		return bearerClaims{}, ErrUnauthenticated
 	}
-	var claims struct {
-		Subject   string `json:"sub"`
-		Audience  any    `json:"aud"`
-		ExpiresAt int64  `json:"exp"`
-	}
+	var claims bearerClaims
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil || json.Unmarshal(payload, &claims) != nil || strings.TrimSpace(claims.Subject) == "" || claims.ExpiresAt <= resolver.now() || !matchesAudience(claims.Audience, resolver.audience) {
-		return Actor{}, ErrUnauthenticated
+	if err != nil || json.Unmarshal(payload, &claims) != nil || strings.TrimSpace(claims.Subject) == "" || claims.IssuedAt <= 0 || claims.ExpiresAt <= resolver.now() || !matchesAudience(claims.Audience, resolver.audience) || !validRole(claims.Role) || (claims.Channel != "web" && claims.Channel != "agent") {
+		return bearerClaims{}, ErrUnauthenticated
 	}
-	return Actor{ID: claims.Subject}, nil
+	return claims, nil
 }
 
 func matchesAudience(value any, expected string) bool {
@@ -140,16 +176,8 @@ func (resolver *DelegatedAgentResolver) Resolve(request *http.Request) (Actor, e
 	if err != nil {
 		return Actor{}, err
 	}
-	parts := strings.Split(strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer "), ".")
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return Actor{}, ErrUnauthenticated
-	}
-	var claims struct {
-		JTI     string `json:"jti"`
-		Channel string `json:"channel"`
-	}
-	if json.Unmarshal(payload, &claims) != nil || claims.JTI == "" || claims.Channel != "agent" {
+	claims, err := resolver.bearer.claims(request)
+	if err != nil || strings.TrimSpace(claims.JTI) == "" || actor.Channel != "agent" {
 		return Actor{}, ErrUnauthenticated
 	}
 	active, err := resolver.employees.IsActive(request.Context(), actor.ID)
@@ -157,6 +185,10 @@ func (resolver *DelegatedAgentResolver) Resolve(request *http.Request) (Actor, e
 		return Actor{}, ErrUnauthenticated
 	}
 	return actor, nil
+}
+
+func validRole(value string) bool {
+	return value == "EMPLOYEE" || value == "FINANCE_REVIEWER" || value == "ADMIN"
 }
 
 type actorContextKey struct{}
