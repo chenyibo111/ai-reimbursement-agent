@@ -82,6 +82,36 @@ func (handler *claimsHandler) finalizeReceiptUpload(response http.ResponseWriter
 	writeJSON(response, http.StatusAccepted, map[string]string{"receiptId": body.ReceiptID, "status": "READY_FOR_OCR"})
 }
 
+func (handler *claimsHandler) listReceipts(response http.ResponseWriter, request *http.Request) {
+	actor, _ := ActorFromContext(request.Context())
+	if handler.receipts == nil {
+		writeError(response, http.StatusNotImplemented, "NOT_IMPLEMENTED", "附件服务暂不可用")
+		return
+	}
+	receipts, err := handler.receipts.ListReceipts(request.Context(), actor.ID, pathClaimID(request))
+	if err != nil {
+		writeMappedError(response, err)
+		return
+	}
+	items := make([]map[string]any, 0, len(receipts))
+	for _, receipt := range receipts {
+		items = append(items, receiptResponse(receipt))
+	}
+	writeJSON(response, http.StatusOK, map[string]any{"items": items})
+}
+
+func receiptResponse(receipt application.ReceiptView) map[string]any {
+	return map[string]any{
+		"id":            receipt.ID,
+		"claimId":       receipt.ClaimID,
+		"filename":      receipt.Filename,
+		"status":        receipt.Status,
+		"invoiceNumber": receipt.InvoiceNumber,
+		"ocrConfidence": receipt.OCRConfidence,
+		"updatedAt":     receipt.UpdatedAt,
+	}
+}
+
 func (handler *claimsHandler) createClaim(response http.ResponseWriter, request *http.Request) {
 	actor, _ := ActorFromContext(request.Context())
 	if strings.TrimSpace(request.Header.Get("Idempotency-Key")) == "" {

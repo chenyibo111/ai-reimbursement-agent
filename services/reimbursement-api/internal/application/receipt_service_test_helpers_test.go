@@ -96,6 +96,16 @@ func (repository *fakeReceiptRepository) FindOwned(_ context.Context, receiptID 
 	return receipt, nil
 }
 
+func (repository *fakeReceiptRepository) ListOwnedByClaim(_ context.Context, claimID string, actorID string) ([]domain.Receipt, error) {
+	result := make([]domain.Receipt, 0)
+	for _, receipt := range repository.receipts {
+		if receipt.ClaimID == claimID && receipt.OwnerID == actorID {
+			result = append(result, receipt)
+		}
+	}
+	return result, nil
+}
+
 func (repository *fakeReceiptRepository) FindByContentHash(_ context.Context, hash string) (domain.Receipt, error) {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()

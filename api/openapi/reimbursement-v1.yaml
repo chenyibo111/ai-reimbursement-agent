@@ -84,6 +84,25 @@ paths:
         default:
           $ref: "#/components/responses/Error"
   /api/v1/claims/{claimId}/receipts:
+    get:
+      operationId: listClaimReceipts
+      parameters:
+        - $ref: "#/components/parameters/ClaimId"
+      responses:
+        "200":
+          description: Actor-owned receipt metadata for a claim
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Receipt"
+        default:
+          $ref: "#/components/responses/Error"
     post:
       operationId: finalizeReceiptUpload
       parameters:
@@ -215,17 +234,26 @@ components:
         updatedAt: { type: string, format: date-time }
     Receipt:
       type: object
-      required: [id, claimId, status, originalFilename]
+      required: [id, claimId, filename, status, ocrConfidence, updatedAt]
       properties:
         id:
           type: string
         claimId:
           type: string
+        filename:
+          type: string
         status:
           type: string
-          enum: [PENDING, EXTRACTING, EXTRACTED, FAILED]
-        originalFilename:
+          enum: [UPLOAD_PENDING, READY_FOR_OCR, EXTRACTED, REVIEW_REQUIRED, QUARANTINED]
+        invoiceNumber:
           type: string
+        ocrConfidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        updatedAt:
+          type: string
+          format: date-time
     ValidationIssue:
       type: object
       required: [code, severity, message]

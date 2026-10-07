@@ -40,6 +40,18 @@ type UploadSession struct {
 	UploadURL string
 }
 
+// ReceiptView is the employee-safe representation of an uploaded attachment.
+// Storage locations, hashes, and malware-scanning details remain server-side.
+type ReceiptView struct {
+	ID            string
+	ClaimID       string
+	Filename      string
+	Status        domain.ReceiptStatus
+	InvoiceNumber string
+	OCRConfidence float64
+	UpdatedAt     time.Time
+}
+
 type StoredObject struct {
 	ContentType string
 	Content     []byte
@@ -70,6 +82,7 @@ type ClaimReader interface {
 type ReceiptRepository interface {
 	Create(context.Context, domain.Receipt) error
 	FindOwned(context.Context, string, string, string) (domain.Receipt, error)
+	ListOwnedByClaim(context.Context, string, string) ([]domain.Receipt, error)
 	FindByContentHash(context.Context, string) (domain.Receipt, error)
 	MarkReadyForOCR(context.Context, string, string) error
 	MarkReviewRequired(context.Context, string, string) error
@@ -160,6 +173,30 @@ func (service *ReceiptService) FinalizeReceiptUpload(ctx context.Context, actorI
 		return fmt.Errorf("mark receipt ready for ocr: %w", err)
 	}
 	return nil
+}
+
+// ListReceipts verifies claim ownership before returning attachment metadata.
+// The caller cannot use this path to enumerate another employee's receipts.
+func (service *ReceiptService) ListReceipts(ctx context.Context, actorID string, claimID string) ([]ReceiptView, error) {
+	if _, err := service.claims.FindOwned(ctx, claimID, actorID); err != nil {
+		if errors.Is(err, ErrClaimNotFound) {
+			return nil, ErrClaimNotFound
+		}
+		return nil, fmt.Errorf("find claim for receipt list: %w", err)
+	}
+	receipts, err := service.repository.ListOwnedByClaim(ctx, claimID, actorID)
+	if err != nil {
+		return nil, fmt.Errorf("list claim receipts: %w", err)
+	}
+	views := make([]ReceiptView, 0, len(receipts))
+	for _, receipt := range receipts {
+		views = append(views, ReceiptView{
+			ID: receipt.ID, ClaimID: receipt.ClaimID, Filename: receipt.Filename,
+			Status: receipt.Status, InvoiceNumber: receipt.InvoiceNumber,
+			OCRConfidence: receipt.OCRConfidence, UpdatedAt: receipt.UpdatedAt,
+		})
+	}
+	return views, nil
 }
 
 func (service *ReceiptService) ExtractReceipt(ctx context.Context, actorID string, claimID string, receiptID string) error {

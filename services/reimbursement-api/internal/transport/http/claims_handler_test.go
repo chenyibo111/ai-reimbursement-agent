@@ -137,6 +137,28 @@ func TestListClaimsReturnsOnlyAuthenticatedActorsClaims(t *testing.T) {
 	}
 }
 
+func TestListReceiptsReturnsOnlyReceiptsBelongingToTheAuthenticatedClaim(t *testing.T) {
+	handler := NewRouter(Dependencies{Claims: fakeClaims{}, Receipts: fakeReceipts{}, Auth: StaticActorResolver{}})
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/claims/claim-1/receipts", nil)
+	request.Header.Set("Authorization", "Bearer employee-1")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.Code)
+	}
+	var body struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(body.Items) != 1 || body.Items[0]["id"] != "receipt-1" || body.Items[0]["objectKey"] != nil {
+		t.Fatalf("unexpected safe receipt response: %#v", body.Items)
+	}
+}
+
 type fakeClaims struct{}
 
 func (fakeClaims) CreateClaim(_ context.Context, actor string, command application.CreateClaimCommand) (application.ClaimView, error) {
@@ -168,4 +190,17 @@ func (service fakeSubmissions) RequestSubmission(context.Context, string, string
 }
 func (service fakeSubmissions) SubmitClaim(context.Context, string, string, string, string) (application.SubmissionSnapshot, error) {
 	return application.SubmissionSnapshot{}, service.err
+}
+
+type fakeReceipts struct{}
+
+func (fakeReceipts) CreateUploadSession(context.Context, string, string, application.CreateUploadSessionCommand) (application.UploadSession, error) {
+	return application.UploadSession{}, nil
+}
+func (fakeReceipts) FinalizeReceiptUpload(context.Context, string, string, string) error { return nil }
+func (fakeReceipts) ListReceipts(_ context.Context, actorID string, claimID string) ([]application.ReceiptView, error) {
+	if actorID != "employee-1" || claimID != "claim-1" {
+		return nil, application.ErrClaimNotFound
+	}
+	return []application.ReceiptView{{ID: "receipt-1", ClaimID: claimID, Filename: "hotel.png", Status: domain.ReceiptStatusExtracted, InvoiceNumber: "123", OCRConfidence: 0.98}}, nil
 }

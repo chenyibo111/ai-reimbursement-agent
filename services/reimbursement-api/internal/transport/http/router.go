@@ -24,6 +24,7 @@ type SubmissionService interface {
 type ReceiptService interface {
 	CreateUploadSession(ctx context.Context, actorID string, claimID string, command application.CreateUploadSessionCommand) (application.UploadSession, error)
 	FinalizeReceiptUpload(ctx context.Context, actorID string, claimID string, receiptID string) error
+	ListReceipts(ctx context.Context, actorID string, claimID string) ([]application.ReceiptView, error)
 }
 
 type Dependencies struct {
@@ -41,6 +42,7 @@ func NewRouter(dependencies Dependencies) http.Handler {
 	mux.HandleFunc("GET /api/v1/claims/{claimId}", handler.getClaim)
 	mux.HandleFunc("GET /api/v1/claims/{claimId}/validation", handler.validateClaim)
 	mux.HandleFunc("POST /api/v1/claims/{claimId}/uploads", handler.createUploadSession)
+	mux.HandleFunc("GET /api/v1/claims/{claimId}/receipts", handler.listReceipts)
 	mux.HandleFunc("POST /api/v1/claims/{claimId}/receipts", handler.finalizeReceiptUpload)
 	mux.HandleFunc("POST /api/v1/claims/{claimId}/submission-requests", handler.requestSubmission)
 	mux.HandleFunc("POST /api/v1/claims/{claimId}/submit", handler.submitClaim)
