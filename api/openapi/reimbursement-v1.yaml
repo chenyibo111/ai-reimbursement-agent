@@ -4,15 +4,19 @@ info:
   version: 1.0.0
 paths:
   /api/v1/claims:
-    get:
-      operationId: listClaims
-      responses:
-        "200":
-          description: Claim list
     post:
       operationId: createClaim
       parameters:
         - $ref: "#/components/parameters/Idempotency-Key"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [purpose]
+              properties:
+                purpose: { type: string, minLength: 1 }
       responses:
         "201":
           description: Draft created
@@ -28,6 +32,17 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ClaimId"
         - $ref: "#/components/parameters/Idempotency-Key"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [filename, contentType, sizeBytes]
+              properties:
+                filename: { type: string }
+                contentType: { type: string, enum: [image/jpeg, image/png, application/pdf] }
+                sizeBytes: { type: integer, minimum: 1, maximum: 20971520 }
       responses:
         "201":
           description: Upload session created
@@ -39,6 +54,15 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ClaimId"
         - $ref: "#/components/parameters/Idempotency-Key"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [receiptId]
+              properties:
+                receiptId: { type: string }
       responses:
         "202":
           description: Receipt accepted for extraction
@@ -70,6 +94,15 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ClaimId"
         - $ref: "#/components/parameters/Idempotency-Key"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer, minimum: 1 }
       responses:
         "201":
           description: Submission confirmation issued
@@ -85,6 +118,15 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ClaimId"
         - $ref: "#/components/parameters/Idempotency-Key"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmationToken]
+              properties:
+                confirmationToken: { type: string }
       responses:
         "201":
           description: Claim submitted
@@ -154,7 +196,7 @@ components:
           type: string
     SubmissionRequest:
       type: object
-      required: [confirmationToken, claimId, claimVersion, totalAmountCents]
+      required: [confirmationToken, claimId, claimVersion, policyVersion, expiresAt]
       properties:
         confirmationToken:
           type: string
@@ -162,8 +204,11 @@ components:
           type: string
         claimVersion:
           type: integer
-        totalAmountCents:
-          type: integer
+        policyVersion:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
     ErrorResponse:
       type: object
       required: [code, message, requestId]
