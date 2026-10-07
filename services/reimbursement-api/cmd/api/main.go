@@ -45,6 +45,10 @@ func main() {
 		log.Fatal("OCR_SERVICE_URL is required")
 	}
 	claimRepository := store.NewPostgresClaimRepository(pool)
+	provisioningKey := strings.TrimSpace(os.Getenv("REIMBURSEMENT_AUTH_PROVISIONING_KEY"))
+	if os.Getenv("REIMBURSEMENT_DEV_AUTH") != "true" && provisioningKey == "" {
+		log.Fatal("REIMBURSEMENT_AUTH_PROVISIONING_KEY is required")
+	}
 
 	var resolver transport.ActorResolver
 	if os.Getenv("REIMBURSEMENT_DEV_AUTH") == "true" {
@@ -69,11 +73,13 @@ func main() {
 		}
 	}
 	router := transport.NewRouter(transport.Dependencies{
-		Claims:      application.NewClaimService(claimRepository, application.SecureIDGenerator{}),
-		Submissions: application.NewSubmissionService(store.NewPostgresSubmissionRepository(pool), nil),
-		Receipts:    application.NewReceiptService(claimRepository, store.NewPostgresReceiptRepository(pool), objects, infrastructure.NewClamAVScanner(clamAddress), infrastructure.NewHTTPReceiptOCRClient(ocrURL), application.SecureIDGenerator{}),
-		Admin:       transport.AdminServices{Policies: application.NewPolicyRuleService(store.NewPostgresPolicyRuleRepository(pool)), Reviews: application.NewReviewCaseService(store.NewPostgresReviewCaseRepository(pool)), Role: store.EmployeeRole(pool)},
-		Auth:        resolver,
+		Claims:             application.NewClaimService(claimRepository, application.SecureIDGenerator{}),
+		Submissions:        application.NewSubmissionService(store.NewPostgresSubmissionRepository(pool), nil),
+		Receipts:           application.NewReceiptService(claimRepository, store.NewPostgresReceiptRepository(pool), objects, infrastructure.NewClamAVScanner(clamAddress), infrastructure.NewHTTPReceiptOCRClient(ocrURL), application.SecureIDGenerator{}),
+		Admin:              transport.AdminServices{Policies: application.NewPolicyRuleService(store.NewPostgresPolicyRuleRepository(pool)), Reviews: application.NewReviewCaseService(store.NewPostgresReviewCaseRepository(pool)), Role: store.EmployeeRole(pool)},
+		EmployeeIdentities: application.NewEmployeeIdentityService(store.NewPostgresEmployeeIdentityRepository(pool)),
+		ProvisioningKey:    provisioningKey,
+		Auth:               resolver,
 	})
 	address := os.Getenv("PORT")
 	if address == "" {

@@ -111,6 +111,37 @@ func TestAdminAuthorizationRequiresMatchingTokenAndStoredRole(t *testing.T) {
 	}
 }
 
+func TestInternalEmployeeProvisioningRequiresDedicatedKey(t *testing.T) {
+	service := &fakeEmployeeIdentityService{}
+	handler := NewRouter(Dependencies{EmployeeIdentities: service, ProvisioningKey: "provision-key", Auth: StaticActorResolver{}})
+	request := httptest.NewRequest(http.MethodPut, "/internal/v1/employees/employee-1", bytes.NewBufferString(`{"displayName":"飞书员工","feishuOpenId":"ou-employee","role":"EMPLOYEE","isActive":true}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Auth-Provisioning-Key", "provision-key")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", response.Code)
+	}
+	if service.command.EmployeeID != "employee-1" || service.command.FeishuOpenID != "ou-employee" {
+		t.Fatalf("command = %#v", service.command)
+	}
+	request.Header.Set("X-Auth-Provisioning-Key", "agent-key")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("expected dedicated key rejection, got %d", response.Code)
+	}
+}
+
+type fakeEmployeeIdentityService struct {
+	command application.EmployeeIdentityCommand
+}
+
+func (service *fakeEmployeeIdentityService) Upsert(_ context.Context, command application.EmployeeIdentityCommand) error {
+	service.command = command
+	return nil
+}
+
 func signedTestToken(secret string, claims map[string]any) string {
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))
 	payload, _ := json.Marshal(claims)

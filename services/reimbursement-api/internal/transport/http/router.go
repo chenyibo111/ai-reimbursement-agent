@@ -28,11 +28,13 @@ type ReceiptService interface {
 }
 
 type Dependencies struct {
-	Claims      ClaimService
-	Submissions SubmissionService
-	Receipts    ReceiptService
-	Auth        ActorResolver
-	Admin       AdminServices
+	Claims             ClaimService
+	Submissions        SubmissionService
+	Receipts           ReceiptService
+	Auth               ActorResolver
+	Admin              AdminServices
+	EmployeeIdentities EmployeeIdentityService
+	ProvisioningKey    string
 }
 
 func NewRouter(dependencies Dependencies) http.Handler {
@@ -57,7 +59,19 @@ func NewRouter(dependencies Dependencies) http.Handler {
 	if dependencies.Auth == nil {
 		dependencies.Auth = StaticActorResolver{}
 	}
-	return Authenticate(dependencies.Auth, mux)
+	public := Authenticate(dependencies.Auth, mux)
+	internal := http.NewServeMux()
+	if dependencies.EmployeeIdentities != nil && strings.TrimSpace(dependencies.ProvisioningKey) != "" {
+		handler := &internalEmployeeHandler{service: dependencies.EmployeeIdentities, provisioningKey: []byte(dependencies.ProvisioningKey)}
+		internal.HandleFunc("PUT /internal/v1/employees/{employeeId}", handler.upsert)
+	}
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if strings.HasPrefix(request.URL.Path, "/internal/") {
+			internal.ServeHTTP(response, request)
+			return
+		}
+		public.ServeHTTP(response, request)
+	})
 }
 
 func pathClaimID(request *http.Request) string {
