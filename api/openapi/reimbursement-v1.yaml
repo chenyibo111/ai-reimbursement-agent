@@ -61,6 +61,35 @@ paths:
                 $ref: "#/components/schemas/Claim"
         default:
           $ref: "#/components/responses/Error"
+    patch:
+      operationId: patchClaim
+      parameters:
+        - $ref: "#/components/parameters/ClaimId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              additionalProperties: false
+              properties:
+                version: { type: integer, minimum: 1 }
+                purpose: { type: string, minLength: 1 }
+                expenseCategory: { type: string }
+                participants:
+                  type: array
+                  items: { type: string }
+                projectCode: { type: string }
+      responses:
+        "200":
+          description: Updated actor-owned draft
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Claim"
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/claims/{claimId}/uploads:
     post:
       operationId: createUploadSession

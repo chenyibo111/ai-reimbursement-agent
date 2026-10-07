@@ -143,6 +143,67 @@ func (handler *claimsHandler) getClaim(response http.ResponseWriter, request *ht
 	writeJSON(response, http.StatusOK, claimResponse(claim))
 }
 
+func (handler *claimsHandler) patchClaim(response http.ResponseWriter, request *http.Request) {
+	actor, _ := ActorFromContext(request.Context())
+	var raw map[string]json.RawMessage
+	if err := json.NewDecoder(request.Body).Decode(&raw); err != nil {
+		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "请求内容格式不正确")
+		return
+	}
+	versionRaw, ok := raw["version"]
+	if !ok {
+		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "缺少报销单版本")
+		return
+	}
+	var version int64
+	if err := json.Unmarshal(versionRaw, &version); err != nil || version < 1 {
+		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "报销单版本无效")
+		return
+	}
+	command := application.PatchClaimCommand{}
+	for field, value := range raw {
+		switch field {
+		case "version":
+		case "purpose":
+			var purpose string
+			if json.Unmarshal(value, &purpose) != nil {
+				command.UnknownFields = append(command.UnknownFields, field)
+			} else {
+				command.Purpose = &purpose
+			}
+		case "expenseCategory":
+			var category string
+			if json.Unmarshal(value, &category) != nil {
+				command.UnknownFields = append(command.UnknownFields, field)
+			} else {
+				command.ExpenseCategory = &category
+			}
+		case "participants":
+			var participants []string
+			if json.Unmarshal(value, &participants) != nil {
+				command.UnknownFields = append(command.UnknownFields, field)
+			} else {
+				command.Participants = &participants
+			}
+		case "projectCode":
+			var projectCode string
+			if json.Unmarshal(value, &projectCode) != nil {
+				command.UnknownFields = append(command.UnknownFields, field)
+			} else {
+				command.ProjectCode = &projectCode
+			}
+		default:
+			command.UnknownFields = append(command.UnknownFields, field)
+		}
+	}
+	claim, err := handler.claims.UpdateClaim(request.Context(), actor.ID, pathClaimID(request), version, command)
+	if err != nil {
+		writeMappedError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, claimResponse(claim))
+}
+
 func claimResponse(claim application.ClaimView) map[string]any {
 	return map[string]any{
 		"id":              claim.ID,

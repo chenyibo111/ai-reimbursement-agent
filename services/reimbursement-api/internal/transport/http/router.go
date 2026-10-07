@@ -40,6 +40,7 @@ func NewRouter(dependencies Dependencies) http.Handler {
 	mux.HandleFunc("POST /api/v1/claims", handler.createClaim)
 	mux.HandleFunc("GET /api/v1/claims", handler.listClaims)
 	mux.HandleFunc("GET /api/v1/claims/{claimId}", handler.getClaim)
+	mux.HandleFunc("PATCH /api/v1/claims/{claimId}", handler.patchClaim)
 	mux.HandleFunc("GET /api/v1/claims/{claimId}/validation", handler.validateClaim)
 	mux.HandleFunc("POST /api/v1/claims/{claimId}/uploads", handler.createUploadSession)
 	mux.HandleFunc("GET /api/v1/claims/{claimId}/receipts", handler.listReceipts)
