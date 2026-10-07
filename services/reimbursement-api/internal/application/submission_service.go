@@ -33,11 +33,11 @@ type SubmissionConfirmation struct {
 }
 
 type SubmissionSnapshot struct {
-	ClaimID          string
-	SubmissionNumber string
-	ClaimVersion     int64
-	PolicyVersion    string
-	SubmittedAt      time.Time
+	ClaimID          string    `json:"claimId"`
+	SubmissionNumber string    `json:"submissionNumber"`
+	ClaimVersion     int64     `json:"claimVersion"`
+	PolicyVersion    string    `json:"policyVersion"`
+	SubmittedAt      time.Time `json:"submittedAt"`
 }
 
 type ValidationResult struct {
