@@ -7,6 +7,20 @@ npx prisma generate --config prisma7.config.ts
 npx prisma migrate deploy --config prisma7.config.ts
 ```
 
+## Go 报销迁移与灰度
+
+迁移顺序固定为：备份旧库、只读导出、导入 Go 报销库、执行对账、再按员工和渠道逐步切流。禁止双写，撤回开关只影响尚未创建的新单据；已由 Go 创建的单据继续由 Go 管理。
+
+```powershell
+# 旧 Prisma 数据库：只读导出 JSONL，输出文件不得提交或上传到非受控位置
+npm run migration:export-legacy > legacy-claims.jsonl
+
+# Go 目标数据库：从标准输入幂等导入（同一 claim ID 重跑会跳过）
+Get-Content legacy-claims.jsonl | docker compose --profile migration run --rm --entrypoint /usr/local/bin/legacy-import reimbursement-api
+```
+
+每个批次先在内部测试员工及指定渠道启用反向代理开关。只有单据数、状态、金额、票据内容哈希和提交快照摘要的对账全部无差异，才允许扩大范围。若发现差异，立即关闭该范围的新流量；不要反向同步、删除 Go 数据或修改旧库记录。
+
 ## 政策规则发布与恢复
 
 部署政策功能前，先备份 PostgreSQL，再在目标环境执行已提交的 Prisma 迁移；不得通过重建数据库卷或删除 `PolicyVersion` / `SubmissionSnapshot` 来“初始化”政策数据。部署后在未提交的密钥环境文件中配置管理员白名单：

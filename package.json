@@ -20,7 +20,9 @@
     "job:worker:container": "tsx src/worker/job-worker.ts",
     "alert:relay:container": "tsx src/worker/alert-relay.ts",
     "policy:sync": "tsx --env-file=.env.local src/worker/policy-sync.ts",
-    "roles:bootstrap": "tsx --env-file=.env.local src/worker/role-bootstrap.ts"
+    "roles:bootstrap": "tsx --env-file=.env.local src/worker/role-bootstrap.ts",
+    "migration:export-legacy": "tsx scripts/migration/export-legacy-claims.ts",
+    "migration:reconcile": "tsx scripts/migration/reconcile-claims.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1137.0",

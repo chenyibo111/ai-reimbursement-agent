@@ -16,6 +16,9 @@ export async function GET(request: Request) {
     const startedAt = Date.now();
     try {
       const actorId = getSessionActorId(request);
+      if (isMigratedWriter(actorId, request.headers.get("x-reimbursement-channel") ?? "WEB")) {
+        return NextResponse.json({ error: "该员工渠道已迁移至新版报销服务。", code: "REIMBURSEMENT_MIGRATED", migrationUrl: process.env.REIMBURSEMENT_GO_WEB_URL ?? null }, { status: 409 });
+      }
       const url = new URL(request.url);
       const query = url.searchParams.get("query")?.trim();
       const status = url.searchParams.get("status");
@@ -87,4 +90,8 @@ function errorResponse(error: unknown) {
 
 function getFailureCode(error: unknown) {
   return error instanceof Error && error.message === "unauthenticated" ? "unauthenticated" : "request_failed";
+}
+
+function isMigratedWriter(employeeId: string, channel: string) {
+  return (process.env.REIMBURSEMENT_GO_WRITER_SCOPES ?? "").split(",").some((scope) => scope.trim() === `${employeeId}@${channel}`);
 }
