@@ -36,6 +36,7 @@ func NewRouter(dependencies Dependencies) http.Handler {
 	mux := http.NewServeMux()
 	handler := &claimsHandler{claims: dependencies.Claims, submissions: dependencies.Submissions, receipts: dependencies.Receipts}
 	mux.HandleFunc("POST /api/v1/claims", handler.createClaim)
+	mux.HandleFunc("GET /api/v1/claims/{claimId}", handler.getClaim)
 	mux.HandleFunc("GET /api/v1/claims/{claimId}/validation", handler.validateClaim)
 	mux.HandleFunc("POST /api/v1/claims/{claimId}/uploads", handler.createUploadSession)
 	mux.HandleFunc("POST /api/v1/claims/{claimId}/receipts", handler.finalizeReceiptUpload)

@@ -98,13 +98,30 @@ func TestSubmitClaimReturnsValidationBlockedWithoutLeakingInternals(t *testing.T
 	}
 }
 
+func TestGetClaimReturnsActorScopedClaim(t *testing.T) {
+	handler := NewRouter(Dependencies{Claims: fakeClaims{}, Auth: StaticActorResolver{}})
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/claims/claim-1", nil)
+	request.Header.Set("Authorization", "Bearer employee-1")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.Code)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil { t.Fatalf("decode response: %v", err) }
+	if body["id"] != "claim-1" || body["ownerId"] != "employee-1" { t.Fatalf("unexpected claim response: %#v", body) }
+}
+
 type fakeClaims struct{}
 
 func (fakeClaims) CreateClaim(_ context.Context, actor string, command application.CreateClaimCommand) (application.ClaimView, error) {
 	return application.ClaimView{ID: "claim-1", OwnerID: actor, Status: domain.ClaimStatusDraft, Purpose: command.Purpose, Version: 1}, nil
 }
-func (fakeClaims) GetClaim(context.Context, string, string) (application.ClaimView, error) {
-	return application.ClaimView{}, application.ErrClaimNotFound
+func (fakeClaims) GetClaim(_ context.Context, actorID string, claimID string) (application.ClaimView, error) {
+	if actorID != "employee-1" || claimID != "claim-1" { return application.ClaimView{}, application.ErrClaimNotFound }
+	return application.ClaimView{ID: claimID, OwnerID: actorID, Status: domain.ClaimStatusDraft, Purpose: "客户拜访", Version: 1}, nil
 }
 func (fakeClaims) UpdateClaim(context.Context, string, string, int64, application.PatchClaimCommand) (application.ClaimView, error) {
 	return application.ClaimView{}, application.ErrClaimNotFound

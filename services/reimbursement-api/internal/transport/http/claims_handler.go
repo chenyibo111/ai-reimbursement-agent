@@ -84,7 +84,32 @@ func (handler *claimsHandler) createClaim(response http.ResponseWriter, request 
 		writeMappedError(response, err)
 		return
 	}
-	writeJSON(response, http.StatusCreated, map[string]any{"id": claim.ID, "ownerId": claim.OwnerID, "status": claim.Status, "version": claim.Version, "purpose": claim.Purpose})
+	writeJSON(response, http.StatusCreated, claimResponse(claim))
+}
+
+func (handler *claimsHandler) getClaim(response http.ResponseWriter, request *http.Request) {
+	actor, _ := ActorFromContext(request.Context())
+	claim, err := handler.claims.GetClaim(request.Context(), actor.ID, pathClaimID(request))
+	if err != nil {
+		writeMappedError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, claimResponse(claim))
+}
+
+func claimResponse(claim application.ClaimView) map[string]any {
+	return map[string]any{
+		"id":              claim.ID,
+		"ownerId":         claim.OwnerID,
+		"status":          claim.Status,
+		"version":         claim.Version,
+		"purpose":         claim.Purpose,
+		"expenseCategory": claim.ExpenseCategory,
+		"participants":    claim.Participants,
+		"projectCode":     claim.ProjectCode,
+		"createdAt":       claim.CreatedAt,
+		"updatedAt":       claim.UpdatedAt,
+	}
 }
 
 func (handler *claimsHandler) submitClaim(response http.ResponseWriter, request *http.Request) {

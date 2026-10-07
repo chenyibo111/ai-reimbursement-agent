@@ -26,6 +26,20 @@ paths:
                 $ref: "#/components/schemas/Claim"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/claims/{claimId}:
+    get:
+      operationId: getClaim
+      parameters:
+        - $ref: "#/components/parameters/ClaimId"
+      responses:
+        "200":
+          description: Actor-owned claim
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Claim"
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/claims/{claimId}/uploads:
     post:
       operationId: createUploadSession
@@ -158,7 +172,7 @@ components:
   schemas:
     Claim:
       type: object
-      required: [id, status, version, purpose]
+      required: [id, ownerId, status, version, purpose, participants, createdAt, updatedAt]
       properties:
         id:
           type: string
@@ -170,6 +184,14 @@ components:
           minimum: 0
         purpose:
           type: [string, "null"]
+        ownerId: { type: string }
+        expenseCategory: { type: [string, "null"] }
+        participants:
+          type: array
+          items: { type: string }
+        projectCode: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     Receipt:
       type: object
       required: [id, claimId, status, originalFilename]
