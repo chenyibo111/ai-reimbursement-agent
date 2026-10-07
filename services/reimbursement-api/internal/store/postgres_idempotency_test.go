@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,12 +23,9 @@ func TestPostgresIdempotencyStoreReplaysAndRejectsConflicts(t *testing.T) {
 		t.Fatalf("connect database: %v", err)
 	}
 	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(ctx, "TRUNCATE reimbursement.idempotency_records"); err != nil {
-		t.Fatalf("truncate idempotency records: %v", err)
-	}
-
 	store := NewPostgresIdempotencyStore(pool)
-	request := IdempotencyRequest{ActorID: "employee-1", Operation: "claim.create", Key: "request-1", RequestHash: "hash-a"}
+	suffix := time.Now().UTC().Format("20060102150405.000000000")
+	request := IdempotencyRequest{ActorID: "test-idempotency-" + suffix, Operation: "claim.create", Key: "request-1", RequestHash: "hash-a"}
 	calls := 0
 	_, err = store.ExecuteIdempotent(ctx, request, func(context.Context, pgx.Tx) (StoredResponse, error) {
 		calls++
