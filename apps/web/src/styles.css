@@ -7,9 +7,9 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; background: #f7f9fc; }
-button, input { font: inherit; }
+button, input, textarea { font: inherit; }
 button, .file-input { cursor: pointer; }
-button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid #3569e8; outline-offset: 3px; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visible { outline: 3px solid #3569e8; outline-offset: 3px; }
 button:disabled, .is-disabled { cursor: not-allowed; opacity: .55; }
 a { color: inherit; }
 
@@ -34,8 +34,10 @@ h2 { margin-bottom: 0; font-size: 1.35rem; letter-spacing: -.015em; }
 .create-panel { padding: 24px; margin-bottom: 24px; }
 .create-panel form { display: grid; gap: 8px; margin-top: 18px; }
 label { font-weight: 700; }
-input { width: 100%; min-height: 46px; padding: 0 13px; border: 1px solid #cbd7e8; border-radius: 10px; color: #13233d; background: #fff; }
-input::placeholder { color: #94a3b8; }
+input, textarea { width: 100%; min-height: 46px; padding: 0 13px; border: 1px solid #cbd7e8; border-radius: 10px; color: #13233d; background: #fff; }
+textarea { min-height: 96px; padding: 11px 13px; line-height: 1.6; }
+.resize-none { resize: none; }
+input::placeholder, textarea::placeholder { color: #94a3b8; }
 .form-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
 .field-error { margin: 10px 0 0; color: #c43a4a; line-height: 1.5; }
 .inline-notice { min-height: 1.5em; margin: 0 0 18px; color: #13806a; font-weight: 700; }
@@ -80,6 +82,20 @@ input::placeholder { color: #94a3b8; }
 .receipt-facts div { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr); gap: 8px; min-width: 0; }
 .receipt-facts dt { color: #64748b; font-size: .82rem; }
 .receipt-facts dd { min-width: 0; margin: 0; color: #13233d; font-size: .86rem; overflow-wrap: anywhere; }
+.claim-application-form { display: grid; gap: 18px; margin-top: 20px; }
+.application-form-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(180px, .85fr); gap: 16px; }
+.field-stack { display: grid; gap: 7px; min-width: 0; }
+.field-hint { margin: 0; color: #64748b; font-size: .84rem; line-height: 1.5; }
+.optional-label { color: #64748b; font-size: .85em; font-weight: 400; }
+.amount-input-wrap { position: relative; }
+.amount-input-wrap > span { position: absolute; z-index: 1; top: 50%; left: 13px; color: #64748b; font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace; transform: translateY(-50%); }
+.amount-input-wrap input { padding-left: 32px; font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace; font-variant-numeric: tabular-nums; }
+.ocr-amount-context { display: grid; gap: 4px; padding: 13px 14px; border: 1px solid #dce4f0; border-left: 3px solid #3569e8; border-radius: 0 10px 10px 0; background: #f4f7ff; color: #334155; }
+.ocr-amount-context div { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.ocr-amount-context span { color: #64748b; font-size: .86rem; }
+.ocr-amount-context strong { color: #13233d; font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace; font-variant-numeric: tabular-nums; }
+.ocr-amount-context p { margin: 0; color: #64748b; font-size: .88rem; line-height: 1.5; }
+.application-form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
 .validation-list { display: grid; gap: 8px; }
 .validation-list li { padding: 11px 13px; border-radius: 10px; line-height: 1.5; }
 .validation-ok { background: #e3f7f0; color: #0d6b59; }
@@ -98,6 +114,9 @@ input::placeholder { color: #94a3b8; }
   .case-rail li:not(:last-child)::before { display: none; }
   .claim-list, .create-panel, .workbench-panel { padding: 18px; border-radius: 15px; }
 	.receipt-facts { grid-template-columns: 1fr; gap: 7px; }
+	.application-form-grid { grid-template-columns: 1fr; }
+	.application-form-actions { align-items: stretch; flex-direction: column-reverse; }
+	.application-form-actions button { width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: 0ms !important; scroll-behavior: auto !important; } }

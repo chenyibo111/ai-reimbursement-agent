@@ -1,4 +1,4 @@
-import type { Claim, Receipt, SubmissionRequest, SubmissionSnapshot, ValidationResult } from "./generated/reimbursement";
+import type { Claim, ClaimPatch, Receipt, SubmissionRequest, SubmissionSnapshot, ValidationResult } from "./generated/reimbursement";
 
 export class ReimbursementApiError extends Error {
   constructor(
@@ -50,6 +50,7 @@ export function createReimbursementApi(tokenProvider: TokenProvider, deps: ApiCl
   return {
     listClaims: () => request<{ items: Claim[] }>("/api/v1/claims"),
     getClaim: (claimId: string) => request<Claim>(`/api/v1/claims/${encodeURIComponent(claimId)}`),
+		updateClaim: (claimId: string, patch: ClaimPatch) => request<Claim>(`/api/v1/claims/${encodeURIComponent(claimId)}`, { method: "PATCH", body: patch, idempotent: true }),
     listReceipts: (claimId: string) => request<{ items: Receipt[] }>(`/api/v1/claims/${encodeURIComponent(claimId)}/receipts`),
     createClaim: (purpose: string) => request<Claim>("/api/v1/claims", { method: "POST", body: { purpose }, idempotent: true }),
     createUploadSession: (claimId: string, input: { filename: string; contentType: string; sizeBytes: number }) => request<{ receiptId: string; uploadUrl: string }>(`/api/v1/claims/${encodeURIComponent(claimId)}/uploads`, { method: "POST", body: input, idempotent: true }),

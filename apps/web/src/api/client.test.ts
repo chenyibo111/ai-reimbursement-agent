@@ -35,4 +35,14 @@ describe("createReimbursementApi", () => {
     expect(refreshAccessToken).toHaveBeenCalledTimes(1);
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
+
+  it("sends an idempotent PATCH for claim application fields", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ id: "claim-1", requestedAmountCent: 10155, currency: "CNY", requestedAmountSource: "MANUAL", remark: "客户拜访交通费" }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    const api = createReimbursementApi({ getAccessToken: () => "token-1", refreshAccessToken: async () => "token-1" }, { fetcher, randomId: () => "patch-key" });
+
+    await api.updateClaim("claim-1", { version: 3, requestedAmountCent: 10155, currency: "CNY", remark: "客户拜访交通费" });
+
+    expect(fetcher).toHaveBeenCalledWith("/api/v1/claims/claim-1", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ version: 3, requestedAmountCent: 10155, currency: "CNY", remark: "客户拜访交通费" }) }));
+    expect(new Headers(fetcher.mock.calls[0][1]?.headers).get("Idempotency-Key")).toBe("patch-key");
+  });
 });

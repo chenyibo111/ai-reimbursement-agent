@@ -19,8 +19,20 @@ export interface Claim {
 	recognizedReceiptCount: number;
 	totalAmountCent: number | null;
 	missingAmountReceiptCount: number;
+	requestedAmountCent: number | null;
+	currency: "CNY";
+	requestedAmountSource: "OCR_SUGGESTED" | "MANUAL";
+	remark: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ClaimPatch {
+  version: number;
+  requestedAmountCent?: number;
+  currency?: "CNY";
+  remark?: string | null;
+  useOcrSuggestedAmount?: true;
 }
 
 export interface Receipt {

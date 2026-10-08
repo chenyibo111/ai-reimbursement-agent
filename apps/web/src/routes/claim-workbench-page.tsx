@@ -2,6 +2,7 @@ import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 
 import { useClaim, useReceipts } from "../features/claims/use-claim";
+import { ClaimApplicationForm } from "../features/claims/claim-application-form";
 import { useReceiptUpload } from "../features/receipts/use-receipt-upload";
 import { useClaimSubmission, useClaimValidation, useSubmissionRequest } from "../features/submission/use-submission";
 import { claimAmountSummary, formatCNYFromCent } from "../features/claims/claim-display";
@@ -42,6 +43,12 @@ export function ClaimWorkbenchPage() {
   useEffect(() => {
     if (submit.isSuccess) setNotice("报销单已提交，系统已保存当前提交快照。");
   }, [submit.isSuccess]);
+
+	useEffect(() => {
+		if (!hasPendingReceipt) return;
+		const refresh = window.setInterval(() => { void claimQuery.refetch(); }, 3_000);
+		return () => window.clearInterval(refresh);
+	}, [claimQuery.refetch, hasPendingReceipt]);
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -115,6 +122,8 @@ export function ClaimWorkbenchPage() {
               </li>)}
             </ul>
           </section>
+
+				<ClaimApplicationForm claim={claim} recognizedAmountCent={claim.totalAmountCent} onSaved={() => setNotice("申请报销信息已保存。")} />
 
           <section className="workbench-panel" aria-labelledby="submission-heading">
             <div className="section-heading"><div><p className="eyebrow">提交</p><h2 id="submission-heading">提交前检查</h2></div></div>
