@@ -29,7 +29,10 @@ func TestPostgresSubmissionRepositoryCreatesImmutableSnapshotAndReplays(t *testi
 	if _, err = pool.Exec(ctx, `INSERT INTO reimbursement.employees (id, display_name) VALUES ($1, 'Submission Repository Test')`, ownerID); err != nil {
 		t.Fatalf("seed owner: %v", err)
 	}
-	if _, err = pool.Exec(ctx, `INSERT INTO reimbursement.claims (id, owner_id, purpose) VALUES ($1, $2, 'Submit claim')`, claimID, ownerID); err != nil {
+	if _, err = pool.Exec(ctx, `
+		INSERT INTO reimbursement.claims (id, owner_id, purpose, requested_amount_cent, requested_amount_source, remark)
+		VALUES ($1, $2, 'Submit claim', 12345, 'MANUAL', '客户拜访交通费')
+	`, claimID, ownerID); err != nil {
 		t.Fatalf("seed claim: %v", err)
 	}
 	if _, err = pool.Exec(ctx, `
@@ -68,8 +71,26 @@ func TestPostgresSubmissionRepositoryCreatesImmutableSnapshotAndReplays(t *testi
 	if err = pool.QueryRow(ctx, `SELECT count(*) FROM reimbursement.outbox_events WHERE aggregate_id = $1 AND event_type = 'claim.submitted.v1'`, claimID).Scan(&events); err != nil {
 		t.Fatalf("count submission events: %v", err)
 	}
+	var snapshotAmount int64
+	var snapshotCurrency string
+	var snapshotSource string
+	var snapshotRemark string
+	if err = pool.QueryRow(ctx, `
+		SELECT
+			(snapshot->'claim'->>'RequestedAmountCent')::bigint,
+			snapshot->'claim'->>'Currency',
+			snapshot->'claim'->>'RequestedAmountSource',
+			snapshot->'claim'->>'Remark'
+		FROM reimbursement.submission_snapshots
+		WHERE claim_id = $1
+	`, claimID).Scan(&snapshotAmount, &snapshotCurrency, &snapshotSource, &snapshotRemark); err != nil {
+		t.Fatalf("read snapshot claim application fields: %v", err)
+	}
 	if status != "SUBMITTED" || snapshots != 1 || events != 1 {
 		t.Fatalf("expected submitted snapshot/event once, status=%s snapshots=%d events=%d", status, snapshots, events)
+	}
+	if snapshotAmount != 12345 || snapshotCurrency != "CNY" || snapshotSource != "MANUAL" || snapshotRemark != "客户拜访交通费" {
+		t.Fatalf("unexpected immutable claim application snapshot: amount=%d currency=%q source=%q remark=%q", snapshotAmount, snapshotCurrency, snapshotSource, snapshotRemark)
 	}
 }
 

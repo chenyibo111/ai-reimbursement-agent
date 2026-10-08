@@ -153,6 +153,9 @@ func validateSubmissionInput(input SubmissionInput) []domain.ValidationIssue {
 	if strings.TrimSpace(input.Claim.Purpose) == "" {
 		issues = append(issues, domain.ValidationIssue{Code: "PURPOSE_REQUIRED", Message: "报销事由不能为空", Blocking: true})
 	}
+	if input.Claim.RequestedAmountCent == nil {
+		issues = append(issues, domain.ValidationIssue{Code: "REQUESTED_AMOUNT_REQUIRED", Message: "请填写申请报销金额", Blocking: true})
+	}
 	if len(input.Receipts) == 0 {
 		issues = append(issues, domain.ValidationIssue{Code: "RECEIPT_REQUIRED", Message: "至少需要一张票据", Blocking: true})
 	}

@@ -21,6 +21,8 @@ func writeMappedError(response http.ResponseWriter, err error) {
 		writeError(response, http.StatusConflict, "CONFIRMATION_EXPIRED", "确认已过期，请重新发起提交")
 	case errors.Is(err, application.ErrReceiptNotFound):
 		writeError(response, http.StatusNotFound, "NOT_FOUND", "未找到可访问的票据")
+	case errors.Is(err, domain.ErrInvalidClaim):
+		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "报销单字段无效")
 	case errors.Is(err, application.ErrInvalidReceiptType), errors.Is(err, application.ErrInvalidReceiptSize), errors.Is(err, application.ErrInvalidFileSignature):
 		writeError(response, http.StatusUnprocessableEntity, "INVALID_RECEIPT", "票据文件不符合上传要求")
 	case errors.Is(err, application.ErrUnsafeReceiptFile), errors.Is(err, application.ErrDuplicateReceiptContent), errors.Is(err, application.ErrDuplicateSubmittedInvoice):

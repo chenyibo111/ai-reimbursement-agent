@@ -160,7 +160,9 @@ func loadOwnedClaim(ctx context.Context, query queryRower, actorID string, claim
 	var expenseCategory *string
 	var participants []byte
 	var projectCode *string
-	err := query.QueryRow(ctx, `SELECT id, claim_number, owner_id, status, purpose, expense_category, participants, project_code, version, created_at, updated_at FROM reimbursement.claims WHERE id = $1 AND owner_id = $2`+lock, claimID, actorID).Scan(&claim.ID, &claim.ClaimNumber, &claim.OwnerID, &claim.Status, &claim.Purpose, &expenseCategory, &participants, &projectCode, &claim.Version, &claim.CreatedAt, &claim.UpdatedAt)
+	var requestedAmountCent *int64
+	var remark *string
+	err := query.QueryRow(ctx, `SELECT id, claim_number, owner_id, status, purpose, expense_category, participants, project_code, requested_amount_cent, currency, requested_amount_source, remark, version, created_at, updated_at FROM reimbursement.claims WHERE id = $1 AND owner_id = $2`+lock, claimID, actorID).Scan(&claim.ID, &claim.ClaimNumber, &claim.OwnerID, &claim.Status, &claim.Purpose, &expenseCategory, &participants, &projectCode, &requestedAmountCent, &claim.Currency, &claim.RequestedAmountSource, &remark, &claim.Version, &claim.CreatedAt, &claim.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Claim{}, application.ErrClaimNotFound
 	}
@@ -172,6 +174,10 @@ func loadOwnedClaim(ctx context.Context, query queryRower, actorID string, claim
 	}
 	if projectCode != nil {
 		claim.ProjectCode = *projectCode
+	}
+	claim.RequestedAmountCent = requestedAmountCent
+	if remark != nil {
+		claim.Remark = *remark
 	}
 	if err := json.Unmarshal(participants, &claim.Participants); err != nil {
 		return domain.Claim{}, fmt.Errorf("decode claim participants: %w", err)

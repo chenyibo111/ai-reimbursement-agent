@@ -117,6 +117,10 @@ paths:
                   type: array
                   items: { type: string }
                 projectCode: { type: string }
+                requestedAmountCent: { type: integer, format: int64, minimum: 0 }
+                currency: { type: string, enum: [CNY] }
+                remark: { type: [string, "null"], maxLength: 1000 }
+                useOcrSuggestedAmount: { type: boolean, const: true }
       responses:
         "200":
           description: Updated actor-owned draft
@@ -277,7 +281,7 @@ components:
   schemas:
     Claim:
       type: object
-      required: [id, claimNumber, ownerId, status, version, purpose, participants, receiptCount, recognizedReceiptCount, missingAmountReceiptCount, createdAt, updatedAt]
+      required: [id, claimNumber, ownerId, status, version, purpose, participants, receiptCount, recognizedReceiptCount, missingAmountReceiptCount, requestedAmountCent, currency, requestedAmountSource, remark, createdAt, updatedAt]
       properties:
         id:
           type: string
@@ -311,6 +315,19 @@ components:
         missingAmountReceiptCount:
           type: integer
           minimum: 0
+        requestedAmountCent:
+          type: [integer, "null"]
+          format: int64
+          minimum: 0
+        currency:
+          type: string
+          enum: [CNY]
+        requestedAmountSource:
+          type: string
+          enum: [OCR_SUGGESTED, MANUAL]
+        remark:
+          type: [string, "null"]
+          maxLength: 1000
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
     Receipt:

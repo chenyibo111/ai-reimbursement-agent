@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/application"
+	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/domain"
 )
 
 type claimsHandler struct {
@@ -199,9 +200,44 @@ func (handler *claimsHandler) patchClaim(response http.ResponseWriter, request *
 			} else {
 				command.ProjectCode = &projectCode
 			}
+		case "requestedAmountCent":
+			var amount int64
+			if json.Unmarshal(value, &amount) != nil || amount < 0 {
+				command.UnknownFields = append(command.UnknownFields, field)
+			} else {
+				command.RequestedAmountCent = &amount
+			}
+		case "currency":
+			var currency string
+			if json.Unmarshal(value, &currency) != nil || currency != domain.ClaimCurrencyCNY {
+				command.UnknownFields = append(command.UnknownFields, field)
+			} else {
+				command.Currency = &currency
+			}
+		case "remark":
+			var remark *string
+			if json.Unmarshal(value, &remark) != nil {
+				command.UnknownFields = append(command.UnknownFields, field)
+			} else if remark == nil {
+				empty := ""
+				command.Remark = &empty
+			} else {
+				command.Remark = remark
+			}
+		case "useOcrSuggestedAmount":
+			var restore bool
+			if json.Unmarshal(value, &restore) != nil || !restore {
+				command.UnknownFields = append(command.UnknownFields, field)
+			} else {
+				command.UseOCRSuggestedAmount = true
+			}
 		default:
 			command.UnknownFields = append(command.UnknownFields, field)
 		}
+	}
+	if len(command.UnknownFields) > 0 || (command.UseOCRSuggestedAmount && command.RequestedAmountCent != nil) {
+		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "报销金额字段无效")
+		return
 	}
 	claim, err := handler.claims.UpdateClaim(request.Context(), actor.ID, pathClaimID(request), version, command)
 	if err != nil {
@@ -226,9 +262,20 @@ func claimResponse(claim application.ClaimView) map[string]any {
 		"recognizedReceiptCount":    claim.RecognizedReceiptCount,
 		"totalAmountCent":           claim.TotalAmountCent,
 		"missingAmountReceiptCount": claim.MissingAmountReceiptCount,
+		"requestedAmountCent":       claim.RequestedAmountCent,
+		"currency":                  claim.Currency,
+		"requestedAmountSource":     claim.RequestedAmountSource,
+		"remark":                    nullableString(claim.Remark),
 		"createdAt":                 claim.CreatedAt,
 		"updatedAt":                 claim.UpdatedAt,
 	}
+}
+
+func nullableString(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 func (handler *claimsHandler) submitClaim(response http.ResponseWriter, request *http.Request) {

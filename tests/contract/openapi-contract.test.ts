@@ -26,6 +26,10 @@ describe("reimbursement OpenAPI contract", () => {
 		expect(specification).toContain("recognizedReceiptCount:");
 		expect(specification).toContain("totalAmountCent:");
 		expect(specification).toContain("missingAmountReceiptCount:");
+		expect(specification).toContain("requestedAmountCent:");
+		expect(specification).toContain("requestedAmountSource:");
+		expect(specification).toContain("useOcrSuggestedAmount:");
+		expect(specification).toContain("enum: [OCR_SUGGESTED, MANUAL]");
 		expect(specification).toContain("invoiceDate:");
 		expect(specification).toContain("sellerName:");
     expect(specification).toContain("code:");

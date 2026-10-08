@@ -291,7 +291,84 @@ func TestPatchClaimUpdatesOnlyWhitelistedFieldsAtExpectedVersion(t *testing.T) {
 	}
 }
 
+func TestPatchClaimAcceptsClaimApplicationFields(t *testing.T) {
+	claims := &capturingApplicationClaims{}
+	handler := NewRouter(Dependencies{Claims: claims, Auth: StaticActorResolver{}})
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/claims/claim-1", bytes.NewBufferString(`{"version":1,"requestedAmountCent":10155,"currency":"CNY","remark":"客户拜访交通费"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer employee-1")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", response.Code, response.Body.String())
+	}
+	if claims.command.RequestedAmountCent == nil || *claims.command.RequestedAmountCent != 10155 || claims.command.Currency == nil || *claims.command.Currency != "CNY" || claims.command.Remark == nil || *claims.command.Remark != "客户拜访交通费" {
+		t.Fatalf("patch command = %#v", claims.command)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["requestedAmountCent"] != float64(10155) || body["currency"] != "CNY" || body["requestedAmountSource"] != "MANUAL" || body["remark"] != "客户拜访交通费" {
+		t.Fatalf("application response = %#v", body)
+	}
+}
+
+func TestPatchClaimRejectsInvalidClaimApplicationFields(t *testing.T) {
+	testCases := []struct {
+		name string
+		body string
+	}{
+		{name: "fractional cents", body: `{"version":1,"requestedAmountCent":101.55}`},
+		{name: "exponent notation", body: `{"version":1,"requestedAmountCent":1e4}`},
+		{name: "negative cents", body: `{"version":1,"requestedAmountCent":-1}`},
+		{name: "unsupported currency", body: `{"version":1,"currency":"USD"}`},
+		{name: "false restore", body: `{"version":1,"useOcrSuggestedAmount":false}`},
+		{name: "conflicting amount and restore", body: `{"version":1,"requestedAmountCent":10155,"useOcrSuggestedAmount":true}`},
+		{name: "unknown field", body: `{"version":1,"unexpected":true}`},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			handler := NewRouter(Dependencies{Claims: &capturingApplicationClaims{}, Auth: StaticActorResolver{}})
+			request := httptest.NewRequest(http.MethodPatch, "/api/v1/claims/claim-1", bytes.NewBufferString(testCase.body))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Authorization", "Bearer employee-1")
+			response := httptest.NewRecorder()
+
+			handler.ServeHTTP(response, request)
+
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d body=%s", response.Code, response.Body.String())
+			}
+			var body map[string]any
+			if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if body["code"] != "INVALID_REQUEST" {
+				t.Fatalf("error response = %#v", body)
+			}
+		})
+	}
+}
+
 type fakeClaims struct{}
+
+type capturingApplicationClaims struct {
+	fakeClaims
+	command application.PatchClaimCommand
+}
+
+func (claims *capturingApplicationClaims) UpdateClaim(_ context.Context, actorID string, claimID string, version int64, command application.PatchClaimCommand) (application.ClaimView, error) {
+	if actorID != "employee-1" || claimID != "claim-1" || version != 1 {
+		return application.ClaimView{}, application.ErrClaimNotFound
+	}
+	claims.command = command
+	amount := int64(10155)
+	return application.ClaimView{ID: claimID, ClaimNumber: "BX20261008-0001", OwnerID: actorID, Status: domain.ClaimStatusDraft, Purpose: "客户拜访", Version: 2, RequestedAmountCent: &amount, Currency: domain.ClaimCurrencyCNY, RequestedAmountSource: domain.RequestedAmountSourceManual, Remark: "客户拜访交通费"}, nil
+}
 
 func (fakeClaims) CreateClaim(_ context.Context, actor string, command application.CreateClaimCommand) (application.ClaimView, error) {
 	return application.ClaimView{ID: "claim-1", OwnerID: actor, Status: domain.ClaimStatusDraft, Purpose: command.Purpose, Version: 1}, nil
