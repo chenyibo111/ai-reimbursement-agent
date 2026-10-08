@@ -41,10 +41,14 @@ input::placeholder { color: #94a3b8; }
 .inline-notice { min-height: 1.5em; margin: 0 0 18px; color: #13806a; font-weight: 700; }
 .claim-list { padding: 24px; }
 .claim-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; margin-top: 20px; }
-.claim-card { display: grid; gap: 16px; min-height: 166px; padding: 18px; border: 1px solid #dce4f0; border-radius: 14px; text-decoration: none; background: #fff; }
+.claim-card { display: grid; gap: 13px; min-height: 188px; padding: 18px; border: 1px solid #dce4f0; border-radius: 14px; text-decoration: none; background: #fff; }
 .claim-card:hover { border-color: #3569e8; background: #fafdff; }
 .claim-card strong { align-self: end; font-size: 1.1rem; line-height: 1.5; }
 .claim-card time { color: #64748b; font-size: .82rem; }
+.claim-number { margin: 0; color: #2857cb; font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace; font-size: .82rem; font-weight: 700; letter-spacing: .02em; }
+.claim-number code { color: inherit; font: inherit; }
+.claim-card-topline .status-tag { margin-left: auto; }
+.claim-card-summary { display: grid; gap: 3px; color: #334155; font-size: .87rem; line-height: 1.45; }
 .status-tag { flex: none; display: inline-flex; align-items: center; min-height: 26px; padding: 3px 9px; border-radius: 8px; background: #eaf0ff; color: #2857cb; font-size: .8rem; font-weight: 700; }
 .status-submitted, .receipt-extracted { color: #0d6b59; background: #e3f7f0; }
 .status-needs_information, .receipt-review_required, .receipt-quarantined { color: #9a4d00; background: #fff0dc; }
@@ -67,9 +71,15 @@ input::placeholder { color: #94a3b8; }
 .file-input input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .receipt-list, .validation-list { list-style: none; padding: 0; margin: 18px 0 0; }
 .receipt-list { border-top: 1px solid #dce4f0; }
-.receipt-row { padding: 15px 0; border-bottom: 1px solid #dce4f0; }
+.receipt-row { align-items: flex-start; padding: 15px 0; border-bottom: 1px solid #dce4f0; }
+.receipt-content { min-width: 0; flex: 1; }
 .receipt-row strong, .receipt-row small { display: block; }
 .receipt-row small { margin-top: 4px; font-size: .85rem; }
+.receipt-summary { margin: 14px 0 0; padding: 10px 12px; border-left: 3px solid #3569e8; border-radius: 0 8px 8px 0; background: #f4f7ff; color: #334155; font-size: .9rem; line-height: 1.5; }
+.receipt-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 24px; margin: 10px 0 0; }
+.receipt-facts div { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr); gap: 8px; min-width: 0; }
+.receipt-facts dt { color: #64748b; font-size: .82rem; }
+.receipt-facts dd { min-width: 0; margin: 0; color: #13233d; font-size: .86rem; overflow-wrap: anywhere; }
 .validation-list { display: grid; gap: 8px; }
 .validation-list li { padding: 11px 13px; border-radius: 10px; line-height: 1.5; }
 .validation-ok { background: #e3f7f0; color: #0d6b59; }
@@ -87,6 +97,7 @@ input::placeholder { color: #94a3b8; }
   .case-rail li { padding-bottom: 0; }
   .case-rail li:not(:last-child)::before { display: none; }
   .claim-list, .create-panel, .workbench-panel { padding: 18px; border-radius: 15px; }
+	.receipt-facts { grid-template-columns: 1fr; gap: 7px; }
 }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: 0ms !important; scroll-behavior: auto !important; } }

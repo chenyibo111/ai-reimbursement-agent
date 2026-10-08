@@ -4,6 +4,7 @@ import { Link, useLocation, useParams } from "react-router-dom";
 import { useClaim, useReceipts } from "../features/claims/use-claim";
 import { useReceiptUpload } from "../features/receipts/use-receipt-upload";
 import { useClaimSubmission, useClaimValidation, useSubmissionRequest } from "../features/submission/use-submission";
+import { claimAmountSummary, formatCNYFromCent } from "../features/claims/claim-display";
 
 function statusText(status: string) {
   const labels: Record<string, string> = {
@@ -64,6 +65,7 @@ export function ClaimWorkbenchPage() {
           <div>
             <p className="eyebrow">报销工作台 · {statusText(claim.status)}</p>
             <h1 id="workbench-title">{claim.purpose || "未填写报销事由"}</h1>
+				<p className="claim-number">报销单号 <code>{claim.claimNumber}</code></p>
           </div>
           <span className={`status-tag status-${claim.status.toLowerCase()}`}>{statusText(claim.status)}</span>
         </div>
@@ -91,12 +93,24 @@ export function ClaimWorkbenchPage() {
               </label>
             </div>
             <p className="panel-copy">支持 JPG、PNG、PDF；单个文件最大 20 MB。文件会先进行安全检查，再进入 OCR。</p>
+			<p className="receipt-summary" aria-live="polite">{claimAmountSummary(claim.totalAmountCent, claim.missingAmountReceiptCount)} · 票据 {claim.receiptCount} 份，已识别 {claim.recognizedReceiptCount} 份</p>
             {upload.isError && <p className="field-error" role="alert">{errorMessage(upload.error)}</p>}
             {receiptsQuery.isLoading && <p className="empty-state" role="status">正在读取附件…</p>}
             {receiptsQuery.data?.items.length === 0 && <p className="empty-state">还没有票据。上传后会在这里显示识别进度与结果。</p>}
             <ul className="receipt-list">
               {receiptsQuery.data?.items.map((receipt) => <li key={receipt.id} className="receipt-row">
-                <div><strong>{receipt.filename}</strong><small>{receipt.invoiceNumber ? `发票号 ${receipt.invoiceNumber}` : "等待识别发票信息"}</small></div>
+						<div className="receipt-content">
+							<strong>{receipt.filename}</strong>
+							{receipt.status === "EXTRACTED" ? (
+								<dl className="receipt-facts">
+									<div><dt>发票号码</dt><dd>{receipt.invoiceNumber || "待补充"}</dd></div>
+									<div><dt>开票日期</dt><dd>{receipt.invoiceDate || "待补充"}</dd></div>
+									<div><dt>价税合计</dt><dd>{receipt.totalAmountCent === null ? "待补充" : formatCNYFromCent(receipt.totalAmountCent)}</dd></div>
+									<div><dt>销售方</dt><dd>{receipt.sellerName || "待补充"}</dd></div>
+									<div><dt>OCR 置信度</dt><dd>{Math.round(receipt.ocrConfidence * 100)}%</dd></div>
+								</dl>
+							) : <small>待 OCR 识别</small>}
+						</div>
                 <span className={`status-tag receipt-${receipt.status.toLowerCase()}`}>{statusText(receipt.status)}</span>
               </li>)}
             </ul>

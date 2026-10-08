@@ -7,6 +7,7 @@ export type ReceiptStatus = "UPLOAD_PENDING" | "READY_FOR_OCR" | "EXTRACTED" | "
 
 export interface Claim {
   id: string;
+	claimNumber: string;
   ownerId?: string;
   status: ClaimStatus;
   version: number;
@@ -14,6 +15,10 @@ export interface Claim {
   expenseCategory: string | null;
   participants: string[];
   projectCode: string | null;
+	receiptCount: number;
+	recognizedReceiptCount: number;
+	totalAmountCent: number | null;
+	missingAmountReceiptCount: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -24,6 +29,9 @@ export interface Receipt {
   filename: string;
   status: ReceiptStatus;
   invoiceNumber: string;
+	invoiceDate: string | null;
+	totalAmountCent: number | null;
+	sellerName: string | null;
   ocrConfidence: number;
   updatedAt: string;
 }

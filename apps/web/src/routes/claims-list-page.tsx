@@ -5,6 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { reimbursementApi } from "../api/client";
 import type { ClaimStatus } from "../api/generated/reimbursement";
 import { claimKeys, useClaims } from "../features/claims/use-claim";
+import { claimAmountSummary } from "../features/claims/claim-display";
 
 const statusLabel: Record<ClaimStatus, string> = {
   DRAFT: "草稿",
@@ -96,11 +97,15 @@ export function ClaimListPage() {
           {claimsQuery.data?.items.map((claim) => (
             <Link className="claim-card" key={claim.id} to={`/claims/${claim.id}`}>
               <div className="claim-card-topline">
+					<code className="claim-number">{claim.claimNumber}</code>
                 <span className={`status-tag status-${claim.status.toLowerCase()}`}>{statusLabel[claim.status]}</span>
-                <time dateTime={claim.updatedAt}>更新于 {new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium" }).format(new Date(claim.updatedAt))}</time>
               </div>
               <strong>{claim.purpose || "未填写报销事由"}</strong>
-              <span className="card-meta">版本 {claim.version} · 查看处理脉络</span>
+				<div className="claim-card-summary">
+					<span>{claimAmountSummary(claim.totalAmountCent, claim.missingAmountReceiptCount)}</span>
+					<span>票据 {claim.receiptCount} 份，已识别 {claim.recognizedReceiptCount} 份</span>
+				</div>
+              <span className="card-meta">更新于 <time dateTime={claim.updatedAt}>{new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium" }).format(new Date(claim.updatedAt))}</time> · 版本 {claim.version}</span>
             </Link>
           ))}
         </div>
