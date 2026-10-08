@@ -11,7 +11,8 @@ import (
 
 func TestSubmitClaimRevalidatesBeforeSubmit(t *testing.T) {
 	repository := newFakeSubmissionRepository()
-	repository.claim = domain.Claim{ID: "claim-1", OwnerID: "employee-1", Status: domain.ClaimStatusDraft, Purpose: "客户拜访", Version: 1}
+	amount := int64(10155)
+	repository.claim = domain.Claim{ID: "claim-1", OwnerID: "employee-1", Status: domain.ClaimStatusDraft, Purpose: "客户拜访", RequestedAmountCent: &amount, Currency: domain.ClaimCurrencyCNY, Version: 1}
 	repository.receipts = []domain.Receipt{{ID: "receipt-1", ClaimID: "claim-1", OwnerID: "employee-1", Status: domain.ReceiptStatusExtracted, OCRConfidence: 0.98}}
 	service := NewSubmissionService(repository, fixedClock{now: time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)})
 
@@ -47,7 +48,8 @@ func TestRequestSubmissionRequiresRequestedAmount(t *testing.T) {
 
 func TestSubmitClaimRejectsStaleConfirmation(t *testing.T) {
 	repository := newFakeSubmissionRepository()
-	repository.claim = domain.Claim{ID: "claim-1", OwnerID: "employee-1", Status: domain.ClaimStatusDraft, Purpose: "客户拜访", Version: 1}
+	amount := int64(10155)
+	repository.claim = domain.Claim{ID: "claim-1", OwnerID: "employee-1", Status: domain.ClaimStatusDraft, Purpose: "客户拜访", RequestedAmountCent: &amount, Currency: domain.ClaimCurrencyCNY, Version: 1}
 	repository.receipts = []domain.Receipt{{ID: "receipt-1", ClaimID: "claim-1", OwnerID: "employee-1", Status: domain.ReceiptStatusExtracted, OCRConfidence: 0.98}}
 	clock := fixedClock{now: time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)}
 	service := NewSubmissionService(repository, clock)
@@ -65,7 +67,8 @@ func TestSubmitClaimRejectsStaleConfirmation(t *testing.T) {
 
 func TestSubmitClaimReplaysIdempotentSubmission(t *testing.T) {
 	repository := newFakeSubmissionRepository()
-	repository.claim = domain.Claim{ID: "claim-1", OwnerID: "employee-1", Status: domain.ClaimStatusDraft, Purpose: "客户拜访", Version: 1}
+	amount := int64(10155)
+	repository.claim = domain.Claim{ID: "claim-1", OwnerID: "employee-1", Status: domain.ClaimStatusDraft, Purpose: "客户拜访", RequestedAmountCent: &amount, Currency: domain.ClaimCurrencyCNY, Version: 1}
 	repository.receipts = []domain.Receipt{{ID: "receipt-1", ClaimID: "claim-1", OwnerID: "employee-1", Status: domain.ReceiptStatusExtracted, OCRConfidence: 0.98}}
 	service := NewSubmissionService(repository, fixedClock{now: time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)})
 	confirmation, err := service.RequestSubmission(context.Background(), "employee-1", "claim-1", 1)

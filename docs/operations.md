@@ -48,6 +48,38 @@ docker compose --profile migration ps
 
 该迁移不支持通过删除列、删除计数器或修改迁移记录来回滚。应用故障时可先回退到仍兼容新增列的应用镜像；若必须恢复数据库状态，只能按已验证的 PostgreSQL 备份恢复流程执行，并先停止对应写入流量。恢复后重新核对报销单号、票据记录、审计事件和提交快照，不能反向同步或删除单笔记录“修复”。
 
+### 申请报销金额、币种与备注升级
+
+`services/reimbursement-api/db/migrations/000011_claim_application_fields.sql` 必须在 `000010` 之后执行。它为 `reimbursement.claims` 增加可空的 `requested_amount_cent`、固定为 `CNY` 的 `currency`、金额来源 `requested_amount_source` 与最长 1000 字符的 `remark`。金额单位为分；空金额表示员工尚未填写或尚无可用 OCR 建议，绝不代表零金额。
+
+执行前备份目标 PostgreSQL，并由具备 DDL 权限的受控运维账户执行已提交脚本。不要手改字段、删除数据卷或以重建数据库代替迁移。本地 Compose 环境可执行：
+
+```powershell
+Get-Content -Raw services/reimbursement-api/db/migrations/000011_claim_application_fields.sql |
+  docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U reimbursement -d reimbursement
+
+docker compose --profile migration up -d --build reimbursement-api reimbursement-worker reimbursement-web reimbursement-edge
+docker compose --profile migration ps
+```
+
+迁移后仅做只读核对，不记录或导出员工明细：
+
+```sql
+SELECT currency, requested_amount_source, count(*)
+FROM reimbursement.claims
+GROUP BY currency, requested_amount_source
+ORDER BY currency, requested_amount_source;
+
+SELECT claim_number, requested_amount_cent, currency, requested_amount_source, length(remark) AS remark_length
+FROM reimbursement.claims
+ORDER BY updated_at DESC
+LIMIT 10;
+```
+
+验收一条测试草稿即可：无 OCR 金额时提交前检查应返回 `REQUESTED_AMOUNT_REQUIRED`；识别完成后，仍使用 OCR 建议的草稿应显示已识别票据金额合计；输入例如 `99.99` 并保存后，来源应为手工，后续 OCR 不得覆盖该金额；点击“恢复 OCR 建议金额”后应显示当前合计。币种在界面中只读显示为 CNY，金额最多两位小数，备注最多 1000 个字符。提交成功后，提交快照必须保留金额、币种、来源和备注。
+
+此迁移为前向兼容变更：回退应用镜像时不删除列、不回填旧字段、不删除提交快照。若发布异常，停止扩大灰度范围并恢复兼容的应用镜像；数据库恢复仅使用发布前已经验证的备份流程。
+
 ## 政策规则发布与恢复
 
 部署政策功能前，先备份 PostgreSQL，再在目标环境执行已提交的 Prisma 迁移；不得通过重建数据库卷或删除 `PolicyVersion` / `SubmissionSnapshot` 来“初始化”政策数据。部署后在未提交的密钥环境文件中配置管理员白名单：

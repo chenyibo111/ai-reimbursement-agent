@@ -20,7 +20,7 @@ The current Next.js application remains the active product while the new archite
 
 | 模块 | 当前能力 |
 | --- | --- |
-| 报销单 | 创建草稿、编辑用途和费用字段、生成确认摘要、提交并查看提交快照 |
+| 报销单 | 创建草稿、编辑用途和费用字段、填写申请报销总额（仅 CNY）与备注、生成确认摘要、提交并查看提交快照 |
 | 票据 | 上传 JPG、PNG、PDF；文件签名校验、ClamAV 扫描、私有对象存储、异步 OCR 识别、重新识别和删除草稿票据 |
 | 校验 | 必填字段、低置信度、同文件哈希、同员工已提交发票号，以及已发布的制度规则校验 |
 | AI 助手 | 独立私有会话、跨 Web/飞书单聊历史、政策依据回放、受控 Intake 办理与精确确认提交 |
@@ -37,7 +37,7 @@ The current Next.js application remains the active product while the new archite
 1. 使用飞书 OAuth 登录（开发环境可使用受限演示登录）。
 2. 在 `/claims` 查看自己创建的报销单，或在 `/claims/new` 新建草稿。
 3. 上传票据；系统完成安全扫描与私有存储后创建 OCR 任务，后台 Worker 再回填候选费用信息。
-4. 在单据详情核对票据、费用、用途和校验结果；手动创建的草稿保持表单式编辑，不会被对话自动选中或修改。
+4. 在单据详情核对票据、费用、用途和校验结果。申请报销总额会先采用已识别票据金额的合计作为建议值；员工手工修改后以手工值为准，也可恢复当前 OCR 建议值。币种当前固定为 CNY，备注最长 1000 个字符。
 5. 修复阻断项，生成确认摘要后提交。系统以当前版本再次校验并写入不可变 `SubmissionSnapshot`。
 
 草稿状态会经历 `DRAFT`、`PROCESSING`、`NEEDS_INFORMATION`、`AWAITING_CONFIRMATION`、`SUBMITTED`。仅草稿允许删除单据或附件。
@@ -257,9 +257,9 @@ docker compose --profile migration up -d --build reimbursement-edge reimbursemen
 
 本机可通过 `http://localhost:8088` 验证路径分流；旧 Auth BFF 的 `3000` 仅绑定 `127.0.0.1` 供本机调试。生产环境应只将固定 HTTPS 域名指向 `reimbursement-edge`。
 
-### 报销单号与票据识别字段升级
+### 报销单号、票据识别与申请信息升级
 
-`services/reimbursement-api/db/migrations/000010_claim_numbers_and_receipt_metadata.sql` 为 Go 报销库增加不可变业务单号（`BXyyyyMMdd-序号`）与票据开票日期、价税合计、销售方字段。它还会为已有报销单回填单号；未能从历史 OCR 结果取得的新字段保持为空，由 React 工作台显示为“待补充”。
+`services/reimbursement-api/db/migrations/000010_claim_numbers_and_receipt_metadata.sql` 为 Go 报销库增加不可变业务单号（`BXyyyyMMdd-序号`）与票据开票日期、价税合计、销售方字段。它还会为已有报销单回填单号；未能从历史 OCR 结果取得的新字段保持为空，由 React 工作台显示为“待补充”。随后执行的 `000011_claim_application_fields.sql` 增加申请报销总额、固定 CNY 币种、金额来源和备注字段。
 
 迁移顺序不可调换：先备份目标 PostgreSQL，再以具备 DDL 权限的受控运维账户执行脚本，最后同步滚动重启 Go API、Go Worker、React Web 与边缘路由。本地 Compose 示例：
 
@@ -270,7 +270,7 @@ Get-Content -Raw services/reimbursement-api/db/migrations/000010_claim_numbers_a
 docker compose --profile migration up -d --build reimbursement-api reimbursement-worker reimbursement-web reimbursement-edge
 ```
 
-重启后，在 React 报销列表和工作台分别核对：新建草稿立即获得 `BXyyyyMMdd-xxxx`；已识别票据显示发票号、日期、价税合计、销售方和置信度；缺失字段显示“待补充”而非 `￥0.00`；提交前检查仍按既有规则运行。完整的生产验收与回退边界见[运维说明](docs/operations.md#报销单号与票据识别字段升级)。
+重启后，在 React 报销列表和工作台分别核对：新建草稿立即获得 `BXyyyyMMdd-xxxx`；已识别票据显示发票号、日期、价税合计、销售方和置信度；缺失字段显示“待补充”而非 `￥0.00`；申请报销总额仅在仍使用 OCR 建议时自动刷新，手工金额不会被 OCR 覆盖；提交前检查仍按既有规则运行。完整的生产验收与回退边界见[运维说明](docs/operations.md#报销单号与票据识别字段升级)。
 
 部署前应按以下顺序执行：
 
