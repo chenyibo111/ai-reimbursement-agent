@@ -21,6 +21,13 @@ describe("reimbursement OpenAPI contract", () => {
     expect(specification).toContain("ErrorResponse:");
 		expect(specification).toContain("filename:");
 		expect(specification).not.toContain("originalFilename:");
+		expect(specification).toContain("claimNumber:");
+		expect(specification).toContain("receiptCount:");
+		expect(specification).toContain("recognizedReceiptCount:");
+		expect(specification).toContain("totalAmountCent:");
+		expect(specification).toContain("missingAmountReceiptCount:");
+		expect(specification).toContain("invoiceDate:");
+		expect(specification).toContain("sellerName:");
     expect(specification).toContain("code:");
   });
 });

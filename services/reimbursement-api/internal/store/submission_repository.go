@@ -182,7 +182,7 @@ func loadOwnedClaim(ctx context.Context, query queryRower, actorID string, claim
 func loadClaimReceipts(ctx context.Context, query interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 }, claimID string) ([]domain.Receipt, error) {
-	rows, err := query.Query(ctx, `SELECT id, claim_id, owner_id, filename, content_type, expected_size, object_key, content_hash, status, invoice_number, ocr_confidence, created_at, updated_at FROM reimbursement.receipts WHERE claim_id = $1`, claimID)
+	rows, err := query.Query(ctx, `SELECT id, claim_id, owner_id, filename, content_type, expected_size, object_key, content_hash, status, invoice_number, invoice_date, total_amount_cent, seller_name, ocr_confidence, created_at, updated_at FROM reimbursement.receipts WHERE claim_id = $1`, claimID)
 	if err != nil {
 		return nil, fmt.Errorf("load claim receipts: %w", err)
 	}

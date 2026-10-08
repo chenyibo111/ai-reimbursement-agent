@@ -43,8 +43,20 @@ func TestPostgresReceiptRepositoryWritesAuditAndOutbox(t *testing.T) {
 	if err := repository.MarkReadyForOCR(ctx, receiptID, "hash-"+suffix); err != nil {
 		t.Fatalf("mark ready for ocr: %v", err)
 	}
-	if err := repository.MarkExtracted(ctx, receiptID, application.OCRResult{InvoiceNumber: "INV-" + suffix, Confidence: 0.99}); err != nil {
+	invoiceDate := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	totalAmount := int64(10155)
+	sellerName := "上海象鲜网络科技有限公司"
+	if err := repository.MarkExtracted(ctx, receiptID, application.OCRResult{InvoiceNumber: "INV-" + suffix, InvoiceDate: &invoiceDate, TotalAmountCent: &totalAmount, SellerName: &sellerName, Confidence: 0.99}); err != nil {
 		t.Fatalf("mark extracted: %v", err)
+	}
+	var storedInvoiceDate *time.Time
+	var storedAmount *int64
+	var storedSeller *string
+	if err := pool.QueryRow(ctx, `SELECT invoice_date, total_amount_cent, seller_name FROM reimbursement.receipts WHERE id = $1`, receiptID).Scan(&storedInvoiceDate, &storedAmount, &storedSeller); err != nil {
+		t.Fatalf("read persisted receipt metadata: %v", err)
+	}
+	if storedInvoiceDate == nil || storedInvoiceDate.Format("2006-01-02") != "2026-05-01" || storedAmount == nil || *storedAmount != 10155 || storedSeller == nil || *storedSeller != sellerName {
+		t.Fatalf("persisted metadata = date:%#v amount:%#v seller:%#v", storedInvoiceDate, storedAmount, storedSeller)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE reimbursement.claims SET status = 'SUBMITTED' WHERE id = $1`, claimID); err != nil {
 		t.Fatalf("submit test claim: %v", err)

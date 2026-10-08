@@ -277,10 +277,13 @@ components:
   schemas:
     Claim:
       type: object
-      required: [id, ownerId, status, version, purpose, participants, createdAt, updatedAt]
+      required: [id, claimNumber, ownerId, status, version, purpose, participants, receiptCount, recognizedReceiptCount, missingAmountReceiptCount, createdAt, updatedAt]
       properties:
         id:
           type: string
+        claimNumber:
+          type: string
+          pattern: '^BX\\d{8}-\\d{4,}$'
         status:
           type: string
           enum: [DRAFT, PROCESSING, NEEDS_INFORMATION, AWAITING_CONFIRMATION, SUBMITTED]
@@ -295,6 +298,19 @@ components:
           type: array
           items: { type: string }
         projectCode: { type: [string, "null"] }
+        receiptCount:
+          type: integer
+          minimum: 0
+        recognizedReceiptCount:
+          type: integer
+          minimum: 0
+        totalAmountCent:
+          type: [integer, "null"]
+          format: int64
+          minimum: 0
+        missingAmountReceiptCount:
+          type: integer
+          minimum: 0
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
     Receipt:
@@ -312,6 +328,16 @@ components:
           enum: [UPLOAD_PENDING, READY_FOR_OCR, EXTRACTED, REVIEW_REQUIRED, QUARANTINED]
         invoiceNumber:
           type: string
+        invoiceDate:
+          type: [string, "null"]
+          format: date
+        totalAmountCent:
+          type: [integer, "null"]
+          format: int64
+          minimum: 0
+        sellerName:
+          type: [string, "null"]
+          maxLength: 160
         ocrConfidence:
           type: number
           minimum: 0

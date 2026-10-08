@@ -51,10 +51,20 @@ func (repository *PostgresClaimRepository) Create(ctx context.Context, claim dom
 
 func (repository *PostgresClaimRepository) FindOwned(ctx context.Context, claimID string, actorID string) (domain.Claim, error) {
 	claim, err := scanClaim(repository.pool.QueryRow(ctx, `
-		SELECT id, claim_number, owner_id, status, purpose, expense_category, participants, project_code,
-		       version, created_at, updated_at
-		FROM reimbursement.claims
-		WHERE id = $1 AND owner_id = $2
+		SELECT claim.id, claim.claim_number, claim.owner_id, claim.status, claim.purpose, claim.expense_category, claim.participants, claim.project_code,
+		       claim.version, claim.created_at, claim.updated_at,
+		       summary.receipt_count, summary.recognized_receipt_count, summary.total_amount_cent, summary.missing_amount_receipt_count
+		FROM reimbursement.claims AS claim
+		LEFT JOIN LATERAL (
+			SELECT
+				count(*)::INTEGER AS receipt_count,
+				(count(*) FILTER (WHERE receipt.status = 'EXTRACTED'))::INTEGER AS recognized_receipt_count,
+				sum(receipt.total_amount_cent) FILTER (WHERE receipt.status = 'EXTRACTED' AND receipt.total_amount_cent IS NOT NULL) AS total_amount_cent,
+				(count(*) FILTER (WHERE receipt.status = 'EXTRACTED' AND receipt.total_amount_cent IS NULL))::INTEGER AS missing_amount_receipt_count
+			FROM reimbursement.receipts AS receipt
+			WHERE receipt.claim_id = claim.id
+		) AS summary ON TRUE
+		WHERE claim.id = $1 AND claim.owner_id = $2
 	`, claimID, actorID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Claim{}, application.ErrClaimNotFound
@@ -75,6 +85,7 @@ func scanClaim(row claimRow) (domain.Claim, error) {
 	err := row.Scan(
 		&claim.ID, &claim.ClaimNumber, &claim.OwnerID, &claim.Status, &claim.Purpose, &expenseCategory, &participants,
 		&projectCode, &claim.Version, &claim.CreatedAt, &claim.UpdatedAt,
+		&claim.ReceiptCount, &claim.RecognizedReceiptCount, &claim.TotalAmountCent, &claim.MissingAmountReceiptCount,
 	)
 	if err != nil {
 		return domain.Claim{}, err
@@ -93,8 +104,22 @@ func scanClaim(row claimRow) (domain.Claim, error) {
 
 func (repository *PostgresClaimRepository) ListOwned(ctx context.Context, actorID string, limit int) ([]domain.Claim, error) {
 	rows, err := repository.pool.Query(ctx, `
-		SELECT id, claim_number, owner_id, status, purpose, expense_category, participants, project_code, version, created_at, updated_at
-		FROM reimbursement.claims WHERE owner_id = $1 ORDER BY created_at DESC LIMIT $2
+		SELECT claim.id, claim.claim_number, claim.owner_id, claim.status, claim.purpose, claim.expense_category, claim.participants, claim.project_code,
+		       claim.version, claim.created_at, claim.updated_at,
+		       summary.receipt_count, summary.recognized_receipt_count, summary.total_amount_cent, summary.missing_amount_receipt_count
+		FROM reimbursement.claims AS claim
+		LEFT JOIN LATERAL (
+			SELECT
+				count(*)::INTEGER AS receipt_count,
+				(count(*) FILTER (WHERE receipt.status = 'EXTRACTED'))::INTEGER AS recognized_receipt_count,
+				sum(receipt.total_amount_cent) FILTER (WHERE receipt.status = 'EXTRACTED' AND receipt.total_amount_cent IS NOT NULL) AS total_amount_cent,
+				(count(*) FILTER (WHERE receipt.status = 'EXTRACTED' AND receipt.total_amount_cent IS NULL))::INTEGER AS missing_amount_receipt_count
+			FROM reimbursement.receipts AS receipt
+			WHERE receipt.claim_id = claim.id
+		) AS summary ON TRUE
+		WHERE claim.owner_id = $1
+		ORDER BY claim.created_at DESC
+		LIMIT $2
 	`, actorID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list owned claims: %w", err)

@@ -102,13 +102,16 @@ func (handler *claimsHandler) listReceipts(response http.ResponseWriter, request
 
 func receiptResponse(receipt application.ReceiptView) map[string]any {
 	return map[string]any{
-		"id":            receipt.ID,
-		"claimId":       receipt.ClaimID,
-		"filename":      receipt.Filename,
-		"status":        receipt.Status,
-		"invoiceNumber": receipt.InvoiceNumber,
-		"ocrConfidence": receipt.OCRConfidence,
-		"updatedAt":     receipt.UpdatedAt,
+		"id":              receipt.ID,
+		"claimId":         receipt.ClaimID,
+		"filename":        receipt.Filename,
+		"status":          receipt.Status,
+		"invoiceNumber":   receipt.InvoiceNumber,
+		"invoiceDate":     receipt.InvoiceDate,
+		"totalAmountCent": receipt.TotalAmountCent,
+		"sellerName":      receipt.SellerName,
+		"ocrConfidence":   receipt.OCRConfidence,
+		"updatedAt":       receipt.UpdatedAt,
 	}
 }
 
@@ -206,16 +209,21 @@ func (handler *claimsHandler) patchClaim(response http.ResponseWriter, request *
 
 func claimResponse(claim application.ClaimView) map[string]any {
 	return map[string]any{
-		"id":              claim.ID,
-		"ownerId":         claim.OwnerID,
-		"status":          claim.Status,
-		"version":         claim.Version,
-		"purpose":         claim.Purpose,
-		"expenseCategory": claim.ExpenseCategory,
-		"participants":    claim.Participants,
-		"projectCode":     claim.ProjectCode,
-		"createdAt":       claim.CreatedAt,
-		"updatedAt":       claim.UpdatedAt,
+		"id":                        claim.ID,
+		"claimNumber":               claim.ClaimNumber,
+		"ownerId":                   claim.OwnerID,
+		"status":                    claim.Status,
+		"version":                   claim.Version,
+		"purpose":                   claim.Purpose,
+		"expenseCategory":           claim.ExpenseCategory,
+		"participants":              claim.Participants,
+		"projectCode":               claim.ProjectCode,
+		"receiptCount":              claim.ReceiptCount,
+		"recognizedReceiptCount":    claim.RecognizedReceiptCount,
+		"totalAmountCent":           claim.TotalAmountCent,
+		"missingAmountReceiptCount": claim.MissingAmountReceiptCount,
+		"createdAt":                 claim.CreatedAt,
+		"updatedAt":                 claim.UpdatedAt,
 	}
 }
 

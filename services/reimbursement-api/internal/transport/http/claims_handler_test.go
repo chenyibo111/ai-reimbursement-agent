@@ -211,6 +211,9 @@ func TestGetClaimReturnsActorScopedClaim(t *testing.T) {
 	if body["id"] != "claim-1" || body["ownerId"] != "employee-1" {
 		t.Fatalf("unexpected claim response: %#v", body)
 	}
+	if body["claimNumber"] != "BX20261008-0001" || body["receiptCount"] != float64(3) || body["recognizedReceiptCount"] != float64(2) || body["totalAmountCent"] != float64(10155) || body["missingAmountReceiptCount"] != float64(1) {
+		t.Fatalf("claim summary metadata missing from response: %#v", body)
+	}
 }
 
 func TestListClaimsReturnsOnlyAuthenticatedActorsClaims(t *testing.T) {
@@ -245,6 +248,25 @@ func TestListReceiptsReturnsOnlyReceiptsBelongingToTheAuthenticatedClaim(t *test
 	}
 	if len(body.Items) != 1 || body.Items[0]["id"] != "receipt-1" || body.Items[0]["objectKey"] != nil {
 		t.Fatalf("unexpected safe receipt response: %#v", body.Items)
+	}
+	if body.Items[0]["invoiceDate"] != "2026-05-01T00:00:00Z" || body.Items[0]["totalAmountCent"] != float64(10155) || body.Items[0]["sellerName"] != "上海象鲜网络科技有限公司" {
+		t.Fatalf("receipt metadata missing from response: %#v", body.Items[0])
+	}
+}
+
+func TestReceiptResponseKeepsMissingMetadataNull(t *testing.T) {
+	encoded, err := json.Marshal(receiptResponse(application.ReceiptView{ID: "receipt-1", ClaimID: "claim-1", Filename: "pending.pdf"}))
+	if err != nil {
+		t.Fatalf("encode receipt response: %v", err)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(encoded, &response); err != nil {
+		t.Fatalf("decode receipt response: %v", err)
+	}
+	for _, field := range []string{"invoiceDate", "totalAmountCent", "sellerName"} {
+		if value, ok := response[field]; !ok || value != nil {
+			t.Fatalf("expected %s to be explicitly null, got %#v", field, response)
+		}
 	}
 }
 
@@ -284,7 +306,8 @@ func (fakeClaims) GetClaim(_ context.Context, actorID string, claimID string) (a
 	if actorID != "employee-1" || claimID != "claim-1" {
 		return application.ClaimView{}, application.ErrClaimNotFound
 	}
-	return application.ClaimView{ID: claimID, OwnerID: actorID, Status: domain.ClaimStatusDraft, Purpose: "客户拜访", Version: 1}, nil
+	totalAmountCent := int64(10155)
+	return application.ClaimView{ID: claimID, ClaimNumber: "BX20261008-0001", OwnerID: actorID, Status: domain.ClaimStatusDraft, Purpose: "客户拜访", Version: 1, ReceiptCount: 3, RecognizedReceiptCount: 2, TotalAmountCent: &totalAmountCent, MissingAmountReceiptCount: 1}, nil
 }
 func (fakeClaims) UpdateClaim(_ context.Context, actorID string, claimID string, version int64, command application.PatchClaimCommand) (application.ClaimView, error) {
 	if actorID != "employee-1" || claimID != "claim-1" || version != 1 || command.Purpose == nil {
@@ -315,5 +338,8 @@ func (fakeReceipts) ListReceipts(_ context.Context, actorID string, claimID stri
 	if actorID != "employee-1" || claimID != "claim-1" {
 		return nil, application.ErrClaimNotFound
 	}
-	return []application.ReceiptView{{ID: "receipt-1", ClaimID: claimID, Filename: "hotel.png", Status: domain.ReceiptStatusExtracted, InvoiceNumber: "123", OCRConfidence: 0.98}}, nil
+	invoiceDate := time.Date(2026, time.May, 1, 0, 0, 0, 0, time.UTC)
+	totalAmountCent := int64(10155)
+	sellerName := "上海象鲜网络科技有限公司"
+	return []application.ReceiptView{{ID: "receipt-1", ClaimID: claimID, Filename: "hotel.png", Status: domain.ReceiptStatusExtracted, InvoiceNumber: "123", InvoiceDate: &invoiceDate, TotalAmountCent: &totalAmountCent, SellerName: &sellerName, OCRConfidence: 0.98}}, nil
 }
