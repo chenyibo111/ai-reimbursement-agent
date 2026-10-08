@@ -62,7 +62,10 @@ export function createAuthSessionManager(deps: AuthSessionManagerDeps = {}) {
     },
     getAccessToken() { return snapshot.status === "authenticated" ? snapshot.accessToken : null; },
     snapshot() { return snapshot; },
-    subscribe(listener: () => void) { listeners.add(listener); return () => listeners.delete(listener); },
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
     async logout() {
       setSnapshot({ status: "unauthenticated" });
       await fetcher("/api/auth/logout", { method: "POST", credentials: "same-origin" });
