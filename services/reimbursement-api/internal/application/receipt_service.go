@@ -43,13 +43,16 @@ type UploadSession struct {
 // ReceiptView is the employee-safe representation of an uploaded attachment.
 // Storage locations, hashes, and malware-scanning details remain server-side.
 type ReceiptView struct {
-	ID            string
-	ClaimID       string
-	Filename      string
-	Status        domain.ReceiptStatus
-	InvoiceNumber string
-	OCRConfidence float64
-	UpdatedAt     time.Time
+	ID              string
+	ClaimID         string
+	Filename        string
+	Status          domain.ReceiptStatus
+	InvoiceNumber   string
+	InvoiceDate     *time.Time
+	TotalAmountCent *int64
+	SellerName      *string
+	OCRConfidence   float64
+	UpdatedAt       time.Time
 }
 
 type StoredObject struct {
@@ -67,8 +70,11 @@ type FileScanner interface {
 }
 
 type OCRResult struct {
-	InvoiceNumber string
-	Confidence    float64
+	InvoiceNumber   string
+	InvoiceDate     *time.Time
+	TotalAmountCent *int64
+	SellerName      *string
+	Confidence      float64
 }
 
 type OCRClient interface {
@@ -193,10 +199,35 @@ func (service *ReceiptService) ListReceipts(ctx context.Context, actorID string,
 		views = append(views, ReceiptView{
 			ID: receipt.ID, ClaimID: receipt.ClaimID, Filename: receipt.Filename,
 			Status: receipt.Status, InvoiceNumber: receipt.InvoiceNumber,
-			OCRConfidence: receipt.OCRConfidence, UpdatedAt: receipt.UpdatedAt,
+			InvoiceDate: cloneTime(receipt.InvoiceDate), TotalAmountCent: cloneInt64(receipt.TotalAmountCent),
+			SellerName: cloneString(receipt.SellerName), OCRConfidence: receipt.OCRConfidence, UpdatedAt: receipt.UpdatedAt,
 		})
 	}
 	return views, nil
+}
+
+func cloneTime(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	return &clone
+}
+
+func cloneInt64(value *int64) *int64 {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	return &clone
+}
+
+func cloneString(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	return &clone
 }
 
 func (service *ReceiptService) ExtractReceipt(ctx context.Context, actorID string, claimID string, receiptID string) error {

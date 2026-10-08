@@ -141,6 +141,9 @@ func (repository *fakeReceiptRepository) MarkExtracted(_ context.Context, receip
 	defer repository.mu.Unlock()
 	receipt := repository.receipts[receiptID]
 	receipt.InvoiceNumber = result.InvoiceNumber
+	receipt.InvoiceDate = result.InvoiceDate
+	receipt.TotalAmountCent = result.TotalAmountCent
+	receipt.SellerName = result.SellerName
 	receipt.OCRConfidence = result.Confidence
 	receipt.Status = domain.ReceiptStatusExtracted
 	repository.receipts[receiptID] = receipt

@@ -8,14 +8,11 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/application"
 )
-
-var invoiceNumberPattern = regexp.MustCompile(`(?m)(?:发票号码|发票号)\s*[：:]?\s*([A-Za-z0-9-]{6,})`)
 
 type HTTPReceiptOCRClient struct {
 	baseURL string
@@ -74,9 +71,5 @@ func (client *HTTPReceiptOCRClient) Extract(ctx context.Context, object applicat
 	if len(payload.Pages) > 0 {
 		confidence /= float64(len(payload.Pages))
 	}
-	result := application.OCRResult{Confidence: confidence}
-	if match := invoiceNumberPattern.FindStringSubmatch(text.String()); len(match) == 2 {
-		result.InvoiceNumber = match[1]
-	}
-	return result, nil
+	return parseOCRReceipt(text.String(), confidence), nil
 }
