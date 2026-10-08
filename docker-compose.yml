@@ -160,6 +160,29 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  reimbursement-web:
+    build: ./apps/web
+    profiles: ["migration"]
+    expose:
+      - "8080"
+    restart: unless-stopped
+
+  reimbursement-edge:
+    image: nginx:1.27-alpine
+    profiles: ["migration"]
+    ports:
+      - "${REIMBURSEMENT_EDGE_PORT:-8088}:80"
+    volumes:
+      - ./infra/nginx/reimbursement-routes.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      web:
+        condition: service_started
+      reimbursement-web:
+        condition: service_started
+      reimbursement-api:
+        condition: service_started
+    restart: unless-stopped
+
   nats:
     image: nats:2.10-alpine
     profiles: ["migration"]
