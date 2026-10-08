@@ -45,7 +45,8 @@ export class ReimbursementApiClient implements ReimbursementPort {
 
   private token(context: ToolCallContext) {
     const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
-    const payload = Buffer.from(JSON.stringify({ sub: context.actorEmployeeId, aud: "reimbursement-api", exp: Math.floor(this.now().getTime() / 1000) + 60, jti: this.randomId(), channel: "agent", source_channel: context.channel, conversation_id: context.conversationId, tool_call_id: context.toolCallId })).toString("base64url");
+    const iat = Math.floor(this.now().getTime() / 1000);
+    const payload = Buffer.from(JSON.stringify({ sub: context.actorEmployeeId, role: context.actorRole, aud: "reimbursement-api", iat, exp: iat + 15 * 60, jti: this.randomId(), channel: "agent", source_channel: context.channel, conversation_id: context.conversationId, tool_call_id: context.toolCallId })).toString("base64url");
     const signed = `${header}.${payload}`;
     return `${signed}.${createHmac("sha256", this.options.signingSecret).update(signed).digest("base64url")}`;
   }

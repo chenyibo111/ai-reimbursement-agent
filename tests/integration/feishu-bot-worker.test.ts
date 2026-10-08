@@ -90,6 +90,16 @@ function createRuntime(messages: Map<string, FeishuInboundMessage>, replies: str
     botOpenId: "ou-bot",
     publicAppUrl: "https://reimbursement.example.test",
     events: repository,
+    identities: {
+      async ensureEmployeeForInboundMessage({ openId, displayName }) {
+        const employee = await prisma.employee.upsert({
+          where: { feishuUserId: openId },
+          update: { ...(displayName ? { displayName } : {}) },
+          create: { id: "employee-1", feishuUserId: openId, displayName: displayName ?? "飞书员工" },
+        });
+        return { id: employee.id, role: "EMPLOYEE" as const };
+      },
+    },
     conversations,
     client,
     runConversationTurn: async (turn) => {

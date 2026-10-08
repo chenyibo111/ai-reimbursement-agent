@@ -18,6 +18,7 @@ describe("ReimbursementApiClient", () => {
 
     await client.createClaimDraft({
       actorEmployeeId: "employee-1",
+      actorRole: "EMPLOYEE",
       channel: "FEISHU",
       conversationId: "conversation-1",
       toolCallId: "tool-call-1",
@@ -34,6 +35,6 @@ describe("ReimbursementApiClient", () => {
     }));
     const authorization = new Headers(fetcher.mock.calls[0][1]?.headers).get("Authorization")!;
     const claims = JSON.parse(Buffer.from(authorization.split(".")[1], "base64url").toString("utf8"));
-    expect(claims).toMatchObject({ sub: "employee-1", aud: "reimbursement-api", channel: "agent", source_channel: "FEISHU", conversation_id: "conversation-1", tool_call_id: "tool-call-1", jti: "jwt-id-1" });
+    expect(claims).toMatchObject({ sub: "employee-1", role: "EMPLOYEE", aud: "reimbursement-api", channel: "agent", source_channel: "FEISHU", conversation_id: "conversation-1", tool_call_id: "tool-call-1", jti: "jwt-id-1", iat: 1_791_367_200 });
   });
 });

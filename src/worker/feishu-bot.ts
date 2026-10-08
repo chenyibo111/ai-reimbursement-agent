@@ -29,6 +29,7 @@ import { createLogger } from "@/src/observability/logger";
 import { createWorkerHeartbeat } from "@/src/observability/worker-heartbeat";
 import { PrismaAgentToolCallRepository } from "@/src/infrastructure/prisma/agent-tool-call-repository";
 import { loadConfig, validateFeishuWorkerEnvironment } from "@/src/server/config";
+import { createFeishuIdentityEnsurer } from "@/src/server/employee-identity";
 import { createFeishuBotRuntime } from "@/src/worker/feishu-bot-runtime";
 import { ReimbursementApiClient } from "../../services/agent/src/adapters/reimbursement-api-client";
 import { createConversationReimbursementTools } from "../../services/agent/src/tool-gateway/conversation-reimbursement";
@@ -120,16 +121,21 @@ function createProcessDeps(input: {
       baseUrl: requiredEnv("REIMBURSEMENT_API_URL"), serviceKey: requiredEnv("REIMBURSEMENT_AGENT_SERVICE_KEY"), signingSecret: requiredEnv("REIMBURSEMENT_AUTH_HS256_SECRET"),
     }), new PrismaAgentToolCallRepository(input.prisma))
     : null;
+  const ensureFeishuIdentity = createFeishuIdentityEnsurer(input.prisma);
 
   return {
     botOpenId: input.botOpenId,
     publicAppUrl: input.publicAppUrl,
     events: input.repository,
+    identities: { ensureEmployeeForInboundMessage: async ({ openId, displayName }) => {
+      const employee = await ensureFeishuIdentity({ openId, displayName });
+      return { id: employee.id, role: employee.role };
+    } },
     conversations,
     client: input.client,
     runConversationTurn: (agentInput) => {
       const goTools = gateway ? createConversationReimbursementTools(gateway) : null;
-      const context = { actorId: agentInput.actorId, conversationId: agentInput.conversationId, channelMessageId: agentInput.channelMessageId };
+      const context = { actorId: agentInput.actorId, actorRole: agentInput.actorRole, conversationId: agentInput.conversationId, channelMessageId: agentInput.channelMessageId };
       return runConversationTurn(agentInput, {
       conversations: conversations as unknown as ConversationStore,
       model: createChatModel(config),

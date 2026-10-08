@@ -12,7 +12,7 @@ describe("ReimbursementToolGateway", () => {
     const gateway = new ReimbursementToolGateway(port as never, store);
 
     const result = await gateway.execute({
-      actorEmployeeId: "employee-1", channel: "FEISHU", conversationId: "conversation-1", toolCallId: "feishu-message-1:create", idempotencyKey: "feishu-message-1:create",
+      actorEmployeeId: "employee-1", actorRole: "EMPLOYEE", channel: "FEISHU", conversationId: "conversation-1", toolCallId: "feishu-message-1:create", idempotencyKey: "feishu-message-1:create",
       name: "create_claim_draft", arguments: { purpose: "客户拜访" },
     });
 

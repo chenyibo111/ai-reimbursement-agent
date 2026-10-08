@@ -1,10 +1,10 @@
 import type { ConversationTurnResult } from "@/src/application/run-conversation-turn";
 import type { FeishuInboundMessage, FeishuMessageContent } from "@/src/domain/feishu-bot";
 import type { FeishuBotClient } from "@/src/infrastructure/feishu/feishu-bot-client";
+import type { EmployeeRole } from "@/src/server/reimbursement-auth";
 
 export type FeishuProcessingResult =
   | { kind: "IGNORED" }
-  | { kind: "LOGIN_REQUIRED"; replyText: string }
   | { kind: "AGENT_REPLIED"; claimId: string | null; replyText: string }
   | { kind: "RETRYABLE_FAILURE"; claimId?: string; retryable: boolean; replyText: string };
 
@@ -25,7 +25,9 @@ export type ProcessFeishuEventDeps = {
   publicAppUrl: string;
   events: {
     findInboundByEventId(eventId: string): Promise<StoredInboundEvent | null>;
-    findEmployeeByOpenId(openId: string): Promise<{ id: string } | null>;
+  };
+  identities: {
+    ensureEmployeeForInboundMessage(input: { openId: string; displayName?: string }): Promise<{ id: string; role: EmployeeRole }>;
   };
   conversations: {
     getOrCreatePrivate(employeeId: string): Promise<Conversation>;
@@ -35,6 +37,7 @@ export type ProcessFeishuEventDeps = {
   client: FeishuBotClient;
   runConversationTurn(input: {
     actorId: string;
+    actorRole: EmployeeRole;
     conversationId: string;
     channel: "FEISHU";
     chatId: string;
@@ -60,12 +63,11 @@ export async function processFeishuEvent(
   };
   if (message.chatType === "group" && !message.mentions.includes(deps.botOpenId)) return { kind: "IGNORED" };
 
-  const employee = await deps.events.findEmployeeByOpenId(message.senderOpenId);
-  if (!employee) {
-    return {
-      kind: "LOGIN_REQUIRED",
-      replyText: `请先登录并绑定飞书账号：${deps.publicAppUrl}/api/auth/feishu/login`,
-    };
+  let employee: { id: string; role: EmployeeRole };
+  try {
+    employee = await deps.identities.ensureEmployeeForInboundMessage({ openId: message.senderOpenId });
+  } catch {
+    return failed(true, "消息暂未处理完成，请稍后重试或在工作台继续。");
   }
 
   const conversation = message.chatType === "group"
@@ -78,6 +80,7 @@ export async function processFeishuEvent(
   try {
     const result = await deps.runConversationTurn({
       actorId: employee.id,
+      actorRole: employee.role,
       conversationId: conversation.id,
       channel: "FEISHU",
     chatId: message.chatId,

@@ -18,6 +18,7 @@ export function createReimbursementEventConsumer(deps: {
       if (!target) return;
       const workbench = await deps.port.getClaimWorkbench({
         actorEmployeeId: target.employeeId,
+        actorRole: "EMPLOYEE",
         channel: "FEISHU",
         conversationId: target.conversationId,
         toolCallId: `event:${event.event_id}:get_claim_workbench`,

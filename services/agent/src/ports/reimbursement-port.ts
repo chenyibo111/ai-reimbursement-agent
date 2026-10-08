@@ -1,6 +1,7 @@
 /** The only boundary through which the Agent may access reimbursement data. */
 export type ToolCallContext = {
   actorEmployeeId: string;
+  actorRole: "EMPLOYEE" | "FINANCE_REVIEWER" | "ADMIN";
   channel: "FEISHU" | "WEB";
   conversationId: string;
   toolCallId: string;

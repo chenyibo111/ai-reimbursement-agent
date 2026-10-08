@@ -114,10 +114,6 @@ export class FeishuBotRepository {
     });
   }
 
-  async findEmployeeByOpenId(openId: string): Promise<{ id: string } | null> {
-    return this.prisma.employee.findUnique({ where: { feishuUserId: openId }, select: { id: true } });
-  }
-
   async getConversation(employeeId: string, chatId: string): Promise<{ claimId: string } | null> {
     return this.prisma.feishuConversation.findUnique({
       where: { employeeId_chatId: { employeeId, chatId } },

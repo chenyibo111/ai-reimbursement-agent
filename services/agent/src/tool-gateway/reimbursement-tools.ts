@@ -15,7 +15,7 @@ export class ReimbursementToolGateway {
     assertContext(call);
     const replay = await this.results.findCompleted(call.toolCallId);
     if (replay) return replay;
-    const context: ToolCallContext = { actorEmployeeId: call.actorEmployeeId, channel: call.channel, conversationId: call.conversationId, toolCallId: call.toolCallId, idempotencyKey: call.idempotencyKey };
+    const context: ToolCallContext = { actorEmployeeId: call.actorEmployeeId, actorRole: call.actorRole, channel: call.channel, conversationId: call.conversationId, toolCallId: call.toolCallId, idempotencyKey: call.idempotencyKey };
     let result: Record<string, unknown>;
     switch (call.name) {
       case "create_claim_draft": result = { claim: await this.port.createClaimDraft({ ...context, purpose: requiredString(call.arguments, "purpose") }) }; break;
@@ -33,7 +33,7 @@ export class ReimbursementToolGateway {
 }
 
 function assertContext(value: ToolCallContext) {
-  if (!value.actorEmployeeId || !value.conversationId || !value.toolCallId || !value.idempotencyKey) throw new Error("tool call context is incomplete");
+  if (!value.actorEmployeeId || !value.actorRole || !value.conversationId || !value.toolCallId || !value.idempotencyKey) throw new Error("tool call context is incomplete");
 }
 function requiredString(value: Record<string, unknown>, field: string) {
   if (typeof value[field] !== "string" || !value[field].trim()) throw new Error(`invalid ${field}`);

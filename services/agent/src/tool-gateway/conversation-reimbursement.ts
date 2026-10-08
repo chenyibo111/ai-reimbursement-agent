@@ -1,12 +1,13 @@
 import { ReimbursementToolGateway, type ReimbursementToolName } from "./reimbursement-tools";
 
-type ConversationContext = { actorId: string; conversationId: string; channelMessageId?: string };
+type ConversationContext = { actorId: string; actorRole: "EMPLOYEE" | "FINANCE_REVIEWER" | "ADMIN"; conversationId: string; channelMessageId?: string };
 type Attachment = { filename: string; mimeType: string; bytes: Uint8Array };
 
 /** Adapts persisted conversation actions to the eight audited reimbursement tools. */
 export function createConversationReimbursementTools(gateway: ReimbursementToolGateway, fetcher: typeof fetch = fetch) {
   const execute = (context: ConversationContext, name: ReimbursementToolName, args: Record<string, unknown>) => gateway.execute({
     actorEmployeeId: context.actorId,
+    actorRole: context.actorRole,
     channel: "FEISHU",
     conversationId: context.conversationId,
     toolCallId: `${context.channelMessageId ?? context.conversationId}:${name}`,
