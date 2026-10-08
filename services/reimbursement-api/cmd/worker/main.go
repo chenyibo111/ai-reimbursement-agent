@@ -52,11 +52,12 @@ func main() {
 	}
 	defer publisher.Close()
 
+	claimRepository := store.NewPostgresClaimRepository(pool)
 	receipts := store.NewPostgresReceiptRepository(pool)
 	receiptService := application.NewReceiptService(
-		store.NewPostgresClaimRepository(pool), receipts, objects,
+		claimRepository, receipts, objects,
 		infrastructure.NewClamAVScanner(clamAddress), infrastructure.NewHTTPReceiptOCRClient(ocrURL),
-		application.SecureIDGenerator{},
+		application.SecureIDGenerator{}, claimRepository,
 	)
 	receiptWorker := workers.NewReceiptExtractionWorker(
 		events.NewPostgresEventDeduplicator(pool, workers.ReceiptOCRConsumer),

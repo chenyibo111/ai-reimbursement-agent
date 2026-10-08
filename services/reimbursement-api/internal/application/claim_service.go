@@ -79,14 +79,19 @@ type IDGenerator interface {
 }
 
 type ClaimService struct {
-	repository ClaimRepository
-	ids        IDGenerator
-	numbers    ClaimNumberGenerator
-	now        func() time.Time
+	repository  ClaimRepository
+	suggestions ClaimOCRSuggestionRefresher
+	ids         IDGenerator
+	numbers     ClaimNumberGenerator
+	now         func() time.Time
 }
 
-func NewClaimService(repository ClaimRepository, ids IDGenerator, numbers ClaimNumberGenerator, now func() time.Time) *ClaimService {
-	return &ClaimService{repository: repository, ids: ids, numbers: numbers, now: now}
+func NewClaimService(repository ClaimRepository, ids IDGenerator, numbers ClaimNumberGenerator, now func() time.Time, suggestions ...ClaimOCRSuggestionRefresher) *ClaimService {
+	var suggestionRefresher ClaimOCRSuggestionRefresher
+	if len(suggestions) > 0 {
+		suggestionRefresher = suggestions[0]
+	}
+	return &ClaimService{repository: repository, suggestions: suggestionRefresher, ids: ids, numbers: numbers, now: now}
 }
 
 func (service *ClaimService) CreateClaim(ctx context.Context, actorID string, command CreateClaimCommand) (ClaimView, error) {
@@ -150,6 +155,12 @@ func (service *ClaimService) UpdateClaim(ctx context.Context, actorID string, cl
 			return ClaimView{}, ErrClaimVersionConflict
 		}
 		return ClaimView{}, fmt.Errorf("persist claim update: %w", err)
+	}
+	if command.UseOCRSuggestedAmount && service.suggestions != nil {
+		if err := service.suggestions.RefreshOCRSuggestion(ctx, claim.ID, actorID); err != nil {
+			return ClaimView{}, fmt.Errorf("refresh ocr suggested amount: %w", err)
+		}
+		return service.GetClaim(ctx, actorID, claim.ID)
 	}
 	return claim.Clone(), nil
 }

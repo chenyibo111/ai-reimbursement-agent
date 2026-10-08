@@ -174,6 +174,55 @@ func (repository *PostgresClaimRepository) Update(ctx context.Context, claim dom
 	return nil
 }
 
+// RefreshOCRSuggestion derives a claim-level requested amount from the OCR
+// totals currently persisted for its extracted receipts. Its source predicate
+// makes a concurrent or prior manual employee edit a safe no-op.
+func (repository *PostgresClaimRepository) RefreshOCRSuggestion(ctx context.Context, claimID string, actorID string) error {
+	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin OCR suggestion refresh: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var version int64
+	err = tx.QueryRow(ctx, `
+		WITH suggestion AS (
+			SELECT sum(total_amount_cent) AS requested_amount_cent
+			FROM reimbursement.receipts
+			WHERE claim_id = $1
+			  AND status = 'EXTRACTED'
+			  AND total_amount_cent IS NOT NULL
+		)
+		UPDATE reimbursement.claims AS claim
+		SET requested_amount_cent = suggestion.requested_amount_cent,
+		    version = claim.version + 1,
+		    updated_at = now()
+		FROM suggestion
+		WHERE claim.id = $1
+		  AND claim.owner_id = $2
+		  AND claim.status = 'DRAFT'
+		  AND claim.requested_amount_source = 'OCR_SUGGESTED'
+		  AND claim.requested_amount_cent IS DISTINCT FROM suggestion.requested_amount_cent
+		RETURNING claim.version
+	`, claimID, actorID).Scan(&version)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return tx.Commit(ctx)
+	}
+	if err != nil {
+		return fmt.Errorf("refresh OCR suggestion: %w", err)
+	}
+	if err = writeClaimAuditAndEvent(ctx, tx,
+		application.ClaimAudit{ClaimID: claimID, ActorID: actorID, Action: "CLAIM_OCR_SUGGESTION_REFRESHED", Version: version},
+		application.ClaimOutboxEvent{ClaimID: claimID, Type: "ClaimOCRSuggestionRefreshed", Version: version},
+	); err != nil {
+		return err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit OCR suggestion refresh: %w", err)
+	}
+	return nil
+}
+
 func (repository *PostgresClaimRepository) Delete(ctx context.Context, claimID string, actorID string, expectedVersion int64, audit application.ClaimAudit, event application.ClaimOutboxEvent) error {
 	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {

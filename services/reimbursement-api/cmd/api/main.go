@@ -72,10 +72,11 @@ func main() {
 			resolver = web
 		}
 	}
+	ocrSuggestionRefresher := claimRepository
 	router := transport.NewRouter(transport.Dependencies{
-		Claims:             application.NewClaimService(claimRepository, application.SecureIDGenerator{}, store.NewPostgresClaimNumberGenerator(pool), time.Now),
+		Claims:             application.NewClaimService(claimRepository, application.SecureIDGenerator{}, store.NewPostgresClaimNumberGenerator(pool), time.Now, ocrSuggestionRefresher),
 		Submissions:        application.NewSubmissionService(store.NewPostgresSubmissionRepository(pool), nil),
-		Receipts:           application.NewReceiptService(claimRepository, store.NewPostgresReceiptRepository(pool), objects, infrastructure.NewClamAVScanner(clamAddress), infrastructure.NewHTTPReceiptOCRClient(ocrURL), application.SecureIDGenerator{}),
+		Receipts:           application.NewReceiptService(claimRepository, store.NewPostgresReceiptRepository(pool), objects, infrastructure.NewClamAVScanner(clamAddress), infrastructure.NewHTTPReceiptOCRClient(ocrURL), application.SecureIDGenerator{}, ocrSuggestionRefresher),
 		Admin:              transport.AdminServices{Policies: application.NewPolicyRuleService(store.NewPostgresPolicyRuleRepository(pool)), Reviews: application.NewReviewCaseService(store.NewPostgresReviewCaseRepository(pool)), Role: store.EmployeeRole(pool)},
 		EmployeeIdentities: application.NewEmployeeIdentityService(store.NewPostgresEmployeeIdentityRepository(pool)),
 		ProvisioningKey:    provisioningKey,

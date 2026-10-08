@@ -131,6 +131,28 @@ func TestUpdateClaimStoresManualRequestedAmount(t *testing.T) {
 	}
 }
 
+func TestUpdateClaimRestoreReturnsCurrentOCRSuggestion(t *testing.T) {
+	repository := NewMemoryClaimRepository()
+	service := NewClaimService(repository, NewSequentialIDGenerator(), NewMemoryClaimNumberGenerator(), time.Now, memoryOCRSuggestionRefresher{repository: repository, amount: 12155})
+	claim, err := service.CreateClaim(context.Background(), "employee-1", CreateClaimCommand{Purpose: "客户拜访"})
+	if err != nil {
+		t.Fatalf("create claim: %v", err)
+	}
+	manualAmount := int64(9999)
+	manual, err := service.UpdateClaim(context.Background(), "employee-1", claim.ID, claim.Version, PatchClaimCommand{RequestedAmountCent: &manualAmount})
+	if err != nil {
+		t.Fatalf("set manual amount: %v", err)
+	}
+
+	restored, err := service.UpdateClaim(context.Background(), "employee-1", claim.ID, manual.Version, PatchClaimCommand{UseOCRSuggestedAmount: true})
+	if err != nil {
+		t.Fatalf("restore OCR suggestion: %v", err)
+	}
+	if restored.RequestedAmountCent == nil || *restored.RequestedAmountCent != 12155 || restored.RequestedAmountSource != domain.RequestedAmountSourceSuggested {
+		t.Fatalf("restored claim = %#v", restored)
+	}
+}
+
 func TestDeleteClaimAllowsOnlyOwnDraftAtCurrentVersion(t *testing.T) {
 	service := newClaimServiceForTest(NewMemoryClaimRepository())
 	claim, err := service.CreateClaim(context.Background(), "employee-1", CreateClaimCommand{Purpose: "客户拜访"})
@@ -151,4 +173,23 @@ func stringPointer(value string) *string { return &value }
 
 func newClaimServiceForTest(repository ClaimRepository) *ClaimService {
 	return NewClaimService(repository, NewSequentialIDGenerator(), NewMemoryClaimNumberGenerator(), time.Now)
+}
+
+type memoryOCRSuggestionRefresher struct {
+	repository *MemoryClaimRepository
+	amount     int64
+}
+
+func (refresher memoryOCRSuggestionRefresher) RefreshOCRSuggestion(_ context.Context, claimID string, actorID string) error {
+	refresher.repository.mu.Lock()
+	defer refresher.repository.mu.Unlock()
+	claim, found := refresher.repository.claims[claimID]
+	if !found || claim.OwnerID != actorID || claim.RequestedAmountSource != domain.RequestedAmountSourceSuggested {
+		return ErrClaimNotFound
+	}
+	amount := refresher.amount
+	claim.RequestedAmountCent = &amount
+	claim.Version++
+	refresher.repository.claims[claimID] = claim
+	return nil
 }

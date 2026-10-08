@@ -97,16 +97,21 @@ type ReceiptRepository interface {
 }
 
 type ReceiptService struct {
-	claims     ClaimReader
-	repository ReceiptRepository
-	objects    ObjectStore
-	scanner    FileScanner
-	ocr        OCRClient
-	ids        IDGenerator
+	claims      ClaimReader
+	repository  ReceiptRepository
+	objects     ObjectStore
+	scanner     FileScanner
+	ocr         OCRClient
+	ids         IDGenerator
+	suggestions ClaimOCRSuggestionRefresher
 }
 
-func NewReceiptService(claims ClaimReader, repository ReceiptRepository, objects ObjectStore, scanner FileScanner, ocr OCRClient, ids IDGenerator) *ReceiptService {
-	return &ReceiptService{claims: claims, repository: repository, objects: objects, scanner: scanner, ocr: ocr, ids: ids}
+func NewReceiptService(claims ClaimReader, repository ReceiptRepository, objects ObjectStore, scanner FileScanner, ocr OCRClient, ids IDGenerator, suggestions ...ClaimOCRSuggestionRefresher) *ReceiptService {
+	var suggestionRefresher ClaimOCRSuggestionRefresher
+	if len(suggestions) > 0 {
+		suggestionRefresher = suggestions[0]
+	}
+	return &ReceiptService{claims: claims, repository: repository, objects: objects, scanner: scanner, ocr: ocr, ids: ids, suggestions: suggestionRefresher}
 }
 
 func (service *ReceiptService) CreateUploadSession(ctx context.Context, actorID string, claimID string, command CreateUploadSessionCommand) (UploadSession, error) {
@@ -260,6 +265,11 @@ func (service *ReceiptService) ExtractReceipt(ctx context.Context, actorID strin
 	}
 	if err := service.repository.MarkExtracted(ctx, receipt.ID, result); err != nil {
 		return fmt.Errorf("persist ocr result: %w", err)
+	}
+	if service.suggestions != nil {
+		if err := service.suggestions.RefreshOCRSuggestion(ctx, claimID, actorID); err != nil {
+			return fmt.Errorf("refresh ocr suggested amount: %w", err)
+		}
 	}
 	return nil
 }
