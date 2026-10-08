@@ -257,6 +257,21 @@ docker compose --profile migration up -d --build reimbursement-edge reimbursemen
 
 本机可通过 `http://localhost:8088` 验证路径分流；旧 Auth BFF 的 `3000` 仅绑定 `127.0.0.1` 供本机调试。生产环境应只将固定 HTTPS 域名指向 `reimbursement-edge`。
 
+### 报销单号与票据识别字段升级
+
+`services/reimbursement-api/db/migrations/000010_claim_numbers_and_receipt_metadata.sql` 为 Go 报销库增加不可变业务单号（`BXyyyyMMdd-序号`）与票据开票日期、价税合计、销售方字段。它还会为已有报销单回填单号；未能从历史 OCR 结果取得的新字段保持为空，由 React 工作台显示为“待补充”。
+
+迁移顺序不可调换：先备份目标 PostgreSQL，再以具备 DDL 权限的受控运维账户执行脚本，最后同步滚动重启 Go API、Go Worker、React Web 与边缘路由。本地 Compose 示例：
+
+```powershell
+Get-Content -Raw services/reimbursement-api/db/migrations/000010_claim_numbers_and_receipt_metadata.sql |
+  docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U reimbursement -d reimbursement
+
+docker compose --profile migration up -d --build reimbursement-api reimbursement-worker reimbursement-web reimbursement-edge
+```
+
+重启后，在 React 报销列表和工作台分别核对：新建草稿立即获得 `BXyyyyMMdd-xxxx`；已识别票据显示发票号、日期、价税合计、销售方和置信度；缺失字段显示“待补充”而非 `￥0.00`；提交前检查仍按既有规则运行。完整的生产验收与回退边界见[运维说明](docs/operations.md#报销单号与票据识别字段升级)。
+
 部署前应按以下顺序执行：
 
 1. 备份 PostgreSQL；不要用删除卷或重建数据库代替迁移。

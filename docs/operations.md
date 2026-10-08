@@ -21,6 +21,33 @@ Get-Content legacy-claims.jsonl | docker compose --profile migration run --rm --
 
 每个批次先在内部测试员工及指定渠道启用反向代理开关。只有单据数、状态、金额、票据内容哈希和提交快照摘要的对账全部无差异，才允许扩大范围。若发现差异，立即关闭该范围的新流量；不要反向同步、删除 Go 数据或修改旧库记录。
 
+### 报销单号与票据识别字段升级
+
+`services/reimbursement-api/db/migrations/000010_claim_numbers_and_receipt_metadata.sql` 是 Go `reimbursement` schema 的前向升级：它回填已有报销单的不可变 `claim_number`，新增每日序号计数器，并增加可空的 `invoice_date`、`total_amount_cent`、`seller_name`。金额单位为分；空值代表没有可靠识别结果，绝不代表零金额。
+
+执行前必须完成并验证目标 PostgreSQL 备份。不要以删除 Docker volume、重建数据库、手改报销单号或直接填充 OCR 字段代替迁移。由拥有 DDL 权限的受控运维账户执行已提交脚本；本地 Compose 环境可使用：
+
+```powershell
+Get-Content -Raw services/reimbursement-api/db/migrations/000010_claim_numbers_and_receipt_metadata.sql |
+  docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U reimbursement -d reimbursement
+```
+
+脚本成功后，同步重启迁移 Profile 的读写路径，避免新 API、Worker 和 React 对同一 schema 版本理解不一致：
+
+```powershell
+docker compose --profile migration up -d --build reimbursement-api reimbursement-worker reimbursement-web reimbursement-edge
+docker compose --profile migration ps
+```
+
+验收使用测试员工和非敏感样票完成以下检查：
+
+1. 新建草稿后，列表和工作台都显示稳定的 `BXyyyyMMdd-xxxx`；刷新后不变。
+2. 上传带明确标签的票据，识别完成后显示发票号码、开票日期、价税合计、销售方、置信度，以及以分精确聚合的已识别金额。
+3. 打开一张历史或字段不完整的已识别票据；它仍可读取，缺失字段显示“待补充”，不会显示 `￥0.00`，也不会因为本次展示增强被新的校验规则阻断。
+4. 运行既有提交前检查，确认提交状态机、重复票据校验和人工复核入口没有改变。
+
+该迁移不支持通过删除列、删除计数器或修改迁移记录来回滚。应用故障时可先回退到仍兼容新增列的应用镜像；若必须恢复数据库状态，只能按已验证的 PostgreSQL 备份恢复流程执行，并先停止对应写入流量。恢复后重新核对报销单号、票据记录、审计事件和提交快照，不能反向同步或删除单笔记录“修复”。
+
 ## 政策规则发布与恢复
 
 部署政策功能前，先备份 PostgreSQL，再在目标环境执行已提交的 Prisma 迁移；不得通过重建数据库卷或删除 `PolicyVersion` / `SubmissionSnapshot` 来“初始化”政策数据。部署后在未提交的密钥环境文件中配置管理员白名单：
