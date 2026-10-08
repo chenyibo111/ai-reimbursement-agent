@@ -35,9 +35,9 @@ func (repository *PostgresClaimRepository) Create(ctx context.Context, claim dom
 		return fmt.Errorf("encode participants: %w", err)
 	}
 	if _, err = tx.Exec(ctx, `
-		INSERT INTO reimbursement.claims (id, claim_number, owner_id, status, purpose, expense_category, participants, project_code, version, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7::jsonb, NULLIF($8, ''), $9, $10, $11)
-	`, claim.ID, claim.ClaimNumber, claim.OwnerID, claim.Status, claim.Purpose, claim.ExpenseCategory, participants, claim.ProjectCode, claim.Version, claim.CreatedAt, claim.UpdatedAt); err != nil {
+		INSERT INTO reimbursement.claims (id, claim_number, owner_id, status, purpose, expense_category, participants, project_code, requested_amount_cent, currency, requested_amount_source, remark, version, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7::jsonb, NULLIF($8, ''), $9, $10, $11, NULLIF($12, ''), $13, $14, $15)
+	`, claim.ID, claim.ClaimNumber, claim.OwnerID, claim.Status, claim.Purpose, claim.ExpenseCategory, participants, claim.ProjectCode, claim.RequestedAmountCent, claim.Currency, claim.RequestedAmountSource, claim.Remark, claim.Version, claim.CreatedAt, claim.UpdatedAt); err != nil {
 		return fmt.Errorf("insert claim: %w", err)
 	}
 	if err = writeClaimAuditAndEvent(ctx, tx, audit, event); err != nil {
@@ -52,6 +52,7 @@ func (repository *PostgresClaimRepository) Create(ctx context.Context, claim dom
 func (repository *PostgresClaimRepository) FindOwned(ctx context.Context, claimID string, actorID string) (domain.Claim, error) {
 	claim, err := scanClaim(repository.pool.QueryRow(ctx, `
 		SELECT claim.id, claim.claim_number, claim.owner_id, claim.status, claim.purpose, claim.expense_category, claim.participants, claim.project_code,
+		       claim.requested_amount_cent, claim.currency, claim.requested_amount_source, claim.remark,
 		       claim.version, claim.created_at, claim.updated_at,
 		       summary.receipt_count, summary.recognized_receipt_count, summary.total_amount_cent, summary.missing_amount_receipt_count
 		FROM reimbursement.claims AS claim
@@ -82,9 +83,10 @@ func scanClaim(row claimRow) (domain.Claim, error) {
 	var participants []byte
 	var expenseCategory *string
 	var projectCode *string
+	var remark *string
 	err := row.Scan(
 		&claim.ID, &claim.ClaimNumber, &claim.OwnerID, &claim.Status, &claim.Purpose, &expenseCategory, &participants,
-		&projectCode, &claim.Version, &claim.CreatedAt, &claim.UpdatedAt,
+		&projectCode, &claim.RequestedAmountCent, &claim.Currency, &claim.RequestedAmountSource, &remark, &claim.Version, &claim.CreatedAt, &claim.UpdatedAt,
 		&claim.ReceiptCount, &claim.RecognizedReceiptCount, &claim.TotalAmountCent, &claim.MissingAmountReceiptCount,
 	)
 	if err != nil {
@@ -96,6 +98,9 @@ func scanClaim(row claimRow) (domain.Claim, error) {
 	if projectCode != nil {
 		claim.ProjectCode = *projectCode
 	}
+	if remark != nil {
+		claim.Remark = *remark
+	}
 	if err := json.Unmarshal(participants, &claim.Participants); err != nil {
 		return domain.Claim{}, fmt.Errorf("decode participants: %w", err)
 	}
@@ -105,6 +110,7 @@ func scanClaim(row claimRow) (domain.Claim, error) {
 func (repository *PostgresClaimRepository) ListOwned(ctx context.Context, actorID string, limit int) ([]domain.Claim, error) {
 	rows, err := repository.pool.Query(ctx, `
 		SELECT claim.id, claim.claim_number, claim.owner_id, claim.status, claim.purpose, claim.expense_category, claim.participants, claim.project_code,
+		       claim.requested_amount_cent, claim.currency, claim.requested_amount_source, claim.remark,
 		       claim.version, claim.created_at, claim.updated_at,
 		       summary.receipt_count, summary.recognized_receipt_count, summary.total_amount_cent, summary.missing_amount_receipt_count
 		FROM reimbursement.claims AS claim
@@ -149,9 +155,10 @@ func (repository *PostgresClaimRepository) Update(ctx context.Context, claim dom
 	result, err := tx.Exec(ctx, `
 		UPDATE reimbursement.claims
 		SET purpose = $4, expense_category = NULLIF($5, ''), participants = $6::jsonb,
-		    project_code = NULLIF($7, ''), version = $8, updated_at = $9
+		    project_code = NULLIF($7, ''), requested_amount_cent = $8, currency = $9,
+		    requested_amount_source = $10, remark = NULLIF($11, ''), version = $12, updated_at = $13
 		WHERE id = $1 AND owner_id = $2 AND status = 'DRAFT' AND version = $3
-	`, claim.ID, claim.OwnerID, expectedVersion, claim.Purpose, claim.ExpenseCategory, participants, claim.ProjectCode, claim.Version, claim.UpdatedAt)
+	`, claim.ID, claim.OwnerID, expectedVersion, claim.Purpose, claim.ExpenseCategory, participants, claim.ProjectCode, claim.RequestedAmountCent, claim.Currency, claim.RequestedAmountSource, claim.Remark, claim.Version, claim.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("update claim: %w", err)
 	}

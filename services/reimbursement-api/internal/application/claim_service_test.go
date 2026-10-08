@@ -109,6 +109,28 @@ func TestUpdateClaimRejectsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestUpdateClaimStoresManualRequestedAmount(t *testing.T) {
+	service := newClaimServiceForTest(NewMemoryClaimRepository())
+	claim, err := service.CreateClaim(context.Background(), "employee-1", CreateClaimCommand{Purpose: "客户拜访"})
+	if err != nil {
+		t.Fatalf("create claim: %v", err)
+	}
+	amount := int64(10155)
+	currency := "CNY"
+	remark := "客户拜访交通费"
+	updated, err := service.UpdateClaim(context.Background(), "employee-1", claim.ID, claim.Version, PatchClaimCommand{
+		RequestedAmountCent: &amount,
+		Currency:            &currency,
+		Remark:              &remark,
+	})
+	if err != nil {
+		t.Fatalf("update claim: %v", err)
+	}
+	if updated.RequestedAmountCent == nil || *updated.RequestedAmountCent != 10155 || updated.Currency != "CNY" || updated.Remark != remark {
+		t.Fatalf("updated application fields = %#v", updated)
+	}
+}
+
 func TestDeleteClaimAllowsOnlyOwnDraftAtCurrentVersion(t *testing.T) {
 	service := newClaimServiceForTest(NewMemoryClaimRepository())
 	claim, err := service.CreateClaim(context.Background(), "employee-1", CreateClaimCommand{Purpose: "客户拜访"})

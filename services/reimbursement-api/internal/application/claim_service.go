@@ -25,11 +25,15 @@ type CreateClaimCommand struct {
 }
 
 type PatchClaimCommand struct {
-	Purpose         *string
-	ExpenseCategory *string
-	Participants    *[]string
-	ProjectCode     *string
-	UnknownFields   []string
+	Purpose               *string
+	ExpenseCategory       *string
+	Participants          *[]string
+	ProjectCode           *string
+	RequestedAmountCent   *int64
+	Currency              *string
+	Remark                *string
+	UseOCRSuggestedAmount bool
+	UnknownFields         []string
 }
 
 type ClaimView = domain.Claim
@@ -126,10 +130,14 @@ func (service *ClaimService) UpdateClaim(ctx context.Context, actorID string, cl
 		return ClaimView{}, fmt.Errorf("find claim: %w", err)
 	}
 	patch := domain.ClaimPatch{
-		Purpose:         command.Purpose,
-		ExpenseCategory: command.ExpenseCategory,
-		Participants:    command.Participants,
-		ProjectCode:     command.ProjectCode,
+		Purpose:               command.Purpose,
+		ExpenseCategory:       command.ExpenseCategory,
+		Participants:          command.Participants,
+		ProjectCode:           command.ProjectCode,
+		RequestedAmountCent:   command.RequestedAmountCent,
+		Currency:              command.Currency,
+		Remark:                command.Remark,
+		UseOCRSuggestedAmount: command.UseOCRSuggestedAmount,
 	}
 	if err := claim.Patch(expectedVersion, patch); err != nil {
 		if errors.Is(err, domain.ErrClaimVersionConflict) {

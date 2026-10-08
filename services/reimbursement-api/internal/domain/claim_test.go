@@ -29,6 +29,25 @@ func TestClaimPatchRejectsSubmittedClaim(t *testing.T) {
 	}
 }
 
+func TestClaimPatchStoresManualRequestedAmountCurrencyAndRemark(t *testing.T) {
+	claim, err := NewDraftClaim("claim-1", "BX20261008-0001", "employee-1", "差旅报销")
+	if err != nil {
+		t.Fatalf("create draft: %v", err)
+	}
+	amount := int64(10155)
+	currency := "CNY"
+	remark := "客户拜访交通费"
+	if err = claim.Patch(1, ClaimPatch{RequestedAmountCent: &amount, Currency: &currency, Remark: &remark}); err != nil {
+		t.Fatalf("patch claim: %v", err)
+	}
+	if claim.RequestedAmountCent == nil || *claim.RequestedAmountCent != 10155 {
+		t.Fatalf("requested amount = %#v, want 10155", claim.RequestedAmountCent)
+	}
+	if claim.Currency != "CNY" || claim.RequestedAmountSource != RequestedAmountSourceManual || claim.Remark != remark {
+		t.Fatalf("claim application fields = %#v", claim)
+	}
+}
+
 func TestClaimDeleteRejectsStaleVersion(t *testing.T) {
 	claim, err := NewDraftClaim("claim-1", "BX20261008-0001", "employee-1", "差旅报销")
 	if err != nil {
