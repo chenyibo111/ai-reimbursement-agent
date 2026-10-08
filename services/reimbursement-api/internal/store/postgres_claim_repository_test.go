@@ -28,7 +28,7 @@ func TestPostgresClaimRepositoryWritesAuditAndOutboxAtomically(t *testing.T) {
 		t.Fatalf("seed owner: %v", err)
 	}
 
-	service := application.NewClaimService(NewPostgresClaimRepository(pool), fixedIDGenerator{value: claimID})
+	service := application.NewClaimService(NewPostgresClaimRepository(pool), fixedIDGenerator{value: claimID}, NewPostgresClaimNumberGenerator(pool), time.Now)
 	claim, err := service.CreateClaim(ctx, ownerID, application.CreateClaimCommand{Purpose: "客户拜访"})
 	if err != nil {
 		t.Fatalf("create claim: %v", err)

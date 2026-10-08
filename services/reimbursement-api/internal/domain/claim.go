@@ -20,16 +20,21 @@ const (
 )
 
 type Claim struct {
-	ID              string
-	OwnerID         string
-	Status          ClaimStatus
-	Purpose         string
-	ExpenseCategory string
-	Participants    []string
-	ProjectCode     string
-	Version         int64
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID                        string
+	ClaimNumber               string
+	OwnerID                   string
+	Status                    ClaimStatus
+	Purpose                   string
+	ExpenseCategory           string
+	Participants              []string
+	ProjectCode               string
+	Version                   int64
+	CreatedAt                 time.Time
+	UpdatedAt                 time.Time
+	ReceiptCount              int
+	RecognizedReceiptCount    int
+	TotalAmountCent           *int64
+	MissingAmountReceiptCount int
 }
 
 type ClaimPatch struct {
@@ -39,19 +44,20 @@ type ClaimPatch struct {
 	ProjectCode     *string
 }
 
-func NewDraftClaim(id string, ownerID string, purpose string) (Claim, error) {
-	if strings.TrimSpace(id) == "" || strings.TrimSpace(ownerID) == "" || strings.TrimSpace(purpose) == "" {
+func NewDraftClaim(id string, claimNumber string, ownerID string, purpose string) (Claim, error) {
+	if strings.TrimSpace(id) == "" || strings.TrimSpace(claimNumber) == "" || strings.TrimSpace(ownerID) == "" || strings.TrimSpace(purpose) == "" {
 		return Claim{}, ErrInvalidClaim
 	}
 	now := time.Now().UTC()
 	return Claim{
-		ID:        id,
-		OwnerID:   ownerID,
-		Status:    ClaimStatusDraft,
-		Purpose:   purpose,
-		Version:   1,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:          id,
+		ClaimNumber: claimNumber,
+		OwnerID:     ownerID,
+		Status:      ClaimStatusDraft,
+		Purpose:     purpose,
+		Version:     1,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}, nil
 }
 
@@ -94,5 +100,9 @@ func (claim Claim) CanDelete(expectedVersion int64) error {
 
 func (claim Claim) Clone() Claim {
 	claim.Participants = append([]string(nil), claim.Participants...)
+	if claim.TotalAmountCent != nil {
+		total := *claim.TotalAmountCent
+		claim.TotalAmountCent = &total
+	}
 	return claim
 }

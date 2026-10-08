@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -76,14 +77,23 @@ type IDGenerator interface {
 type ClaimService struct {
 	repository ClaimRepository
 	ids        IDGenerator
+	numbers    ClaimNumberGenerator
+	now        func() time.Time
 }
 
-func NewClaimService(repository ClaimRepository, ids IDGenerator) *ClaimService {
-	return &ClaimService{repository: repository, ids: ids}
+func NewClaimService(repository ClaimRepository, ids IDGenerator, numbers ClaimNumberGenerator, now func() time.Time) *ClaimService {
+	return &ClaimService{repository: repository, ids: ids, numbers: numbers, now: now}
 }
 
 func (service *ClaimService) CreateClaim(ctx context.Context, actorID string, command CreateClaimCommand) (ClaimView, error) {
-	claim, err := domain.NewDraftClaim(service.ids.Next(), actorID, command.Purpose)
+	if strings.TrimSpace(command.Purpose) == "" {
+		return ClaimView{}, domain.ErrInvalidClaim
+	}
+	claimNumber, err := service.numbers.Next(ctx, service.now())
+	if err != nil {
+		return ClaimView{}, fmt.Errorf("allocate claim number: %w", err)
+	}
+	claim, err := domain.NewDraftClaim(service.ids.Next(), claimNumber, actorID, command.Purpose)
 	if err != nil {
 		return ClaimView{}, err
 	}

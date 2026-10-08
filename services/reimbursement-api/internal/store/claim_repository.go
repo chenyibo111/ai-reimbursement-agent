@@ -35,9 +35,9 @@ func (repository *PostgresClaimRepository) Create(ctx context.Context, claim dom
 		return fmt.Errorf("encode participants: %w", err)
 	}
 	if _, err = tx.Exec(ctx, `
-		INSERT INTO reimbursement.claims (id, owner_id, status, purpose, expense_category, participants, project_code, version, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, NULLIF($5, ''), $6::jsonb, NULLIF($7, ''), $8, $9, $10)
-	`, claim.ID, claim.OwnerID, claim.Status, claim.Purpose, claim.ExpenseCategory, participants, claim.ProjectCode, claim.Version, claim.CreatedAt, claim.UpdatedAt); err != nil {
+		INSERT INTO reimbursement.claims (id, claim_number, owner_id, status, purpose, expense_category, participants, project_code, version, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7::jsonb, NULLIF($8, ''), $9, $10, $11)
+	`, claim.ID, claim.ClaimNumber, claim.OwnerID, claim.Status, claim.Purpose, claim.ExpenseCategory, participants, claim.ProjectCode, claim.Version, claim.CreatedAt, claim.UpdatedAt); err != nil {
 		return fmt.Errorf("insert claim: %w", err)
 	}
 	if err = writeClaimAuditAndEvent(ctx, tx, audit, event); err != nil {
@@ -51,7 +51,7 @@ func (repository *PostgresClaimRepository) Create(ctx context.Context, claim dom
 
 func (repository *PostgresClaimRepository) FindOwned(ctx context.Context, claimID string, actorID string) (domain.Claim, error) {
 	claim, err := scanClaim(repository.pool.QueryRow(ctx, `
-		SELECT id, owner_id, status, purpose, expense_category, participants, project_code,
+		SELECT id, claim_number, owner_id, status, purpose, expense_category, participants, project_code,
 		       version, created_at, updated_at
 		FROM reimbursement.claims
 		WHERE id = $1 AND owner_id = $2
@@ -73,7 +73,7 @@ func scanClaim(row claimRow) (domain.Claim, error) {
 	var expenseCategory *string
 	var projectCode *string
 	err := row.Scan(
-		&claim.ID, &claim.OwnerID, &claim.Status, &claim.Purpose, &expenseCategory, &participants,
+		&claim.ID, &claim.ClaimNumber, &claim.OwnerID, &claim.Status, &claim.Purpose, &expenseCategory, &participants,
 		&projectCode, &claim.Version, &claim.CreatedAt, &claim.UpdatedAt,
 	)
 	if err != nil {
@@ -93,7 +93,7 @@ func scanClaim(row claimRow) (domain.Claim, error) {
 
 func (repository *PostgresClaimRepository) ListOwned(ctx context.Context, actorID string, limit int) ([]domain.Claim, error) {
 	rows, err := repository.pool.Query(ctx, `
-		SELECT id, owner_id, status, purpose, expense_category, participants, project_code, version, created_at, updated_at
+		SELECT id, claim_number, owner_id, status, purpose, expense_category, participants, project_code, version, created_at, updated_at
 		FROM reimbursement.claims WHERE owner_id = $1 ORDER BY created_at DESC LIMIT $2
 	`, actorID, limit)
 	if err != nil {

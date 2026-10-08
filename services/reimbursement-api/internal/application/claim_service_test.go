@@ -4,12 +4,38 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/domain"
 )
 
+func TestCreateClaimAssignsImmutableBusinessNumber(t *testing.T) {
+	service := NewClaimService(
+		NewMemoryClaimRepository(),
+		NewSequentialIDGenerator(),
+		NewMemoryClaimNumberGenerator(),
+		func() time.Time { return time.Date(2026, 10, 8, 1, 0, 0, 0, time.UTC) },
+	)
+
+	claim, err := service.CreateClaim(context.Background(), "employee-1", CreateClaimCommand{Purpose: "客户拜访"})
+	if err != nil {
+		t.Fatalf("create claim: %v", err)
+	}
+	if claim.ClaimNumber != "BX20261008-0001" {
+		t.Fatalf("claim number = %q, want BX20261008-0001", claim.ClaimNumber)
+	}
+
+	updated, err := service.UpdateClaim(context.Background(), "employee-1", claim.ID, claim.Version, PatchClaimCommand{Purpose: stringPointer("客户交流")})
+	if err != nil {
+		t.Fatalf("update claim: %v", err)
+	}
+	if updated.ClaimNumber != claim.ClaimNumber {
+		t.Fatalf("claim number changed from %q to %q", claim.ClaimNumber, updated.ClaimNumber)
+	}
+}
+
 func TestCreateClaimAssignsDraftToActor(t *testing.T) {
-	service := NewClaimService(NewMemoryClaimRepository(), NewSequentialIDGenerator())
+	service := newClaimServiceForTest(NewMemoryClaimRepository())
 
 	claim, err := service.CreateClaim(context.Background(), "employee-1", CreateClaimCommand{Purpose: "客户拜访"})
 	if err != nil {
@@ -21,7 +47,7 @@ func TestCreateClaimAssignsDraftToActor(t *testing.T) {
 }
 
 func TestUpdateClaimRejectsAnotherEmployeesClaim(t *testing.T) {
-	service := NewClaimService(NewMemoryClaimRepository(), NewSequentialIDGenerator())
+	service := newClaimServiceForTest(NewMemoryClaimRepository())
 	claim, err := service.CreateClaim(context.Background(), "employee-1", CreateClaimCommand{Purpose: "客户拜访"})
 	if err != nil {
 		t.Fatalf("create claim: %v", err)
@@ -34,7 +60,7 @@ func TestUpdateClaimRejectsAnotherEmployeesClaim(t *testing.T) {
 }
 
 func TestUpdateClaimRejectsStaleVersion(t *testing.T) {
-	service := NewClaimService(NewMemoryClaimRepository(), NewSequentialIDGenerator())
+	service := newClaimServiceForTest(NewMemoryClaimRepository())
 	claim, err := service.CreateClaim(context.Background(), "employee-1", CreateClaimCommand{Purpose: "客户拜访"})
 	if err != nil {
 		t.Fatalf("create claim: %v", err)
@@ -55,7 +81,7 @@ func TestUpdateClaimRejectsStaleVersion(t *testing.T) {
 
 func TestUpdateClaimRejectsSubmittedClaim(t *testing.T) {
 	repository := NewMemoryClaimRepository()
-	service := NewClaimService(repository, NewSequentialIDGenerator())
+	service := newClaimServiceForTest(repository)
 	claim, err := service.CreateClaim(context.Background(), "employee-1", CreateClaimCommand{Purpose: "客户拜访"})
 	if err != nil {
 		t.Fatalf("create claim: %v", err)
@@ -71,7 +97,7 @@ func TestUpdateClaimRejectsSubmittedClaim(t *testing.T) {
 }
 
 func TestUpdateClaimRejectsUnknownFields(t *testing.T) {
-	service := NewClaimService(NewMemoryClaimRepository(), NewSequentialIDGenerator())
+	service := newClaimServiceForTest(NewMemoryClaimRepository())
 	claim, err := service.CreateClaim(context.Background(), "employee-1", CreateClaimCommand{Purpose: "客户拜访"})
 	if err != nil {
 		t.Fatalf("create claim: %v", err)
@@ -84,7 +110,7 @@ func TestUpdateClaimRejectsUnknownFields(t *testing.T) {
 }
 
 func TestDeleteClaimAllowsOnlyOwnDraftAtCurrentVersion(t *testing.T) {
-	service := NewClaimService(NewMemoryClaimRepository(), NewSequentialIDGenerator())
+	service := newClaimServiceForTest(NewMemoryClaimRepository())
 	claim, err := service.CreateClaim(context.Background(), "employee-1", CreateClaimCommand{Purpose: "客户拜访"})
 	if err != nil {
 		t.Fatalf("create claim: %v", err)
@@ -100,3 +126,7 @@ func TestDeleteClaimAllowsOnlyOwnDraftAtCurrentVersion(t *testing.T) {
 }
 
 func stringPointer(value string) *string { return &value }
+
+func newClaimServiceForTest(repository ClaimRepository) *ClaimService {
+	return NewClaimService(repository, NewSequentialIDGenerator(), NewMemoryClaimNumberGenerator(), time.Now)
+}

@@ -6,7 +6,7 @@ import (
 )
 
 func TestNewDraftClaimAssignsOwnerAndVersion(t *testing.T) {
-	claim, err := NewDraftClaim("claim-1", "employee-1", "差旅报销")
+	claim, err := NewDraftClaim("claim-1", "BX20261008-0001", "employee-1", "差旅报销")
 	if err != nil {
 		t.Fatalf("create draft: %v", err)
 	}
@@ -17,7 +17,7 @@ func TestNewDraftClaimAssignsOwnerAndVersion(t *testing.T) {
 }
 
 func TestClaimPatchRejectsSubmittedClaim(t *testing.T) {
-	claim, err := NewDraftClaim("claim-1", "employee-1", "差旅报销")
+	claim, err := NewDraftClaim("claim-1", "BX20261008-0001", "employee-1", "差旅报销")
 	if err != nil {
 		t.Fatalf("create draft: %v", err)
 	}
@@ -30,7 +30,7 @@ func TestClaimPatchRejectsSubmittedClaim(t *testing.T) {
 }
 
 func TestClaimDeleteRejectsStaleVersion(t *testing.T) {
-	claim, err := NewDraftClaim("claim-1", "employee-1", "差旅报销")
+	claim, err := NewDraftClaim("claim-1", "BX20261008-0001", "employee-1", "差旅报销")
 	if err != nil {
 		t.Fatalf("create draft: %v", err)
 	}
