@@ -101,13 +101,17 @@ func (handler *claimsHandler) listReceipts(response http.ResponseWriter, request
 }
 
 func receiptResponse(receipt application.ReceiptView) map[string]any {
+	var invoiceDate any
+	if receipt.InvoiceDate != nil {
+		invoiceDate = receipt.InvoiceDate.Format("2006-01-02")
+	}
 	return map[string]any{
 		"id":              receipt.ID,
 		"claimId":         receipt.ClaimID,
 		"filename":        receipt.Filename,
 		"status":          receipt.Status,
 		"invoiceNumber":   receipt.InvoiceNumber,
-		"invoiceDate":     receipt.InvoiceDate,
+		"invoiceDate":     invoiceDate,
 		"totalAmountCent": receipt.TotalAmountCent,
 		"sellerName":      receipt.SellerName,
 		"ocrConfidence":   receipt.OCRConfidence,

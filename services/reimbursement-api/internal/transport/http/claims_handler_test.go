@@ -249,7 +249,7 @@ func TestListReceiptsReturnsOnlyReceiptsBelongingToTheAuthenticatedClaim(t *test
 	if len(body.Items) != 1 || body.Items[0]["id"] != "receipt-1" || body.Items[0]["objectKey"] != nil {
 		t.Fatalf("unexpected safe receipt response: %#v", body.Items)
 	}
-	if body.Items[0]["invoiceDate"] != "2026-05-01T00:00:00Z" || body.Items[0]["totalAmountCent"] != float64(10155) || body.Items[0]["sellerName"] != "上海象鲜网络科技有限公司" {
+	if body.Items[0]["invoiceDate"] != "2026-05-01" || body.Items[0]["totalAmountCent"] != float64(10155) || body.Items[0]["sellerName"] != "上海象鲜网络科技有限公司" {
 		t.Fatalf("receipt metadata missing from response: %#v", body.Items[0])
 	}
 }
