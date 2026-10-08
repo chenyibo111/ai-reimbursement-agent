@@ -7,7 +7,7 @@ export type EmployeeProvisioner = { provision(input: { employeeId: string; displ
 
 export async function ensureEmployeeIdentity(identity: FeishuIdentity, deps: { employees: FeishuEmployeeRepository; resolveRole(openId: string): EmployeeRole; provision: EmployeeProvisioner["provision"] }): Promise<ResolvedEmployeeIdentity> {
   const employee = await authenticateFeishuUser(identity, { employees: deps.employees });
-  const displayName = identity.displayName?.trim() || "飞书员工";
+  const displayName = identity.displayName?.trim() || employee.displayName?.trim() || "飞书员工";
   const role = deps.resolveRole(identity.openId);
   const resolved = { id: employee.id, displayName, openId: identity.openId, role, isActive: true } satisfies ResolvedEmployeeIdentity;
   await deps.provision({ employeeId: resolved.id, displayName, feishuOpenId: resolved.openId, role, isActive: resolved.isActive });

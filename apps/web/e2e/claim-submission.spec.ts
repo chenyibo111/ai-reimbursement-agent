@@ -1,6 +1,14 @@
 import { expect, test } from "@playwright/test";
 
 test("employee creates a claim and reaches its Go API-backed workbench", async ({ page }) => {
+  const expiresAt = new Date(Date.now() + 5 * 60_000).toISOString();
+  await page.route("**/api/auth/access-token", (route) => route.fulfill({
+    json: {
+      accessToken: "e2e-token",
+      expiresAt,
+      employee: { id: "employee-e2e", displayName: "测试员工", role: "EMPLOYEE" },
+    },
+  }));
   await page.route("**/api/v1/claims", async (route) => {
     if (route.request().method() === "GET") {
       await route.fulfill({ json: { items: [] } });

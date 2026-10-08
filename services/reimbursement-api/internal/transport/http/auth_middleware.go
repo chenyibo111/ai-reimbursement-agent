@@ -53,7 +53,10 @@ type HS256BearerResolver struct {
 	now      func() int64
 }
 
-type WebBearerResolver struct{ *HS256BearerResolver }
+type WebBearerResolver struct {
+	*HS256BearerResolver
+	employees EmployeeActivityChecker
+}
 
 func NewHS256BearerResolver(secret string, audience string) (*HS256BearerResolver, error) {
 	if strings.TrimSpace(secret) == "" {
@@ -62,12 +65,16 @@ func NewHS256BearerResolver(secret string, audience string) (*HS256BearerResolve
 	return &HS256BearerResolver{secret: []byte(secret), audience: audience, now: func() int64 { return time.Now().Unix() }}, nil
 }
 
-func NewWebBearerResolver(secret string, audience string) (*WebBearerResolver, error) {
+func NewWebBearerResolver(secret string, audience string, employees ...EmployeeActivityChecker) (*WebBearerResolver, error) {
 	bearer, err := NewHS256BearerResolver(secret, audience)
 	if err != nil {
 		return nil, err
 	}
-	return &WebBearerResolver{HS256BearerResolver: bearer}, nil
+	resolver := &WebBearerResolver{HS256BearerResolver: bearer}
+	if len(employees) > 0 {
+		resolver.employees = employees[0]
+	}
+	return resolver, nil
 }
 
 func (resolver *HS256BearerResolver) Resolve(request *http.Request) (Actor, error) {
@@ -82,6 +89,12 @@ func (resolver *WebBearerResolver) Resolve(request *http.Request) (Actor, error)
 	actor, err := resolver.HS256BearerResolver.Resolve(request)
 	if err != nil || actor.Channel != "web" {
 		return Actor{}, ErrUnauthenticated
+	}
+	if resolver.employees != nil {
+		active, activityErr := resolver.employees.IsActive(request.Context(), actor.ID)
+		if activityErr != nil || !active {
+			return Actor{}, ErrUnauthenticated
+		}
 	}
 	return actor, nil
 }

@@ -99,6 +99,4 @@ it("replaces a current claim per employee and chat without mixing employees in t
 
   await expect(repository.getConversation(employeeA.id, "oc-shared")).resolves.toMatchObject({ claimId: claimA2.id });
   await expect(repository.getConversation(employeeB.id, "oc-shared")).resolves.toMatchObject({ claimId: claimB.id });
-  await expect(repository.findEmployeeByOpenId("ou-a")).resolves.toEqual({ id: employeeA.id });
-  await expect(repository.findEmployeeByOpenId("ou-missing")).resolves.toBeNull();
 });

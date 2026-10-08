@@ -9,7 +9,9 @@ function attachmentDeps(overrides: Partial<ProcessFeishuEventDeps> = {}) {
     publicAppUrl: "https://reimbursement.example.test",
     events: {
       findInboundByEventId: async () => ({ eventId: "event-1", messageId: "om-1", messageType: "image", chatId: "oc-1", senderOpenId: "ou-employee", chatType: "p2p", mentionedOpenIds: [] }),
-      findEmployeeByOpenId: async () => ({ id: "employee-1" }),
+    },
+    identities: {
+      ensureEmployeeForInboundMessage: async () => ({ id: "employee-1", role: "EMPLOYEE" }),
     },
     conversations: {
       getOrCreatePrivate: async () => ({ id: "private-1" }),
@@ -43,10 +45,12 @@ it("downloads an attachment and delegates storage, extraction, and intake handli
   expect(calls).toEqual({ download: 1, turns: 1 });
 });
 
-it("does not download an attachment for an employee that has not completed Web OAuth binding", async () => {
-  const { deps, calls } = attachmentDeps({ events: { ...attachmentDeps().deps.events, findEmployeeByOpenId: async () => null } });
+it("does not download an attachment when first-contact identity provisioning is unavailable", async () => {
+  const { deps, calls } = attachmentDeps({
+    identities: { ensureEmployeeForInboundMessage: async () => { throw new Error("IDENTITY_PROVISIONING_UNAVAILABLE"); } },
+  });
 
-  await expect(processFeishuEvent({ eventId: "event-1" }, deps)).resolves.toMatchObject({ kind: "LOGIN_REQUIRED" });
+  await expect(processFeishuEvent({ eventId: "event-1" }, deps)).resolves.toMatchObject({ kind: "RETRYABLE_FAILURE", retryable: true });
   expect(calls.download).toBe(0);
   expect(calls.turns).toBe(0);
 });

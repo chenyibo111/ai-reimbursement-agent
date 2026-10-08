@@ -12,7 +12,7 @@ function read(path: string) {
 describe("React and Agent reimbursement boundary", () => {
   it("reserves reimbursement database access for the Go API and exposes an Agent port", () => {
     const compose = read("docker-compose.yml");
-    const reimbursementApi = compose.slice(compose.indexOf("  reimbursement-api:"), compose.indexOf("\n  loki:"));
+    const reimbursementApi = compose.slice(compose.indexOf("  reimbursement-api:"), compose.indexOf("\n  reimbursement-web:"));
 
     expect(reimbursementApi).toContain("REIMBURSEMENT_DATABASE_URL");
     expect(reimbursementApi).not.toMatch(/\n\s+ports:/);

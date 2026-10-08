@@ -1,10 +1,16 @@
 # React + Go 报销切流 Runbook
 
+## 当前阶段：空数据演练
+
+当前旧 Next.js 版本尚未上线，已有数据均为可丢弃测试数据。因此本阶段**不执行**旧库导出、导入或对账；在空的 Go 报销库中完成迁移与员工身份投影初始化即可。不得为了模拟回滚而删除共享数据库、对象存储或队列。
+
+个人飞书验证时，先在飞书开放平台把 OAuth 回调地址登记为与浏览器入口完全一致的 `.../api/auth/feishu/callback`，然后分别验证 OAuth 登录、`/api/auth/access-token` 刷新、机器人首次消息建身份以及 React 写请求。多人 Staging 前必须改用固定 HTTPS 域名，并让该域名只指向 `reimbursement-edge`；临时隧道域名不能用于该演练。
+
 ## 切流前置条件
 
 1. 取得 PostgreSQL、MinIO 与 NATS 的可恢复备份，并在隔离环境验证恢复。
 2. 部署 Go API、Go Worker、NATS 与 Agent event worker；确认健康检查、Outbox 延迟和告警链路正常。
-3. 对旧库执行只读导出、导入 Go 数据库，并运行 `npm run migration:reconcile`。差异必须为零。
+3. 若未来旧系统已承载真实数据，再对旧库执行只读导出、导入 Go 数据库，并运行 `npm run migration:reconcile`。差异必须为零；本阶段空数据演练跳过此项。
 4. 首批仅配置内部员工与单一渠道到 `REIMBURSEMENT_GO_WRITER_SCOPES`，其余流量保持旧入口。
 
 ## 演练步骤

@@ -4,6 +4,12 @@
 
 The current Next.js application remains the active product while the new architecture is built behind a migration profile. `services/reimbursement-api` will become the sole writer for reimbursement data, `apps/web` will become the React client, and `services/agent` will call the Go API through a typed tool boundary. Do not route employee traffic to the migration profile until its cutover runbook and reconciliation checks are complete.
 
+### 迁移中的统一飞书身份
+
+迁移 Profile 下，Next.js 只承担 Auth BFF：它完成飞书 OAuth、保存 HttpOnly 会话，并在 `GET /api/auth/access-token` 为 React 签发 15 分钟、仅保存在内存的 Web JWT。React 通过统一边缘路由调用 Go API；飞书机器人首次收到消息时也会按同一 `open_id` 创建或复用员工并同步 Go 员工投影。Web 与 Agent Token 分别绑定 `channel=web` 和 `channel=agent`，不能互用。
+
+个人本地验证时，在飞书开放平台登记与浏览器访问地址完全一致的回调地址，并配置 `FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`FEISHU_REDIRECT_URI`、`APP_PUBLIC_URL`、`REIMBURSEMENT_AUTH_HS256_SECRET`、`REIMBURSEMENT_AUTH_PROVISIONING_KEY` 和角色白名单。开发登录还必须配置非敏感的 `DEV_DEMO_FEISHU_OPEN_ID`。多人 Staging 前必须换成固定 HTTPS 域名；临时 `trycloudflare` 地址不能作为多人 OAuth 与工作台深链入口。完整变量边界与验收步骤见[统一身份运维说明](docs/operations/unified-feishu-identity.md)。
+
 面向中国单企业员工的 AI 报销服务。它把“上传票据、识别票据、补齐报销信息、校验制度、生成并提交报销单”组织成一条可审计、可人工确认的链路。
 
 项目当前提供独立 Web 工作台，并可选接入飞书 OAuth、飞书机器人和以飞书文档为来源的报销政策知识库。
@@ -150,7 +156,7 @@ FEISHU_APP_SECRET="..."
 FEISHU_REDIRECT_URI="http://localhost:3000/api/auth/feishu/callback"
 ```
 
-访问 `/api/auth/feishu/login` 开始授权。没有飞书应用时，仅本地环境可使用 `POST /api/auth/dev-login`；它只读取服务端配置的 `DEV_DEMO_EMPLOYEE_ID`、`DEV_DEMO_EMPLOYEE_NAME` 与可选 `DEV_DEMO_FEISHU_OPEN_ID`，生产环境不提供该入口。
+访问 `/api/auth/feishu/login` 开始授权。没有飞书应用时，仅本地环境可使用 `POST /api/auth/dev-login`；它只读取服务端配置的 `DEV_DEMO_EMPLOYEE_ID`、`DEV_DEMO_EMPLOYEE_NAME` 与必填的 `DEV_DEMO_FEISHU_OPEN_ID`，生产环境不提供该入口。
 
 ## 可选能力配置
 
@@ -242,6 +248,14 @@ Web、飞书 Worker 与异步任务 Worker 使用同一个 Docker 镜像，分�
 ```powershell
 docker compose up -d --build web feishu-bot-worker job-worker
 ```
+
+React + Go 迁移演练使用统一边缘入口，而不是直接暴露 Go API：
+
+```powershell
+docker compose --profile migration up -d --build reimbursement-edge reimbursement-web reimbursement-api
+```
+
+本机可通过 `http://localhost:8088` 验证路径分流；旧 Auth BFF 的 `3000` 仅绑定 `127.0.0.1` 供本机调试。生产环境应只将固定 HTTPS 域名指向 `reimbursement-edge`。
 
 部署前应按以下顺序执行：
 

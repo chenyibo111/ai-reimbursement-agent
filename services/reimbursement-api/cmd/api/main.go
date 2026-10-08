@@ -54,7 +54,7 @@ func main() {
 	if os.Getenv("REIMBURSEMENT_DEV_AUTH") == "true" {
 		resolver = transport.StaticActorResolver{}
 	} else {
-		web, webErr := transport.NewWebBearerResolver(os.Getenv("REIMBURSEMENT_AUTH_HS256_SECRET"), "reimbursement-api")
+		web, webErr := transport.NewWebBearerResolver(os.Getenv("REIMBURSEMENT_AUTH_HS256_SECRET"), "reimbursement-api", transport.EmployeeActivityFunc(store.EmployeeIsActive(pool)))
 		if webErr != nil {
 			log.Fatalf("configure bearer authentication: %v", webErr)
 		}

@@ -26,8 +26,10 @@ describe("reimbursement migration routing", () => {
     ]);
 
     const apiService = compose.slice(compose.indexOf("  reimbursement-api:"), compose.indexOf("  reimbursement-web:"));
+    const authBffService = compose.slice(compose.indexOf("  web:"), compose.indexOf("  feishu-bot-worker:"));
     expect(apiService).toMatch(/expose:\s*\n\s*- "8080"/);
     expect(apiService).not.toContain("ports:");
+    expect(authBffService).toContain('"127.0.0.1:3000:3000"');
     expect(`${nginx}\n${runbook}`).not.toMatch(/(?:REIMBURSEMENT_AUTH_HS256_SECRET|REIMBURSEMENT_AUTH_PROVISIONING_KEY)=\S+/);
   });
 });
