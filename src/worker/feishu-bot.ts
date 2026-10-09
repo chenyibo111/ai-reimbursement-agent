@@ -134,7 +134,7 @@ function createProcessDeps(input: {
     conversations,
     client: input.client,
     runConversationTurn: (agentInput) => {
-      const goTools = gateway ? createConversationReimbursementTools(gateway) : null;
+      const goTools = gateway ? createConversationReimbursementTools(gateway, fetch, process.env.REIMBURSEMENT_AGENT_STORAGE_ENDPOINT) : null;
       const context = { actorId: agentInput.actorId, actorRole: agentInput.actorRole, conversationId: agentInput.conversationId, channelMessageId: agentInput.channelMessageId };
       return runConversationTurn(agentInput, {
       conversations: conversations as unknown as ConversationStore,

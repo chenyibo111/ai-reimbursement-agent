@@ -254,6 +254,23 @@ func TestListReceiptsReturnsOnlyReceiptsBelongingToTheAuthenticatedClaim(t *test
 	}
 }
 
+func TestDeleteReceiptDeletesOwnedDraftReceipt(t *testing.T) {
+	receipts := &deletingFakeReceipts{}
+	handler := NewRouter(Dependencies{Claims: fakeClaims{}, Receipts: receipts, Auth: StaticActorResolver{}})
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/claims/claim-1/receipts/receipt-1", nil)
+	request.Header.Set("Authorization", "Bearer employee-1")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusNoContent, response.Body.String())
+	}
+	if receipts.actorID != "employee-1" || receipts.claimID != "claim-1" || receipts.receiptID != "receipt-1" {
+		t.Fatalf("unexpected delete input: %#v", receipts)
+	}
+}
+
 func TestReceiptResponseKeepsMissingMetadataNull(t *testing.T) {
 	encoded, err := json.Marshal(receiptResponse(application.ReceiptView{ID: "receipt-1", ClaimID: "claim-1", Filename: "pending.pdf"}))
 	if err != nil {
@@ -411,6 +428,7 @@ func (fakeReceipts) CreateUploadSession(context.Context, string, string, applica
 	return application.UploadSession{}, nil
 }
 func (fakeReceipts) FinalizeReceiptUpload(context.Context, string, string, string) error { return nil }
+func (fakeReceipts) DeleteReceipt(context.Context, string, string, string) error         { return nil }
 func (fakeReceipts) ListReceipts(_ context.Context, actorID string, claimID string) ([]application.ReceiptView, error) {
 	if actorID != "employee-1" || claimID != "claim-1" {
 		return nil, application.ErrClaimNotFound
@@ -419,4 +437,22 @@ func (fakeReceipts) ListReceipts(_ context.Context, actorID string, claimID stri
 	totalAmountCent := int64(10155)
 	sellerName := "上海象鲜网络科技有限公司"
 	return []application.ReceiptView{{ID: "receipt-1", ClaimID: claimID, Filename: "hotel.png", Status: domain.ReceiptStatusExtracted, InvoiceNumber: "123", InvoiceDate: &invoiceDate, TotalAmountCent: &totalAmountCent, SellerName: &sellerName, OCRConfidence: 0.98}}, nil
+}
+
+type deletingFakeReceipts struct {
+	actorID, claimID, receiptID string
+}
+
+func (*deletingFakeReceipts) CreateUploadSession(context.Context, string, string, application.CreateUploadSessionCommand) (application.UploadSession, error) {
+	return application.UploadSession{}, nil
+}
+func (*deletingFakeReceipts) FinalizeReceiptUpload(context.Context, string, string, string) error {
+	return nil
+}
+func (*deletingFakeReceipts) ListReceipts(context.Context, string, string) ([]application.ReceiptView, error) {
+	return nil, nil
+}
+func (service *deletingFakeReceipts) DeleteReceipt(_ context.Context, actorID string, claimID string, receiptID string) error {
+	service.actorID, service.claimID, service.receiptID = actorID, claimID, receiptID
+	return nil
 }

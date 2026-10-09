@@ -23,6 +23,8 @@ services:
     entrypoint: ["/bin/sh", "-c", "set -a; . /run/secrets/app_env; set +a; export MINIO_ROOT_USER=\"$${MINIO_ROOT_USER:-$${S3_ACCESS_KEY_ID:?S3_ACCESS_KEY_ID is required}}\" MINIO_ROOT_PASSWORD=\"$${MINIO_ROOT_PASSWORD:-$${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY is required}}\"; exec minio server /data --console-address :9001"]
     secrets:
       - app_env
+    environment:
+      MINIO_API_CORS_ALLOW_ORIGIN: ${S3_CORS_ALLOWED_ORIGIN:-http://localhost:8088}
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -108,6 +110,8 @@ services:
     build: .
     command: npm run feishu:worker:container
     entrypoint: ["node", "/app/scripts/docker-runtime.mjs"]
+    environment:
+      REIMBURSEMENT_AGENT_STORAGE_ENDPOINT: http://minio:9000
     secrets:
       - app_env
     depends_on:
@@ -148,9 +152,12 @@ services:
     environment:
       REIMBURSEMENT_DATABASE_URL: ${REIMBURSEMENT_DATABASE_URL:-}
       S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}
       CLAMAV_HOST: clamav
       CLAMAV_PORT: "3310"
       OCR_SERVICE_URL: http://ocr:8000
+      REIMBURSEMENT_ALLOW_DUPLICATE_CONTENT_FOR_TESTING: ${REIMBURSEMENT_ALLOW_DUPLICATE_CONTENT_FOR_TESTING:-false}
+      REIMBURSEMENT_ALLOW_DUPLICATE_INVOICES_FOR_TESTING: ${REIMBURSEMENT_ALLOW_DUPLICATE_INVOICES_FOR_TESTING:-false}
     secrets:
       - app_env
     expose:
@@ -206,9 +213,12 @@ services:
       REIMBURSEMENT_DATABASE_URL: ${REIMBURSEMENT_DATABASE_URL:-}
       NATS_URL: nats://nats:4222
       S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}
       CLAMAV_HOST: clamav
       CLAMAV_PORT: "3310"
       OCR_SERVICE_URL: http://ocr:8000
+      REIMBURSEMENT_ALLOW_DUPLICATE_CONTENT_FOR_TESTING: ${REIMBURSEMENT_ALLOW_DUPLICATE_CONTENT_FOR_TESTING:-false}
+      REIMBURSEMENT_ALLOW_DUPLICATE_INVOICES_FOR_TESTING: ${REIMBURSEMENT_ALLOW_DUPLICATE_INVOICES_FOR_TESTING:-false}
     secrets:
       - app_env
     depends_on:

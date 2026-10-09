@@ -57,6 +57,11 @@ func (store *fakeObjectStore) ReadObject(_ context.Context, objectKey string) (S
 	return object, nil
 }
 
+func (store *fakeObjectStore) DeleteObject(_ context.Context, objectKey string) error {
+	delete(store.objects, objectKey)
+	return nil
+}
+
 func (store *fakeObjectStore) Put(objectKey string, contentType string, content []byte) {
 	store.objects[objectKey] = StoredObject{ContentType: contentType, Content: content}
 }
@@ -115,6 +120,17 @@ func (repository *fakeReceiptRepository) FindByContentHash(_ context.Context, ha
 		}
 	}
 	return domain.Receipt{}, ErrReceiptNotFound
+}
+
+func (repository *fakeReceiptRepository) DeleteOwned(_ context.Context, receiptID string, claimID string, actorID string) error {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	receipt, found := repository.receipts[receiptID]
+	if !found || receipt.ClaimID != claimID || receipt.OwnerID != actorID {
+		return ErrReceiptNotFound
+	}
+	delete(repository.receipts, receiptID)
+	return nil
 }
 
 func (repository *fakeReceiptRepository) MarkReadyForOCR(_ context.Context, receiptID string, hash string) error {

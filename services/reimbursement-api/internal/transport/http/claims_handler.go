@@ -50,7 +50,11 @@ func (handler *claimsHandler) createUploadSession(response http.ResponseWriter, 
 		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "请求内容格式不正确")
 		return
 	}
-	session, err := handler.receipts.CreateUploadSession(request.Context(), actor.ID, pathClaimID(request), application.CreateUploadSessionCommand{Filename: body.Filename, ContentType: body.ContentType, SizeBytes: body.SizeBytes})
+	ctx := request.Context()
+	if actor.Channel == "agent" {
+		ctx = application.WithInternalUploadURL(ctx)
+	}
+	session, err := handler.receipts.CreateUploadSession(ctx, actor.ID, pathClaimID(request), application.CreateUploadSessionCommand{Filename: body.Filename, ContentType: body.ContentType, SizeBytes: body.SizeBytes})
 	if err != nil {
 		writeMappedError(response, err)
 		return
@@ -99,6 +103,24 @@ func (handler *claimsHandler) listReceipts(response http.ResponseWriter, request
 		items = append(items, receiptResponse(receipt))
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"items": items})
+}
+
+func (handler *claimsHandler) deleteReceipt(response http.ResponseWriter, request *http.Request) {
+	actor, _ := ActorFromContext(request.Context())
+	if handler.receipts == nil {
+		writeError(response, http.StatusNotImplemented, "NOT_IMPLEMENTED", "附件服务暂不可用")
+		return
+	}
+	receiptID := strings.TrimSpace(request.PathValue("receiptId"))
+	if receiptID == "" {
+		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "缺少票据编号")
+		return
+	}
+	if err := handler.receipts.DeleteReceipt(request.Context(), actor.ID, pathClaimID(request), receiptID); err != nil {
+		writeMappedError(response, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
 }
 
 func receiptResponse(receipt application.ReceiptView) map[string]any {

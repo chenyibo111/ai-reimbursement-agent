@@ -294,6 +294,7 @@ model InboundChannelEvent {
   senderOpenId     String
   status           InboundChannelEventStatus @default(PENDING)
   failureCode      String?
+  attemptCount     Int                       @default(0)
   claimId          String?
   claim            ClaimDraft?               @relation(fields: [claimId], references: [id], onDelete: SetNull)
   receivedAt       DateTime                  @default(now())

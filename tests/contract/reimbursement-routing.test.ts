@@ -11,11 +11,15 @@ describe("reimbursement migration routing", () => {
 
     expect(nginx).toMatch(/location \^~ \/internal\/\s*\{\s*return 404;/);
     expect(nginx).toContain("location ^~ /api/auth/");
-    expect(nginx).toContain("proxy_pass http://web:3000");
+    expect(nginx).toContain("resolver 127.0.0.11 valid=10s ipv6=off;");
+    expect(nginx).toContain("proxy_pass http://$auth_bff_upstream");
+    expect(nginx).toContain("proxy_set_header Host $http_host;");
+    expect(nginx).toContain("proxy_set_header X-Forwarded-Host $http_host;");
+    expect(nginx).toContain("proxy_set_header X-Forwarded-Port $server_port;");
     expect(nginx).toContain("location ^~ /api/v1/");
-    expect(nginx).toContain("proxy_pass http://reimbursement-api:8080");
+    expect(nginx).toContain("proxy_pass http://$reimbursement_api_upstream");
     expect(nginx).toContain("location /");
-    expect(nginx).toContain("proxy_pass http://reimbursement-web:8080");
+    expect(nginx).toContain("proxy_pass http://$reimbursement_web_upstream");
   });
 
   it("keeps the Go API private and does not place secrets in public routing or operator guidance", async () => {

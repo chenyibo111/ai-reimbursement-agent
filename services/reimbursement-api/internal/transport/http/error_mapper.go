@@ -19,6 +19,8 @@ func writeMappedError(response http.ResponseWriter, err error) {
 		writeError(response, http.StatusConflict, "VERSION_CONFLICT", "报销单已变化，请重新确认")
 	case errors.Is(err, application.ErrSubmissionConfirmationExpired):
 		writeError(response, http.StatusConflict, "CONFIRMATION_EXPIRED", "确认已过期，请重新发起提交")
+	case errors.Is(err, domain.ErrClaimNotDraft):
+		writeError(response, http.StatusConflict, "CLAIM_NOT_DRAFT", "仅草稿报销单可以删除附件")
 	case errors.Is(err, application.ErrReceiptNotFound):
 		writeError(response, http.StatusNotFound, "NOT_FOUND", "未找到可访问的票据")
 	case errors.Is(err, domain.ErrInvalidClaim):

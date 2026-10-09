@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -26,12 +27,26 @@ var (
 	ErrDuplicateReceiptContent   = errors.New("receipt content was already uploaded")
 	ErrDuplicateSubmittedInvoice = errors.New("invoice number already exists on a submitted claim")
 	ErrReceiptNotFound           = errors.New("receipt not found")
+	pdfPageTypePattern           = regexp.MustCompile(`/Type\s*/Page\b`)
 )
 
 type CreateUploadSessionCommand struct {
 	Filename    string
 	ContentType string
 	SizeBytes   int64
+}
+
+type internalUploadContextKey struct{}
+
+// WithInternalUploadURL requests a pre-signed URL reachable from a trusted
+// in-cluster caller such as the Agent worker, rather than a browser endpoint.
+func WithInternalUploadURL(ctx context.Context) context.Context {
+	return context.WithValue(ctx, internalUploadContextKey{}, true)
+}
+
+func UsesInternalUploadURL(ctx context.Context) bool {
+	value, _ := ctx.Value(internalUploadContextKey{}).(bool)
+	return value
 }
 
 type UploadSession struct {
@@ -63,6 +78,7 @@ type StoredObject struct {
 type ObjectStore interface {
 	CreateUploadURL(context.Context, string, string, int64) (string, error)
 	ReadObject(context.Context, string) (StoredObject, error)
+	DeleteObject(context.Context, string) error
 }
 
 type FileScanner interface {
@@ -90,6 +106,7 @@ type ReceiptRepository interface {
 	FindOwned(context.Context, string, string, string) (domain.Receipt, error)
 	ListOwnedByClaim(context.Context, string, string) ([]domain.Receipt, error)
 	FindByContentHash(context.Context, string) (domain.Receipt, error)
+	DeleteOwned(context.Context, string, string, string) error
 	MarkReadyForOCR(context.Context, string, string) error
 	MarkReviewRequired(context.Context, string, string) error
 	MarkExtracted(context.Context, string, OCRResult) error
@@ -97,21 +114,45 @@ type ReceiptRepository interface {
 }
 
 type ReceiptService struct {
-	claims      ClaimReader
-	repository  ReceiptRepository
-	objects     ObjectStore
-	scanner     FileScanner
-	ocr         OCRClient
-	ids         IDGenerator
-	suggestions ClaimOCRSuggestionRefresher
+	claims                                   ClaimReader
+	repository                               ReceiptRepository
+	objects                                  ObjectStore
+	scanner                                  FileScanner
+	ocr                                      OCRClient
+	ids                                      IDGenerator
+	suggestions                              ClaimOCRSuggestionRefresher
+	allowDuplicateContentForTesting          bool
+	allowDuplicateSubmittedInvoiceForTesting bool
+}
+
+// ReceiptServiceOptions contains explicitly opt-in runtime behavior.
+// AllowDuplicateContentForTesting is intended only for local test environments.
+// Production callers must leave it false so exact-content duplicates enter review.
+type ReceiptServiceOptions struct {
+	AllowDuplicateContentForTesting          bool
+	AllowDuplicateSubmittedInvoiceForTesting bool
 }
 
 func NewReceiptService(claims ClaimReader, repository ReceiptRepository, objects ObjectStore, scanner FileScanner, ocr OCRClient, ids IDGenerator, suggestions ...ClaimOCRSuggestionRefresher) *ReceiptService {
+	return NewReceiptServiceWithOptions(claims, repository, objects, scanner, ocr, ids, ReceiptServiceOptions{}, suggestions...)
+}
+
+func NewReceiptServiceWithOptions(claims ClaimReader, repository ReceiptRepository, objects ObjectStore, scanner FileScanner, ocr OCRClient, ids IDGenerator, options ReceiptServiceOptions, suggestions ...ClaimOCRSuggestionRefresher) *ReceiptService {
 	var suggestionRefresher ClaimOCRSuggestionRefresher
 	if len(suggestions) > 0 {
 		suggestionRefresher = suggestions[0]
 	}
-	return &ReceiptService{claims: claims, repository: repository, objects: objects, scanner: scanner, ocr: ocr, ids: ids, suggestions: suggestionRefresher}
+	return &ReceiptService{
+		claims:                                   claims,
+		repository:                               repository,
+		objects:                                  objects,
+		scanner:                                  scanner,
+		ocr:                                      ocr,
+		ids:                                      ids,
+		suggestions:                              suggestionRefresher,
+		allowDuplicateContentForTesting:          options.AllowDuplicateContentForTesting,
+		allowDuplicateSubmittedInvoiceForTesting: options.AllowDuplicateSubmittedInvoiceForTesting,
+	}
 }
 
 func (service *ReceiptService) CreateUploadSession(ctx context.Context, actorID string, claimID string, command CreateUploadSessionCommand) (UploadSession, error) {
@@ -170,18 +211,54 @@ func (service *ReceiptService) FinalizeReceiptUpload(ctx context.Context, actorI
 		return ErrUnsafeReceiptFile
 	}
 	hash := contentHash(object.Content)
-	existing, err := service.repository.FindByContentHash(ctx, hash)
-	if err == nil && existing.ID != receipt.ID {
-		if err := service.repository.MarkReviewRequired(ctx, receipt.ID, "DUPLICATE_CONTENT"); err != nil {
-			return fmt.Errorf("flag duplicate receipt: %w", err)
+	if service.allowDuplicateContentForTesting {
+		hash = testReceiptContentHash(hash, receipt.ID)
+	} else {
+		existing, err := service.repository.FindByContentHash(ctx, hash)
+		if err == nil && existing.ID != receipt.ID {
+			if err := service.repository.MarkReviewRequired(ctx, receipt.ID, "DUPLICATE_CONTENT"); err != nil {
+				return fmt.Errorf("flag duplicate receipt: %w", err)
+			}
+			return ErrDuplicateReceiptContent
 		}
-		return ErrDuplicateReceiptContent
-	}
-	if err != nil && !errors.Is(err, ErrReceiptNotFound) {
-		return fmt.Errorf("find duplicate receipt: %w", err)
+		if err != nil && !errors.Is(err, ErrReceiptNotFound) {
+			return fmt.Errorf("find duplicate receipt: %w", err)
+		}
 	}
 	if err := service.repository.MarkReadyForOCR(ctx, receipt.ID, hash); err != nil {
 		return fmt.Errorf("mark receipt ready for ocr: %w", err)
+	}
+	return nil
+}
+
+func (service *ReceiptService) DeleteReceipt(ctx context.Context, actorID string, claimID string, receiptID string) error {
+	claim, err := service.claims.FindOwned(ctx, claimID, actorID)
+	if errors.Is(err, ErrClaimNotFound) {
+		return ErrClaimNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("find claim for receipt deletion: %w", err)
+	}
+	if claim.Status != domain.ClaimStatusDraft {
+		return domain.ErrClaimNotDraft
+	}
+	receipt, err := service.repository.FindOwned(ctx, receiptID, claimID, actorID)
+	if errors.Is(err, ErrReceiptNotFound) {
+		return ErrReceiptNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("find receipt for deletion: %w", err)
+	}
+	if err := service.objects.DeleteObject(ctx, receipt.ObjectKey); err != nil {
+		return fmt.Errorf("delete receipt object: %w", err)
+	}
+	if err := service.repository.DeleteOwned(ctx, receiptID, claimID, actorID); err != nil {
+		return fmt.Errorf("delete receipt record: %w", err)
+	}
+	if service.suggestions != nil {
+		if err := service.suggestions.RefreshOCRSuggestion(ctx, claimID, actorID); err != nil {
+			return fmt.Errorf("refresh ocr suggested amount: %w", err)
+		}
 	}
 	return nil
 }
@@ -256,7 +333,7 @@ func (service *ReceiptService) ExtractReceipt(ctx context.Context, actorID strin
 		if err != nil {
 			return fmt.Errorf("check submitted invoice: %w", err)
 		}
-		if exists {
+		if exists && !service.allowDuplicateSubmittedInvoiceForTesting {
 			if err := service.repository.MarkReviewRequired(ctx, receipt.ID, "DUPLICATE_SUBMITTED_INVOICE"); err != nil {
 				return fmt.Errorf("flag duplicate invoice: %w", err)
 			}
@@ -293,7 +370,7 @@ func hasValidSignature(contentType string, content []byte) bool {
 	case "image/png":
 		return len(content) >= 8 && bytes.Equal(content[:8], []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a})
 	case "application/pdf":
-		pageCount := bytes.Count(content, []byte("/Type /Page"))
+		pageCount := len(pdfPageTypePattern.FindAllIndex(content, -1))
 		return len(content) >= 5 && bytes.Equal(content[:5], []byte("%PDF-")) && pageCount > 0 && pageCount <= MaxPDFPages
 	default:
 		return false
@@ -303,4 +380,8 @@ func hasValidSignature(contentType string, content []byte) bool {
 func contentHash(content []byte) string {
 	digest := sha256.Sum256(content)
 	return hex.EncodeToString(digest[:])
+}
+
+func testReceiptContentHash(rawHash string, receiptID string) string {
+	return contentHash([]byte(rawHash + ":test-upload:" + receiptID))
 }

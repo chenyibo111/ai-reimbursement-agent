@@ -24,6 +24,7 @@ type SubmissionService interface {
 type ReceiptService interface {
 	CreateUploadSession(ctx context.Context, actorID string, claimID string, command application.CreateUploadSessionCommand) (application.UploadSession, error)
 	FinalizeReceiptUpload(ctx context.Context, actorID string, claimID string, receiptID string) error
+	DeleteReceipt(ctx context.Context, actorID string, claimID string, receiptID string) error
 	ListReceipts(ctx context.Context, actorID string, claimID string) ([]application.ReceiptView, error)
 }
 
@@ -48,6 +49,7 @@ func NewRouter(dependencies Dependencies) http.Handler {
 	mux.HandleFunc("POST /api/v1/claims/{claimId}/uploads", handler.createUploadSession)
 	mux.HandleFunc("GET /api/v1/claims/{claimId}/receipts", handler.listReceipts)
 	mux.HandleFunc("POST /api/v1/claims/{claimId}/receipts", handler.finalizeReceiptUpload)
+	mux.HandleFunc("DELETE /api/v1/claims/{claimId}/receipts/{receiptId}", handler.deleteReceipt)
 	mux.HandleFunc("POST /api/v1/claims/{claimId}/submission-requests", handler.requestSubmission)
 	mux.HandleFunc("POST /api/v1/claims/{claimId}/submit", handler.submitClaim)
 	if dependencies.Admin.Policies != nil && dependencies.Admin.Reviews != nil && dependencies.Admin.Role != nil {

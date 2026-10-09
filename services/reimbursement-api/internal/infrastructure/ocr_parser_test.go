@@ -38,3 +38,17 @@ func TestParseOCRReceiptKeepsZeroAmountDistinctFromMissingMetadata(t *testing.T)
 		t.Fatalf("unlabelled metadata must remain empty: %#v", missing)
 	}
 }
+
+func TestParseOCRReceiptExtractsWhitespaceSplitAndThousandsSeparatedTotal(t *testing.T) {
+	result := parseOCRReceipt("价 税 合 计 （ 小 写 ）\n人民币 ￥1,234.56", 0.88)
+	if result.TotalAmountCent == nil || *result.TotalAmountCent != 123456 {
+		t.Fatalf("total amount = %#v, want 123456 cents", result.TotalAmountCent)
+	}
+}
+
+func TestParseOCRReceiptExtractsStandaloneSmallWriteTotalAfterOCRLayoutSplit(t *testing.T) {
+	result := parseOCRReceipt("价税合计（大写）\n壹佰零玖圆肆角陆分\n（小写) ¥109.46\n备注", 0.97)
+	if result.TotalAmountCent == nil || *result.TotalAmountCent != 10946 {
+		t.Fatalf("total amount = %#v, want 10946 cents", result.TotalAmountCent)
+	}
+}

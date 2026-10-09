@@ -73,10 +73,18 @@ func main() {
 		}
 	}
 	ocrSuggestionRefresher := claimRepository
+	allowDuplicateContentForTesting := os.Getenv("REIMBURSEMENT_ALLOW_DUPLICATE_CONTENT_FOR_TESTING") == "true"
+	allowDuplicateSubmittedInvoiceForTesting := os.Getenv("REIMBURSEMENT_ALLOW_DUPLICATE_INVOICES_FOR_TESTING") == "true"
+	if allowDuplicateContentForTesting {
+		log.Print("WARNING: duplicate receipt content is allowed for local testing")
+	}
+	if allowDuplicateSubmittedInvoiceForTesting {
+		log.Print("WARNING: duplicate submitted invoice numbers are allowed for local testing")
+	}
 	router := transport.NewRouter(transport.Dependencies{
 		Claims:             application.NewClaimService(claimRepository, application.SecureIDGenerator{}, store.NewPostgresClaimNumberGenerator(pool), time.Now, ocrSuggestionRefresher),
 		Submissions:        application.NewSubmissionService(store.NewPostgresSubmissionRepository(pool), nil),
-		Receipts:           application.NewReceiptService(claimRepository, store.NewPostgresReceiptRepository(pool), objects, infrastructure.NewClamAVScanner(clamAddress), infrastructure.NewHTTPReceiptOCRClient(ocrURL), application.SecureIDGenerator{}, ocrSuggestionRefresher),
+		Receipts:           application.NewReceiptServiceWithOptions(claimRepository, store.NewPostgresReceiptRepository(pool), objects, infrastructure.NewClamAVScanner(clamAddress), infrastructure.NewHTTPReceiptOCRClient(ocrURL), application.SecureIDGenerator{}, application.ReceiptServiceOptions{AllowDuplicateContentForTesting: allowDuplicateContentForTesting, AllowDuplicateSubmittedInvoiceForTesting: allowDuplicateSubmittedInvoiceForTesting}, ocrSuggestionRefresher),
 		Admin:              transport.AdminServices{Policies: application.NewPolicyRuleService(store.NewPostgresPolicyRuleRepository(pool)), Reviews: application.NewReviewCaseService(store.NewPostgresReviewCaseRepository(pool)), Role: store.EmployeeRole(pool)},
 		EmployeeIdentities: application.NewEmployeeIdentityService(store.NewPostgresEmployeeIdentityRepository(pool)),
 		ProvisioningKey:    provisioningKey,
@@ -97,11 +105,19 @@ func minIOFromEnvironment() (*infrastructure.MinIOStore, error) {
 	if err != nil || parsed.Host == "" {
 		return nil, fmt.Errorf("S3_ENDPOINT must be an http(s) URL")
 	}
+	publicRawEndpoint := strings.TrimSpace(os.Getenv("S3_PUBLIC_ENDPOINT"))
+	if publicRawEndpoint == "" {
+		publicRawEndpoint = rawEndpoint
+	}
+	publicParsed, err := url.Parse(publicRawEndpoint)
+	if err != nil || publicParsed.Host == "" {
+		return nil, fmt.Errorf("S3_PUBLIC_ENDPOINT must be an http(s) URL")
+	}
 	bucket := strings.TrimSpace(os.Getenv("S3_BUCKET"))
 	accessKey := strings.TrimSpace(os.Getenv("S3_ACCESS_KEY_ID"))
 	secretKey := strings.TrimSpace(os.Getenv("S3_SECRET_ACCESS_KEY"))
 	if bucket == "" || accessKey == "" || secretKey == "" {
 		return nil, fmt.Errorf("S3_BUCKET, S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY are required")
 	}
-	return infrastructure.NewMinIOStore(parsed.Host, accessKey, secretKey, parsed.Scheme == "https", bucket)
+	return infrastructure.NewMinIOStore(parsed.Host, publicParsed.Host, accessKey, secretKey, parsed.Scheme == "https", publicParsed.Scheme == "https", bucket)
 }

@@ -60,7 +60,7 @@ type ClaimPatch struct {
 }
 
 func NewDraftClaim(id string, claimNumber string, ownerID string, purpose string) (Claim, error) {
-	if strings.TrimSpace(id) == "" || strings.TrimSpace(claimNumber) == "" || strings.TrimSpace(ownerID) == "" || strings.TrimSpace(purpose) == "" {
+	if strings.TrimSpace(id) == "" || strings.TrimSpace(claimNumber) == "" || strings.TrimSpace(ownerID) == "" {
 		return Claim{}, ErrInvalidClaim
 	}
 	now := time.Now().UTC()
@@ -69,7 +69,7 @@ func NewDraftClaim(id string, claimNumber string, ownerID string, purpose string
 		ClaimNumber:           claimNumber,
 		OwnerID:               ownerID,
 		Status:                ClaimStatusDraft,
-		Purpose:               purpose,
+		Purpose:               strings.TrimSpace(purpose),
 		Currency:              ClaimCurrencyCNY,
 		RequestedAmountSource: RequestedAmountSourceSuggested,
 		Version:               1,
@@ -86,10 +86,7 @@ func (claim *Claim) Patch(expectedVersion int64, patch ClaimPatch) error {
 		return ErrClaimVersionConflict
 	}
 	if patch.Purpose != nil {
-		if strings.TrimSpace(*patch.Purpose) == "" {
-			return ErrInvalidClaim
-		}
-		claim.Purpose = *patch.Purpose
+		claim.Purpose = strings.TrimSpace(*patch.Purpose)
 	}
 	if patch.ExpenseCategory != nil {
 		claim.ExpenseCategory = *patch.ExpenseCategory

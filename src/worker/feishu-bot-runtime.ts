@@ -68,6 +68,17 @@ async function drain(
   try {
     const result = await deps.processEvent({ eventId: inbound.eventId });
     if (result.kind === "RETRYABLE_FAILURE" && result.retryable) {
+      if (inbound.attemptCount >= 3) {
+        await deps.repository.markProcessed(inbound.id);
+        if (inbound.messageId) {
+          try {
+            await deps.replyText(inbound.messageId, result.replyText);
+          } catch {
+            // The terminal business state is durable even if the provider reply fails.
+          }
+        }
+        return true;
+      }
       await deps.repository.markRetryableFailure(inbound.id, "RETRYABLE_FAILURE");
       return true;
     }

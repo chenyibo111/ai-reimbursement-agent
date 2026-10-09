@@ -54,10 +54,18 @@ func main() {
 
 	claimRepository := store.NewPostgresClaimRepository(pool)
 	receipts := store.NewPostgresReceiptRepository(pool)
-	receiptService := application.NewReceiptService(
+	allowDuplicateContentForTesting := os.Getenv("REIMBURSEMENT_ALLOW_DUPLICATE_CONTENT_FOR_TESTING") == "true"
+	allowDuplicateSubmittedInvoiceForTesting := os.Getenv("REIMBURSEMENT_ALLOW_DUPLICATE_INVOICES_FOR_TESTING") == "true"
+	if allowDuplicateContentForTesting {
+		log.Print("WARNING: duplicate receipt content is allowed for local testing")
+	}
+	if allowDuplicateSubmittedInvoiceForTesting {
+		log.Print("WARNING: duplicate submitted invoice numbers are allowed for local testing")
+	}
+	receiptService := application.NewReceiptServiceWithOptions(
 		claimRepository, receipts, objects,
 		infrastructure.NewClamAVScanner(clamAddress), infrastructure.NewHTTPReceiptOCRClient(ocrURL),
-		application.SecureIDGenerator{}, claimRepository,
+		application.SecureIDGenerator{}, application.ReceiptServiceOptions{AllowDuplicateContentForTesting: allowDuplicateContentForTesting, AllowDuplicateSubmittedInvoiceForTesting: allowDuplicateSubmittedInvoiceForTesting}, claimRepository,
 	)
 	receiptWorker := workers.NewReceiptExtractionWorker(
 		events.NewPostgresEventDeduplicator(pool, workers.ReceiptOCRConsumer),
@@ -99,11 +107,19 @@ func minIOFromEnvironment() (*infrastructure.MinIOStore, error) {
 	if err != nil || parsed.Host == "" {
 		return nil, fmt.Errorf("S3_ENDPOINT must be an http(s) URL")
 	}
+	publicRawEndpoint := strings.TrimSpace(os.Getenv("S3_PUBLIC_ENDPOINT"))
+	if publicRawEndpoint == "" {
+		publicRawEndpoint = rawEndpoint
+	}
+	publicParsed, err := url.Parse(publicRawEndpoint)
+	if err != nil || publicParsed.Host == "" {
+		return nil, fmt.Errorf("S3_PUBLIC_ENDPOINT must be an http(s) URL")
+	}
 	bucket := strings.TrimSpace(os.Getenv("S3_BUCKET"))
 	accessKey := strings.TrimSpace(os.Getenv("S3_ACCESS_KEY_ID"))
 	secretKey := strings.TrimSpace(os.Getenv("S3_SECRET_ACCESS_KEY"))
 	if bucket == "" || accessKey == "" || secretKey == "" {
 		return nil, fmt.Errorf("S3_BUCKET, S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY are required")
 	}
-	return infrastructure.NewMinIOStore(parsed.Host, accessKey, secretKey, parsed.Scheme == "https", bucket)
+	return infrastructure.NewMinIOStore(parsed.Host, publicParsed.Host, accessKey, secretKey, parsed.Scheme == "https", publicParsed.Scheme == "https", bucket)
 }

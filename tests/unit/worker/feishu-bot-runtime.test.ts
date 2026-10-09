@@ -73,6 +73,26 @@ it("returns retryable processing failures to the pending queue", async () => {
   expect(calls.processed).toBe(0);
 });
 
+it("notifies the user and releases the queue after three retryable failures", async () => {
+  const { calls } = fixture();
+  const runtime = createFeishuBotRuntime({
+    repository: {
+      recordInbound: async () => ({ id: "inbound-1", shouldProcess: true }),
+      claimNextPending: async () => ({ id: "inbound-1", eventId: "event-1", messageId: "om-1", messageType: "file", chatId: "oc-1", senderOpenId: "ou-1", chatType: "p2p", mentionedOpenIds: [], status: "PROCESSING", claimId: null, attemptCount: 3 }),
+      markProcessed: async () => { calls.processed += 1; },
+      markRetryableFailure: async () => { calls.retryable += 1; },
+    },
+    processEvent: async () => ({ kind: "RETRYABLE_FAILURE", retryable: true, replyText: "附件暂未上传完成，请重新发送。" }),
+    replyText: async () => { calls.replies += 1; },
+  });
+
+  await runtime.drainOnce();
+
+  expect(calls.retryable).toBe(0);
+  expect(calls.processed).toBe(1);
+  expect(calls.replies).toBe(1);
+});
+
 it("keeps a completed business event processed when sending the reply fails", async () => {
   const { calls, pending } = fixture();
   const runtime = createFeishuBotRuntime({

@@ -195,6 +195,25 @@ it("submits exactly once only after the server has prepared the active Intake", 
   expect(getIntake()).toMatchObject({ status: "SUBMITTED" });
 });
 
+it("keeps the conversation responsive when server-side submission validation blocks confirmation", async () => {
+  const { deps, appendMessage, getIntake } = createDeps({
+    model: { decideConversation: async () => ({ action: "REQUEST_SUBMISSION" as const, reply: "请确认提交。" }) },
+    requestSubmission: async () => { throw new Error("报销单尚未满足提交条件"); },
+  });
+  await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1", pendingFields: [] });
+
+  await expect(runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", channelMessageId: "message-validation-blocked", message: "可以提交了吗" }, deps)).resolves.toMatchObject({
+    reply: expect.stringContaining("暂时不能提交"),
+    intake: { status: "COLLECTING" },
+  });
+
+  expect(appendMessage).toHaveBeenLastCalledWith(expect.objectContaining({
+    role: "ASSISTANT",
+    inReplyToChannelMessageId: "message-validation-blocked",
+  }));
+  expect(getIntake()).toMatchObject({ status: "COLLECTING" });
+});
+
 it("invalidates a prepared submission when another attachment changes the claim", async () => {
   const { deps, getIntake } = createDeps({
     model: { decideConversation: async () => ({ action: "REQUEST_SUBMISSION" as const, reply: "请确认提交。" }) },

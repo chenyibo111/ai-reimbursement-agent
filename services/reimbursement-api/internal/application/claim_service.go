@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -95,9 +94,6 @@ func NewClaimService(repository ClaimRepository, ids IDGenerator, numbers ClaimN
 }
 
 func (service *ClaimService) CreateClaim(ctx context.Context, actorID string, command CreateClaimCommand) (ClaimView, error) {
-	if strings.TrimSpace(command.Purpose) == "" {
-		return ClaimView{}, domain.ErrInvalidClaim
-	}
 	claimNumber, err := service.numbers.Next(ctx, service.now())
 	if err != nil {
 		return ClaimView{}, fmt.Errorf("allocate claim number: %w", err)

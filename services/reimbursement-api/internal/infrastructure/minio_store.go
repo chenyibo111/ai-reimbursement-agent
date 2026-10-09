@@ -12,21 +12,30 @@ import (
 )
 
 type MinIOStore struct {
-	client    *minio.Client
-	bucket    string
-	expiresIn time.Duration
+	client        *minio.Client
+	presignClient *minio.Client
+	bucket        string
+	expiresIn     time.Duration
 }
 
-func NewMinIOStore(endpoint string, accessKey string, secretKey string, secure bool, bucket string) (*MinIOStore, error) {
-	client, err := minio.New(endpoint, &minio.Options{Creds: credentials.NewStaticV4(accessKey, secretKey, ""), Secure: secure})
+func NewMinIOStore(endpoint string, publicEndpoint string, accessKey string, secretKey string, secure bool, publicSecure bool, bucket string) (*MinIOStore, error) {
+	client, err := minio.New(endpoint, &minio.Options{Creds: credentials.NewStaticV4(accessKey, secretKey, ""), Secure: secure, Region: "us-east-1"})
 	if err != nil {
 		return nil, fmt.Errorf("create minio client: %w", err)
 	}
-	return &MinIOStore{client: client, bucket: bucket, expiresIn: 10 * time.Minute}, nil
+	presignClient, err := minio.New(publicEndpoint, &minio.Options{Creds: credentials.NewStaticV4(accessKey, secretKey, ""), Secure: publicSecure, Region: "us-east-1"})
+	if err != nil {
+		return nil, fmt.Errorf("create public minio client: %w", err)
+	}
+	return &MinIOStore{client: client, presignClient: presignClient, bucket: bucket, expiresIn: 10 * time.Minute}, nil
 }
 
 func (store *MinIOStore) CreateUploadURL(ctx context.Context, objectKey string, _ string, _ int64) (string, error) {
-	url, err := store.client.PresignedPutObject(ctx, store.bucket, objectKey, store.expiresIn)
+	presigner := store.presignClient
+	if application.UsesInternalUploadURL(ctx) {
+		presigner = store.client
+	}
+	url, err := presigner.PresignedPutObject(ctx, store.bucket, objectKey, store.expiresIn)
 	if err != nil {
 		return "", fmt.Errorf("presign minio put object: %w", err)
 	}
@@ -54,4 +63,11 @@ func (store *MinIOStore) ReadObject(ctx context.Context, objectKey string) (appl
 		return application.StoredObject{}, application.ErrInvalidReceiptSize
 	}
 	return application.StoredObject{ContentType: stat.ContentType, Content: content}, nil
+}
+
+func (store *MinIOStore) DeleteObject(ctx context.Context, objectKey string) error {
+	if err := store.client.RemoveObject(ctx, store.bucket, objectKey, minio.RemoveObjectOptions{}); err != nil {
+		return fmt.Errorf("delete minio object: %w", err)
+	}
+	return nil
 }

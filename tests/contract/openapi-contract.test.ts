@@ -14,6 +14,8 @@ describe("reimbursement OpenAPI contract", () => {
     expect(specification).toContain("/api/v1/claims/{claimId}/uploads:");
     expect(specification).toContain("/api/v1/claims/{claimId}/receipts:");
 		expect(specification).toContain("operationId: listClaimReceipts");
+		expect(specification).toContain("/api/v1/claims/{claimId}/receipts/{receiptId}:");
+		expect(specification).toContain("operationId: deleteClaimReceipt");
     expect(specification).toContain("/api/v1/claims/{claimId}/validation:");
     expect(specification).toContain("/api/v1/claims/{claimId}/submission-requests:");
     expect(specification).toContain("/api/v1/claims/{claimId}/submit:");

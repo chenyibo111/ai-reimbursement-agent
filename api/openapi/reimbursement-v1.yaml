@@ -71,9 +71,10 @@ paths:
           application/json:
             schema:
               type: object
-              required: [purpose]
               properties:
-                purpose: { type: string, minLength: 1 }
+                purpose:
+                  type: string
+                  description: 报销事由。草稿可留空，提交时必填。
       responses:
         "201":
           description: Draft created
@@ -111,7 +112,9 @@ paths:
               additionalProperties: false
               properties:
                 version: { type: integer, minimum: 1 }
-                purpose: { type: string, minLength: 1 }
+                purpose:
+                  type: string
+                  description: 报销事由。草稿可留空，提交时必填。
                 expenseCategory: { type: string }
                 participants:
                   type: array
@@ -191,6 +194,24 @@ paths:
           description: Receipt accepted for extraction
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/claims/{claimId}/receipts/{receiptId}:
+    delete:
+      operationId: deleteClaimReceipt
+      summary: Delete one attachment from an actor-owned draft claim
+      parameters:
+        - $ref: "#/components/parameters/ClaimId"
+        - $ref: "#/components/parameters/ReceiptId"
+      responses:
+        "204":
+          description: Attachment deleted
+        "409":
+          description: Claim is no longer a draft
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/claims/{claimId}/validation:
     get:
       operationId: getClaimValidation
@@ -259,6 +280,12 @@ components:
   parameters:
     ClaimId:
       name: claimId
+      in: path
+      required: true
+      schema:
+        type: string
+    ReceiptId:
+      name: receiptId
       in: path
       required: true
       schema:

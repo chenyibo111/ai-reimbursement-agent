@@ -30,7 +30,7 @@ export async function GET(request: Request) {
     const sessionSecret = process.env.SESSION_SECRET;
     if (!sessionSecret) throw new Error("session configuration is missing");
 
-    const response = NextResponse.redirect(new URL(parseSafeReturnTo(getCookie(request, oauthReturnToCookieName)), request.url));
+    const response = NextResponse.redirect(new URL(parseSafeReturnTo(getCookie(request, oauthReturnToCookieName)), config.redirectUri));
     response.headers.append("Set-Cookie", clearOAuthStateCookie(isProduction()));
     response.headers.append("Set-Cookie", clearOAuthReturnToCookie(isProduction()));
     response.headers.append("Set-Cookie", sessionCookie(employee.id, sessionSecret, isProduction()));

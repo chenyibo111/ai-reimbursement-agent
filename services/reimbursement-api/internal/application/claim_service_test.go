@@ -46,6 +46,18 @@ func TestCreateClaimAssignsDraftToActor(t *testing.T) {
 	}
 }
 
+func TestCreateClaimAllowsAnIncompleteDraft(t *testing.T) {
+	service := newClaimServiceForTest(NewMemoryClaimRepository())
+
+	claim, err := service.CreateClaim(context.Background(), "employee-1", CreateClaimCommand{})
+	if err != nil {
+		t.Fatalf("create incomplete draft: %v", err)
+	}
+	if claim.Purpose != "" || claim.Status != domain.ClaimStatusDraft {
+		t.Fatalf("incomplete draft = %#v", claim)
+	}
+}
+
 func TestUpdateClaimRejectsAnotherEmployeesClaim(t *testing.T) {
 	service := newClaimServiceForTest(NewMemoryClaimRepository())
 	claim, err := service.CreateClaim(context.Background(), "employee-1", CreateClaimCommand{Purpose: "客户拜访"})

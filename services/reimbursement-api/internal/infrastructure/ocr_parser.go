@@ -14,7 +14,7 @@ import (
 var (
 	invoiceNumberPattern = regexp.MustCompile(`(?m)(?:发票号码|发票号)\s*[：:]?\s*([A-Za-z0-9-]{6,})`)
 	invoiceDatePattern   = regexp.MustCompile(`(?m)(?:开票日期|日期)\s*[：:]?\s*((?:19|20)\d{2})\s*(?:年|[-/.])\s*(\d{1,2})\s*(?:月|[-/.])\s*(\d{1,2})\s*日?`)
-	totalAmountPattern   = regexp.MustCompile(`(?m)(?:价税合计(?:（小写）|\(小写\))?|合计)\s*[：:]?\s*(?:人民币\s*)?[¥￥]?\s*([0-9]{1,10}(?:\.[0-9]{1,2})?)(?:\s|$)`)
+	totalAmountPattern   = regexp.MustCompile(`(?m)(?:价\s*税\s*合\s*计\s*(?:[（(]\s*小\s*写\s*[）)])?|合\s*计|[（(]\s*小\s*写\s*[）)])\s*[：:]?\s*(?:人民币\s*)?[¥￥]?\s*((?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]{1,10})(?:\.[0-9]{1,2})?)(?:\s|$)`)
 	sellerNamePattern    = regexp.MustCompile(`(?m)(?:销售方名称|销售方\s*名称)\s*[：:]?\s*([^\r\n]{1,160})`)
 )
 
@@ -42,6 +42,7 @@ func parseOCRReceipt(text string, confidence float64) application.OCRResult {
 }
 
 func amountCents(value string) (int64, bool) {
+	value = strings.ReplaceAll(value, ",", "")
 	parts := strings.Split(value, ".")
 	if len(parts) > 2 || len(parts[0]) == 0 || len(parts[0]) > 10 {
 		return 0, false

@@ -95,6 +95,49 @@ func (repository *PostgresReceiptRepository) FindByContentHash(ctx context.Conte
 	`, hash))
 }
 
+func (repository *PostgresReceiptRepository) DeleteOwned(ctx context.Context, receiptID string, claimID string, actorID string) error {
+	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin receipt deletion: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var status domain.ClaimStatus
+	if err = tx.QueryRow(ctx, `SELECT status FROM reimbursement.claims WHERE id = $1 AND owner_id = $2 FOR UPDATE`, claimID, actorID).Scan(&status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return application.ErrClaimNotFound
+		}
+		return fmt.Errorf("lock claim for receipt deletion: %w", err)
+	}
+	if status != domain.ClaimStatusDraft {
+		return domain.ErrClaimNotDraft
+	}
+
+	if _, err = scanReceipt(tx.QueryRow(ctx, `
+		SELECT id, claim_id, owner_id, filename, content_type, expected_size, object_key,
+		       content_hash, status, invoice_number, invoice_date, total_amount_cent, seller_name, ocr_confidence, created_at, updated_at
+		FROM reimbursement.receipts
+		WHERE id = $1 AND claim_id = $2 AND owner_id = $3
+		FOR UPDATE
+	`, receiptID, claimID, actorID)); err != nil {
+		return err
+	}
+	if err = writeReceiptAuditAndEvent(ctx, tx, receiptID, claimID, actorID, "RECEIPT_DELETED", "ReceiptDeleted"); err != nil {
+		return err
+	}
+	result, err := tx.Exec(ctx, `DELETE FROM reimbursement.receipts WHERE id = $1 AND claim_id = $2 AND owner_id = $3`, receiptID, claimID, actorID)
+	if err != nil {
+		return fmt.Errorf("delete receipt: %w", err)
+	}
+	if result.RowsAffected() != 1 {
+		return application.ErrReceiptNotFound
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit receipt deletion: %w", err)
+	}
+	return nil
+}
+
 func (repository *PostgresReceiptRepository) MarkReadyForOCR(ctx context.Context, receiptID string, hash string) error {
 	return repository.withReceiptMutation(ctx, receiptID, "RECEIPT_READY_FOR_OCR", "ReceiptReadyForOCR", func(tx pgx.Tx) (string, string, error) {
 		result, err := tx.Exec(ctx, `UPDATE reimbursement.receipts SET content_hash = $2, status = 'READY_FOR_OCR', updated_at = now() WHERE id = $1`, receiptID, hash)
