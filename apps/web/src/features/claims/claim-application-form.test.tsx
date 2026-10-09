@@ -38,6 +38,32 @@ describe("ClaimApplicationForm", () => {
     expect(parseCNYAmountToCent("1e2").error).toContain("数字");
   });
 
+  it("uses a generic amount hint and explains when recognized receipts have no amount", () => {
+    const claim = { ...manualClaim, requestedAmountCent: null, requestedAmountSource: "OCR_SUGGESTED" as const, totalAmountCent: null, recognizedReceiptCount: 1 };
+    const { container } = renderForm(claim);
+    const form = within(container);
+
+    expect(form.getByLabelText("申请报销总额")).toHaveAttribute("placeholder", "请输入金额");
+    expect(form.getByText("已识别票据尚未提取金额，请手工补充申请报销总额。")).toBeVisible();
+  });
+
+  it("saves the report purpose together with the other application fields", async () => {
+    const user = userEvent.setup();
+    const { container } = renderForm();
+    const form = within(container);
+
+    const purpose = form.getByLabelText(/报销事由/);
+    await user.clear(purpose);
+    await user.type(purpose, "客户午餐招待");
+    await user.click(form.getByRole("button", { name: "保存草稿" }));
+
+    const { reimbursementApi } = await import("../../api/client");
+    expect(reimbursementApi.updateClaim).toHaveBeenCalledWith("claim-1", expect.objectContaining({
+      version: 3,
+      purpose: "客户午餐招待",
+    }));
+  });
+
   it("shows OCR difference and sends only the explicit restore action", async () => {
     const user = userEvent.setup();
 		const { container } = renderForm();
@@ -61,7 +87,7 @@ describe("ClaimApplicationForm", () => {
 		await user.type(amount, "101.55");
 		await user.clear(form.getByLabelText(/备注/));
 		await user.type(form.getByLabelText(/备注/), "客户拜访交通费");
-		await user.click(form.getByRole("button", { name: "保存申请信息" }));
+		await user.click(form.getByRole("button", { name: "保存草稿" }));
 
 		expect(await form.findByText("报销单已变化，请重新确认")).toBeVisible();
 		expect(amount).toHaveValue("101.55");

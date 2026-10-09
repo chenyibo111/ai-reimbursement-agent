@@ -29,6 +29,7 @@ export interface Claim {
 
 export interface ClaimPatch {
   version: number;
+  purpose?: string;
   requestedAmountCent?: number;
   currency?: "CNY";
   remark?: string | null;

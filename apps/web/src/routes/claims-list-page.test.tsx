@@ -1,6 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
@@ -32,8 +31,7 @@ vi.mock("../api/client", () => ({
 }));
 
 describe("ClaimListPage", () => {
-  it("shows the employee's drafts and opens the accessible create form", async () => {
-    const user = userEvent.setup();
+  it("shows the employee's drafts and links to an unpersisted new claim form", async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={queryClient}>
@@ -47,9 +45,7 @@ describe("ClaimListPage", () => {
 		expect(screen.getByText("BX20261007-0001")).toBeVisible();
 		expect(screen.getByText("已识别金额 ￥203.97 · 另有 1 份待补充")).toBeVisible();
 		expect(screen.getByText("票据 3 份，已识别 2 份")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "新建报销草稿" }));
-
-    expect(screen.getByRole("heading", { name: "新建报销草稿" })).toBeVisible();
-    expect(screen.getByLabelText("报销事由")).toBeVisible();
+		const create = screen.getByRole("link", { name: "新建报销单" });
+		expect(create).toHaveAttribute("href", "/claims/new");
   });
 });

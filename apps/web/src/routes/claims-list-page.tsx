@@ -1,10 +1,7 @@
-import { FormEvent, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 
-import { reimbursementApi } from "../api/client";
 import type { ClaimStatus } from "../api/generated/reimbursement";
-import { claimKeys, useClaims } from "../features/claims/use-claim";
+import { useClaims } from "../features/claims/use-claim";
 import { claimAmountSummary } from "../features/claims/claim-display";
 
 const statusLabel: Record<ClaimStatus, string> = {
@@ -15,35 +12,8 @@ const statusLabel: Record<ClaimStatus, string> = {
   SUBMITTED: "已提交",
 };
 
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "操作未完成，请稍后重试。";
-}
-
 export function ClaimListPage() {
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const claimsQuery = useClaims();
-  const [isCreateOpen, setCreateOpen] = useState(false);
-  const [purpose, setPurpose] = useState("");
-  const [formError, setFormError] = useState("");
-  const createClaim = useMutation({
-    mutationFn: reimbursementApi.createClaim,
-    onSuccess: async (claim) => {
-      await queryClient.invalidateQueries({ queryKey: claimKeys.all });
-      navigate(`/claims/${claim.id}`, { state: { notice: "草稿已创建。请上传票据并完成提交前检查。" } });
-    },
-  });
-
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const value = purpose.trim();
-    if (!value) {
-      setFormError("请填写报销事由。");
-      return;
-    }
-    setFormError("");
-    createClaim.mutate(value);
-  }
 
   return (
     <main className="page-shell" aria-labelledby="claims-page-title">
@@ -53,37 +23,8 @@ export function ClaimListPage() {
           <h1 id="claims-page-title">我的凭证卷宗</h1>
           <p className="page-summary">每份草稿都保留票据处理、校验与提交的完整脉络。</p>
         </div>
-        <button className="primary-action" type="button" onClick={() => setCreateOpen(true)}>新建报销草稿</button>
+        <Link className="primary-action new-claim-action" to="/claims/new">新建报销单</Link>
       </header>
-
-      <p className="sr-only" role="status" aria-live="polite">{createClaim.isPending ? "正在创建草稿" : ""}</p>
-
-      {isCreateOpen && (
-        <section className="create-panel" aria-labelledby="create-claim-title">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">新卷宗</p>
-              <h2 id="create-claim-title">新建报销草稿</h2>
-            </div>
-            <button className="text-action" type="button" onClick={() => setCreateOpen(false)}>取消</button>
-          </div>
-          <form noValidate onSubmit={submit}>
-            <label htmlFor="claim-purpose">报销事由</label>
-            <input
-              id="claim-purpose"
-              value={purpose}
-              onChange={(event) => setPurpose(event.target.value)}
-              aria-describedby={formError ? "claim-purpose-error" : undefined}
-              placeholder="例如：杭州客户拜访"
-              autoFocus
-            />
-            {(formError || createClaim.isError) && <p id="claim-purpose-error" className="field-error" role="alert">{formError || errorMessage(createClaim.error)}</p>}
-            <div className="form-actions">
-              <button className="primary-action" type="submit" disabled={createClaim.isPending}>{createClaim.isPending ? "正在创建…" : "创建并进入工作台"}</button>
-            </div>
-          </form>
-        </section>
-      )}
 
       <section className="claim-list" aria-labelledby="claim-list-title">
         <div className="section-heading">
@@ -91,7 +32,7 @@ export function ClaimListPage() {
           <span className="quiet-count">最多显示最近 50 条</span>
         </div>
         {claimsQuery.isLoading && <p className="empty-state" role="status">正在读取你的报销单…</p>}
-        {claimsQuery.isError && <p className="field-error" role="alert">{errorMessage(claimsQuery.error)}</p>}
+        {claimsQuery.isError && <p className="field-error" role="alert">读取报销单失败，请稍后重试。</p>}
         {claimsQuery.data && claimsQuery.data.items.length === 0 && <p className="empty-state">尚无报销草稿。创建一份卷宗即可从上传票据开始。</p>}
         <div className="claim-grid">
           {claimsQuery.data?.items.map((claim) => (

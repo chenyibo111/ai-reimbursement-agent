@@ -52,6 +52,7 @@ export function createReimbursementApi(tokenProvider: TokenProvider, deps: ApiCl
     getClaim: (claimId: string) => request<Claim>(`/api/v1/claims/${encodeURIComponent(claimId)}`),
 		updateClaim: (claimId: string, patch: ClaimPatch) => request<Claim>(`/api/v1/claims/${encodeURIComponent(claimId)}`, { method: "PATCH", body: patch, idempotent: true }),
     listReceipts: (claimId: string) => request<{ items: Receipt[] }>(`/api/v1/claims/${encodeURIComponent(claimId)}/receipts`),
+    deleteReceipt: (claimId: string, receiptId: string) => request<void>(`/api/v1/claims/${encodeURIComponent(claimId)}/receipts/${encodeURIComponent(receiptId)}`, { method: "DELETE", idempotent: true }),
     createClaim: (purpose: string) => request<Claim>("/api/v1/claims", { method: "POST", body: { purpose }, idempotent: true }),
     createUploadSession: (claimId: string, input: { filename: string; contentType: string; sizeBytes: number }) => request<{ receiptId: string; uploadUrl: string }>(`/api/v1/claims/${encodeURIComponent(claimId)}/uploads`, { method: "POST", body: input, idempotent: true }),
     finalizeReceipt: (claimId: string, receiptId: string) => request<{ receiptId: string; status: string }>(`/api/v1/claims/${encodeURIComponent(claimId)}/receipts`, { method: "POST", body: { receiptId }, idempotent: true }),
