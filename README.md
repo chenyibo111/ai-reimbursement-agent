@@ -350,6 +350,15 @@ npm run roles:bootstrap -- <employeeId>
 - 将 `APP_PUBLIC_URL` 和 `FEISHU_REDIRECT_URI` 切换为固定 HTTPS 域名，并在飞书开放平台登记完全相同的回调地址。
 - 验收：从飞书消息打开具体 `/claims/<id>`，未登录用户完成授权后回到同一报销单；已登录用户直接进入；外部 `returnTo` 被忽略并回退到 `/claims`。
 
+### 待办：Go 人工复核案件队列切流
+
+当前 Go OCR 迁移链路能将异常票据标记为 `REVIEW_REQUIRED` 并保留安全原因代码，但尚未为每个异常自动创建可领取的 `ReviewCase`；`/admin/reviews` 也尚未提供待办列表。因此在完成前，不能把“需要人工复核”视为已有可操作队列。
+
+- 在重复发票、低置信识别、OCR 重试耗尽等分流时，以事务方式创建或更新关联 `ReviewCase`，保证幂等。
+- 提供只对 `FINANCE_REVIEWER` / `ADMIN` 开放的列表、领取、详情和结案 API，并让 React 复核页展示待办队列。
+- 对业务阻断（如已提交发票号重复）停止无意义的 OCR 重试；复核原因仅保留一次并可关联已提交单据。
+- 验收：异常票据仅生成一条可领取案件，复核操作写入审计，普通员工不能读取内部复核原因。
+
 ## 许可证
 
 本仓库采用 [MIT License](LICENSE)。
