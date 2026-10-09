@@ -3,7 +3,7 @@ import { expect, it } from "vitest";
 import { processFeishuEvent, type ProcessFeishuEventDeps } from "@/src/application/process-feishu-event";
 
 function fixture(overrides: Partial<ProcessFeishuEventDeps> = {}) {
-  const calls = { findEmployee: 0, private: 0, group: 0, turn: [] as Array<Record<string, unknown>>, download: 0 };
+  const calls = { findEmployee: 0, ensureEmployee: 0, private: 0, group: 0, deliveryTargets: [] as Array<{ conversationId: string; chatId: string }>, turn: [] as Array<Record<string, unknown>>, download: 0 };
   const deps: ProcessFeishuEventDeps = {
     botOpenId: "ou-bot",
     publicAppUrl: "https://reimbursement.example.test",
@@ -12,6 +12,12 @@ function fixture(overrides: Partial<ProcessFeishuEventDeps> = {}) {
       findEmployeeByOpenId: async () => {
         calls.findEmployee += 1;
         return { id: "employee-1" };
+      },
+    },
+    identities: {
+      ensureEmployeeForInboundMessage: async () => {
+        calls.ensureEmployee += 1;
+        return { id: "employee-1", role: "EMPLOYEE" };
       },
     },
     conversations: {
@@ -23,6 +29,7 @@ function fixture(overrides: Partial<ProcessFeishuEventDeps> = {}) {
         calls.group += 1;
         return { id: "group-employee-1-oc-1" };
       },
+      recordFeishuDeliveryTarget: async (input) => { calls.deliveryTargets.push(input); },
     },
     client: {
       getMessage: async () => ({ messageId: "om-1", chatId: "oc-1", chatType: "p2p", senderOpenId: "ou-employee", messageType: "text", text: "住宿报销规则是什么", mentions: [], attachments: [] }),
@@ -60,17 +67,41 @@ it("ignores a group message that does not mention the bot before looking up an e
   expect(calls.turn).toHaveLength(0);
 });
 
-it("returns a Web OAuth login link for an unbound employee without creating a conversation", async () => {
-  const { deps, calls } = fixture({
-    events: { ...fixture().deps.events, findEmployeeByOpenId: async () => null },
-  });
+it("provisions an unbound sender before routing the first message into a private conversation", async () => {
+  const { deps, calls } = fixture();
+  const identities = {
+    ensureEmployeeForInboundMessage: async () => {
+      calls.ensureEmployee += 1;
+      return { id: "employee-1", role: "EMPLOYEE" as const };
+    },
+  };
+  const provisioningDeps = { ...deps, identities };
 
-  await expect(processFeishuEvent({ eventId: "event-1" }, deps)).resolves.toEqual({
-    kind: "LOGIN_REQUIRED",
-    replyText: "请先登录并绑定飞书账号：https://reimbursement.example.test/api/auth/feishu/login",
+  await expect(processFeishuEvent({ eventId: "event-1" }, provisioningDeps)).resolves.toMatchObject({ kind: "AGENT_REPLIED" });
+  expect(calls.ensureEmployee).toBe(1);
+  expect(calls.private).toBe(1);
+  expect(calls.turn).toHaveLength(1);
+});
+
+it("does not create a conversation when first-contact provisioning is unavailable", async () => {
+  const { deps, calls } = fixture();
+  const identities = {
+    ensureEmployeeForInboundMessage: async () => {
+      calls.ensureEmployee += 1;
+      throw new Error("IDENTITY_PROVISIONING_UNAVAILABLE");
+    },
+  };
+  const provisioningDeps = { ...deps, identities };
+
+  await expect(processFeishuEvent({ eventId: "event-1" }, provisioningDeps)).resolves.toEqual({
+    kind: "RETRYABLE_FAILURE",
+    retryable: true,
+    replyText: "消息暂未处理完成，请稍后重试或在工作台继续。",
   });
-  expect(calls.private).toBe(0);
+  expect(calls.ensureEmployee).toBe(1);
   expect(calls.group).toBe(0);
+  expect(calls.private).toBe(0);
+  expect(calls.turn).toHaveLength(0);
 });
 
 it("routes private policy questions into the shared private conversation without creating a claim", async () => {
@@ -80,6 +111,7 @@ it("routes private policy questions into the shared private conversation without
 
   expect(result).toMatchObject({ kind: "AGENT_REPLIED", claimId: null });
   expect(calls.private).toBe(1);
+  expect(calls.deliveryTargets).toEqual([{ conversationId: "private-employee-1", chatId: "oc-1" }]);
   expect(calls.turn).toEqual([expect.objectContaining({ conversationId: "private-employee-1", channelMessageId: "om-1", channel: "FEISHU", message: "住宿报销规则是什么" })]);
   if (result.kind !== "AGENT_REPLIED") throw new Error("agent reply expected");
   expect(result.replyText).toContain("政策依据：差旅制度（住宿）");
@@ -97,6 +129,7 @@ it("uses a per-employee group conversation only for mentioned group messages", a
     client: { ...fixture().deps.client, getMessage: async () => ({ messageId: "om-1", chatId: "oc-team", chatType: "group", senderOpenId: "ou-employee", messageType: "text", text: "@机器人 报销政策", mentions: [], attachments: [] }) },
     conversations: {
       getOrCreatePrivate: fixture().deps.conversations.getOrCreatePrivate,
+      recordFeishuDeliveryTarget: fixture().deps.conversations.recordFeishuDeliveryTarget,
       getOrCreateGroup: async (employeeId, chatId) => {
         calls.group += 1;
         expect([employeeId, chatId]).toEqual(["employee-1", "oc-team"]);

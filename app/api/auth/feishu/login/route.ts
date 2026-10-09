@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { createOAuthState, oauthStateCookie } from "@/src/server/auth-cookies";
+import { createOAuthState, oauthReturnToCookie, oauthStateCookie } from "@/src/server/auth-cookies";
+import { parseSafeReturnTo } from "@/src/server/reimbursement-auth";
 
 export const runtime = "nodejs";
 
@@ -21,6 +22,7 @@ export async function GET(request: Request) {
 
   const response = NextResponse.redirect(authorizeUrl);
   response.headers.append("Set-Cookie", oauthStateCookie(state, isProduction()));
+  response.headers.append("Set-Cookie", oauthReturnToCookie(parseSafeReturnTo(new URL(request.url).searchParams.get("returnTo")), isProduction()));
   return response;
 }
 

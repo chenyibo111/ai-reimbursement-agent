@@ -152,13 +152,18 @@ function parsePolicyAdminOpenIds(value: string | undefined): ReadonlySet<string>
 export function validateFeishuWorkerEnvironment(env: Record<string, string | undefined>): FeishuBotConfig {
   const bot = loadConfig(env).feishuBot;
   if (!bot) throw new Error("FEISHU_BOT_ENABLED=true is required to start the Feishu worker");
-  if (env.NODE_ENV === "production" && new URL(bot.publicAppUrl).protocol !== "https:") {
+  const publicAppUrl = new URL(bot.publicAppUrl);
+  if (env.NODE_ENV === "production" && publicAppUrl.protocol !== "https:" && !isLoopbackHttpUrl(publicAppUrl)) {
     throw new Error("APP_PUBLIC_URL must use HTTPS in production");
   }
   for (const name of ["DATABASE_URL", "S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "CLAMAV_HOST", "OCR_SERVICE_URL"]) {
     if (!env[name]?.trim()) throw new Error(`${name} is required to start the Feishu worker`);
   }
   return bot;
+}
+
+function isLoopbackHttpUrl(url: URL): boolean {
+  return url.protocol === "http:" && ["localhost", "127.0.0.1", "::1"].includes(url.hostname.toLowerCase());
 }
 
 function parseFeishuBotConfig(env: Record<string, string | undefined>): FeishuBotConfig | undefined {

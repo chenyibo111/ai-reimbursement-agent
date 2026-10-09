@@ -62,3 +62,16 @@ it("falls back to application S3 credentials when MinIO root credentials are abs
   expect(compose).toContain('MINIO_ROOT_USER=\\"$${MINIO_ROOT_USER:-$${S3_ACCESS_KEY_ID:?S3_ACCESS_KEY_ID is required}}\\"');
   expect(compose).toContain('MINIO_ROOT_PASSWORD=\\"$${MINIO_ROOT_PASSWORD:-$${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY is required}}\\"');
 });
+
+it("configures a browser-reachable S3 endpoint with a narrow upload CORS origin", async () => {
+  const [compose, example] = await Promise.all([
+    readFile(new URL("../../docker-compose.yml", import.meta.url), "utf8"),
+    readFile(new URL("../../.env.example", import.meta.url), "utf8"),
+  ]);
+
+  expect(compose).toContain('S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}');
+  expect(compose).toContain('MINIO_API_CORS_ALLOW_ORIGIN: ${S3_CORS_ALLOWED_ORIGIN:-http://localhost:8088}');
+  expect(compose).not.toContain("mc cors set local/$$S3_BUCKET -");
+  expect(example).toContain('S3_PUBLIC_ENDPOINT="http://localhost:9000"');
+  expect(example).toContain('S3_CORS_ALLOWED_ORIGIN="http://localhost:8088"');
+});

@@ -24,7 +24,7 @@ it("keeps logs for 30 days and extracts only low-cardinality Loki labels", async
   expect(alloy).toMatch(/target_label\s+= "service"/);
   expect(alloy).toMatch(/target_label\s+= "environment"/);
   expect(alloy).toContain("values = { level = \"\", event = \"\", jobKind = \"\" }");
-  expect(alloy).toMatch(/regex\s+= "\(web\|feishu-bot-worker\|job-worker\|ocr\|alloy\|loki\|alertmanager\|alert-relay\)"/);
+  expect(alloy).toMatch(/regex\s+= "\(web\|feishu-bot-worker\|job-worker\|agent-event-worker\|ocr\|reimbursement-api\|reimbursement-worker\|nats\|alloy\|loki\|alertmanager\|alert-relay\)"/);
   expect(alloy).not.toContain("jobId");
   expect(alloy).not.toContain("claimId");
 });

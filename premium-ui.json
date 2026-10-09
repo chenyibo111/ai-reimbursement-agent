@@ -1,6 +1,6 @@
 {
   "profile": "product-admin",
-  "sourceRoots": ["src", "app"],
+  "sourceRoots": ["src", "app", "apps/web/src"],
   "locale": "zh-CN",
   "canonicalMap": "UX-CONTRACT.md",
   "requiredCapabilities": ["Select/Listbox", "Date", "Form", "Scrollbar", "Toast", "CRUD"],

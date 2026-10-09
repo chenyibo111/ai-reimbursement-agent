@@ -125,19 +125,38 @@ function normalizeMessage(message: z.infer<typeof messageEnvelopeSchema>["data"]
   const senderOpenId = message.sender.id ?? message.sender.sender_id?.open_id;
   if (!senderOpenId) throw new FeishuBotClientError("INVALID_RESPONSE");
   const content = parseContent(message.body.content);
-  const imageKey = content.image_key;
-  const fileKey = content.file_key;
+  const elements = message.msg_type === "post" ? postElements(content) : [content];
   return {
     messageId: message.message_id,
     chatId: message.chat_id,
     senderOpenId,
     messageType: message.msg_type,
-    text: typeof content.text === "string" ? content.text : "",
-    attachments: [
-      ...(typeof imageKey === "string" && imageKey ? [{ fileKey: imageKey, resourceType: "image" as const, filename: typeof content.image_name === "string" ? content.image_name : undefined }] : []),
-      ...(typeof fileKey === "string" && fileKey ? [{ fileKey, resourceType: "file" as const, filename: typeof content.file_name === "string" ? content.file_name : undefined }] : []),
-    ],
+    text: message.msg_type === "post" ? elements.flatMap((element) => typeof element.text === "string" ? [element.text] : []).join("") : typeof content.text === "string" ? content.text : "",
+    attachments: elements.flatMap(attachmentsFromElement),
   };
+}
+
+function postElements(content: Record<string, unknown>): Record<string, unknown>[] {
+  for (const localized of Object.values(content)) {
+    if (!isRecord(localized) || !Array.isArray(localized.content)) continue;
+    return localized.content.flatMap((row) => Array.isArray(row)
+      ? row.filter(isRecord)
+      : []);
+  }
+  return [];
+}
+
+function attachmentsFromElement(element: Record<string, unknown>) {
+  const imageKey = element.image_key;
+  const fileKey = element.file_key;
+  return [
+    ...(typeof imageKey === "string" && imageKey ? [{ fileKey: imageKey, resourceType: "image" as const, filename: typeof element.image_name === "string" ? element.image_name : undefined }] : []),
+    ...(typeof fileKey === "string" && fileKey ? [{ fileKey, resourceType: "file" as const, filename: typeof element.file_name === "string" ? element.file_name : undefined }] : []),
+  ];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function parseContent(content: string): Record<string, unknown> {

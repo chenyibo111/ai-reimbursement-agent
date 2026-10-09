@@ -53,6 +53,29 @@ export class AgentConversationRepository {
     return this.getOrCreateConversation(employeeId, "GROUP", scopeKey);
   }
 
+  async recordFeishuDeliveryTarget(input: { conversationId: string; chatId: string }): Promise<void> {
+    const chatId = input.chatId.trim();
+    if (!chatId) throw new Error("Feishu chat ID is required");
+    await this.prisma.agentConversation.update({
+      where: { id: input.conversationId },
+      data: { latestFeishuChatId: chatId },
+    });
+  }
+
+  async findNotificationTargetByClaimId(claimId: string): Promise<{ employeeId: string; conversationId: string; chatId: string } | null> {
+    const intake = await this.prisma.reimbursementIntake.findFirst({
+      where: { claimId, conversation: { latestFeishuChatId: { not: null } } },
+      orderBy: { updatedAt: "desc" },
+      select: {
+        employeeId: true,
+        conversationId: true,
+        conversation: { select: { latestFeishuChatId: true } },
+      },
+    });
+    const chatId = intake?.conversation.latestFeishuChatId?.trim();
+    return intake && chatId ? { employeeId: intake.employeeId, conversationId: intake.conversationId, chatId } : null;
+  }
+
   async appendMessage(input: AppendAgentMessageInput): Promise<AgentMessage> {
     return (await this.appendMessageOnce(input)).message;
   }
@@ -158,7 +181,7 @@ export class AgentConversationRepository {
   async updateIntake(input: UpdateReimbursementIntakeInput): Promise<ReimbursementIntake> {
     const data: Prisma.ReimbursementIntakeUpdateInput = {};
     if (input.status !== undefined) data.status = input.status;
-    if ("claimId" in input) data.claim = input.claimId ? { connect: { id: input.claimId } } : { disconnect: true };
+    if ("claimId" in input) data.claimId = input.claimId ?? null;
     if (input.collectedFields !== undefined) data.collectedFields = normalizeSnapshot(input.collectedFields) ?? {};
     if (input.pendingFields !== undefined) data.pendingFields = input.pendingFields;
     if ("submissionToken" in input) data.submissionToken = input.submissionToken ?? null;

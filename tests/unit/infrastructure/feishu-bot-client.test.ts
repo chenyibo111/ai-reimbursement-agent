@@ -61,6 +61,47 @@ it("normalizes a message response without retaining the original provider payloa
   });
 });
 
+it("extracts a receipt attachment nested in a Feishu post message", async () => {
+  const client = createFeishuBotClient({
+    appId: "cli_test",
+    appSecret: "app-secret",
+    fetch: async (_url, init) => {
+      if (init?.method === "POST") return json({ code: 0, tenant_access_token: "tenant-token", expire: 7200 });
+      return json({
+        code: 0,
+        data: {
+          items: [{
+            message_id: "om_post_receipt",
+            chat_id: "oc_123",
+            msg_type: "post",
+            body: {
+              content: JSON.stringify({
+                zh_cn: {
+                  title: "团队聚餐",
+                  content: [[
+                    { tag: "text", text: "报销事由：团队聚餐" },
+                    { tag: "file", file_key: "file_receipt_123", file_name: "聚餐发票.pdf" },
+                  ]],
+                },
+              }),
+            },
+            sender: { id: "ou_employee" },
+          }],
+        },
+      });
+    },
+  });
+
+  await expect(client.getMessage("om_post_receipt")).resolves.toEqual({
+    messageId: "om_post_receipt",
+    chatId: "oc_123",
+    senderOpenId: "ou_employee",
+    messageType: "post",
+    text: "报销事由：团队聚餐",
+    attachments: [{ fileKey: "file_receipt_123", resourceType: "file", filename: "聚餐发票.pdf" }],
+  });
+});
+
 it("classifies provider failures without exposing response bodies or credentials", async () => {
   const client = createFeishuBotClient({
     appId: "cli_test",

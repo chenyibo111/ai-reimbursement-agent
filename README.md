@@ -1,5 +1,15 @@
 # AI Reimbursement Agent
 
+## React + Go migration
+
+The current Next.js application remains the active product while the new architecture is built behind a migration profile. `services/reimbursement-api` will become the sole writer for reimbursement data, `apps/web` will become the React client, and `services/agent` will call the Go API through a typed tool boundary. Do not route employee traffic to the migration profile until its cutover runbook and reconciliation checks are complete.
+
+### 迁移中的统一飞书身份
+
+迁移 Profile 下，Next.js 只承担 Auth BFF：它完成飞书 OAuth、保存 HttpOnly 会话，并在 `GET /api/auth/access-token` 为 React 签发 15 分钟、仅保存在内存的 Web JWT。React 通过统一边缘路由调用 Go API；飞书机器人首次收到消息时也会按同一 `open_id` 创建或复用员工并同步 Go 员工投影。Web 与 Agent Token 分别绑定 `channel=web` 和 `channel=agent`，不能互用。
+
+个人本地验证时，在飞书开放平台登记与浏览器访问地址完全一致的回调地址，并配置 `FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`FEISHU_REDIRECT_URI`、`APP_PUBLIC_URL`、`REIMBURSEMENT_AUTH_HS256_SECRET`、`REIMBURSEMENT_AUTH_PROVISIONING_KEY` 和角色白名单。开发登录还必须配置非敏感的 `DEV_DEMO_FEISHU_OPEN_ID`。多人 Staging 前必须换成固定 HTTPS 域名；临时 `trycloudflare` 地址不能作为多人 OAuth 与工作台深链入口。完整变量边界与验收步骤见[统一身份运维说明](docs/operations/unified-feishu-identity.md)。
+
 面向中国单企业员工的 AI 报销服务。它把“上传票据、识别票据、补齐报销信息、校验制度、生成并提交报销单”组织成一条可审计、可人工确认的链路。
 
 项目当前提供独立 Web 工作台，并可选接入飞书 OAuth、飞书机器人和以飞书文档为来源的报销政策知识库。
@@ -10,7 +20,7 @@
 
 | 模块 | 当前能力 |
 | --- | --- |
-| 报销单 | 创建草稿、编辑用途和费用字段、生成确认摘要、提交并查看提交快照 |
+| 报销单 | 创建草稿、编辑用途和费用字段、填写申请报销总额（仅 CNY）与备注、生成确认摘要、提交并查看提交快照 |
 | 票据 | 上传 JPG、PNG、PDF；文件签名校验、ClamAV 扫描、私有对象存储、异步 OCR 识别、重新识别和删除草稿票据 |
 | 校验 | 必填字段、低置信度、同文件哈希、同员工已提交发票号，以及已发布的制度规则校验 |
 | AI 助手 | 独立私有会话、跨 Web/飞书单聊历史、政策依据回放、受控 Intake 办理与精确确认提交 |
@@ -27,7 +37,7 @@
 1. 使用飞书 OAuth 登录（开发环境可使用受限演示登录）。
 2. 在 `/claims` 查看自己创建的报销单，或在 `/claims/new` 新建草稿。
 3. 上传票据；系统完成安全扫描与私有存储后创建 OCR 任务，后台 Worker 再回填候选费用信息。
-4. 在单据详情核对票据、费用、用途和校验结果；手动创建的草稿保持表单式编辑，不会被对话自动选中或修改。
+4. 在单据详情核对票据、费用、用途和校验结果。申请报销总额会先采用已识别票据金额的合计作为建议值；员工手工修改后以手工值为准，也可恢复当前 OCR 建议值。币种当前固定为 CNY，备注最长 1000 个字符。
 5. 修复阻断项，生成确认摘要后提交。系统以当前版本再次校验并写入不可变 `SubmissionSnapshot`。
 
 草稿状态会经历 `DRAFT`、`PROCESSING`、`NEEDS_INFORMATION`、`AWAITING_CONFIRMATION`、`SUBMITTED`。仅草稿允许删除单据或附件。
@@ -146,7 +156,7 @@ FEISHU_APP_SECRET="..."
 FEISHU_REDIRECT_URI="http://localhost:3000/api/auth/feishu/callback"
 ```
 
-访问 `/api/auth/feishu/login` 开始授权。没有飞书应用时，仅本地环境可使用 `POST /api/auth/dev-login`；它只读取服务端配置的 `DEV_DEMO_EMPLOYEE_ID`、`DEV_DEMO_EMPLOYEE_NAME` 与可选 `DEV_DEMO_FEISHU_OPEN_ID`，生产环境不提供该入口。
+访问 `/api/auth/feishu/login` 开始授权。没有飞书应用时，仅本地环境可使用 `POST /api/auth/dev-login`；它只读取服务端配置的 `DEV_DEMO_EMPLOYEE_ID`、`DEV_DEMO_EMPLOYEE_NAME` 与必填的 `DEV_DEMO_FEISHU_OPEN_ID`，生产环境不提供该入口。
 
 ## 可选能力配置
 
@@ -239,6 +249,29 @@ Web、飞书 Worker 与异步任务 Worker 使用同一个 Docker 镜像，分�
 docker compose up -d --build web feishu-bot-worker job-worker
 ```
 
+React + Go 迁移演练使用统一边缘入口，而不是直接暴露 Go API：
+
+```powershell
+docker compose --profile migration up -d --build reimbursement-edge reimbursement-web reimbursement-api
+```
+
+本机可通过 `http://localhost:8088` 验证路径分流；旧 Auth BFF 的 `3000` 仅绑定 `127.0.0.1` 供本机调试。生产环境应只将固定 HTTPS 域名指向 `reimbursement-edge`。
+
+### 报销单号、票据识别与申请信息升级
+
+`services/reimbursement-api/db/migrations/000010_claim_numbers_and_receipt_metadata.sql` 为 Go 报销库增加不可变业务单号（`BXyyyyMMdd-序号`）与票据开票日期、价税合计、销售方字段。它还会为已有报销单回填单号；未能从历史 OCR 结果取得的新字段保持为空，由 React 工作台显示为“待补充”。随后执行的 `000011_claim_application_fields.sql` 增加申请报销总额、固定 CNY 币种、金额来源和备注字段。
+
+迁移顺序不可调换：先备份目标 PostgreSQL，再以具备 DDL 权限的受控运维账户执行脚本，最后同步滚动重启 Go API、Go Worker、React Web 与边缘路由。本地 Compose 示例：
+
+```powershell
+Get-Content -Raw services/reimbursement-api/db/migrations/000010_claim_numbers_and_receipt_metadata.sql |
+  docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U reimbursement -d reimbursement
+
+docker compose --profile migration up -d --build reimbursement-api reimbursement-worker reimbursement-web reimbursement-edge
+```
+
+重启后，在 React 报销列表和工作台分别核对：新建草稿立即获得 `BXyyyyMMdd-xxxx`；已识别票据显示发票号、日期、价税合计、销售方和置信度；缺失字段显示“待补充”而非 `￥0.00`；申请报销总额仅在仍使用 OCR 建议时自动刷新，手工金额不会被 OCR 覆盖；提交前检查仍按既有规则运行。完整的生产验收与回退边界见[运维说明](docs/operations.md#报销单号与票据识别字段升级)。
+
 部署前应按以下顺序执行：
 
 1. 备份 PostgreSQL；不要用删除卷或重建数据库代替迁移。
@@ -317,6 +350,20 @@ npm run roles:bootstrap -- <employeeId>
 - 将 `APP_PUBLIC_URL` 和 `FEISHU_REDIRECT_URI` 切换为固定 HTTPS 域名，并在飞书开放平台登记完全相同的回调地址。
 - 验收：从飞书消息打开具体 `/claims/<id>`，未登录用户完成授权后回到同一报销单；已登录用户直接进入；外部 `returnTo` 被忽略并回退到 `/claims`。
 
+### 待办：Go 人工复核案件队列切流
+
+当前 Go OCR 迁移链路能将异常票据标记为 `REVIEW_REQUIRED` 并保留安全原因代码，但尚未为每个异常自动创建可领取的 `ReviewCase`；`/admin/reviews` 也尚未提供待办列表。因此在完成前，不能把“需要人工复核”视为已有可操作队列。
+
+- 在重复发票、低置信识别、OCR 重试耗尽等分流时，以事务方式创建或更新关联 `ReviewCase`，保证幂等。
+- 提供只对 `FINANCE_REVIEWER` / `ADMIN` 开放的列表、领取、详情和结案 API，并让 React 复核页展示待办队列。
+- 对业务阻断（如已提交发票号重复）停止无意义的 OCR 重试；复核原因仅保留一次并可关联已提交单据。
+- 验收：异常票据仅生成一条可领取案件，复核操作写入审计，普通员工不能读取内部复核原因。
+
 ## 许可证
 
 本仓库采用 [MIT License](LICENSE)。
+# AI Reimbursement Agent
+
+## React + Go 迁移
+
+迁移采用按员工和渠道灰度的单写入方策略。执行生产演练前，请阅读 [切流 Runbook](docs/migration/react-go-cutover-runbook.md) 与 [旧写路径退役清单](docs/migration/legacy-retirement-checklist.md)。不要通过删除数据、反向同步或停止 OCR 进行回滚。

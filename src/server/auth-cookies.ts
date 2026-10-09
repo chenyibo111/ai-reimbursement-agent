@@ -3,6 +3,7 @@ import { createSessionToken, sessionDurationSeconds } from "@/src/server/session
 
 export const sessionCookieName = "reimbursement_session";
 export const oauthStateCookieName = "reimbursement_oauth_state";
+export const oauthReturnToCookieName = "reimbursement_oauth_return_to";
 
 export function createOAuthState(): string {
   return randomBytes(32).toString("base64url");
@@ -23,6 +24,9 @@ export function oauthStateCookie(value: string, isProduction: boolean): string {
 export function clearOAuthStateCookie(isProduction: boolean): string {
   return cookie(oauthStateCookieName, "", isProduction, 0);
 }
+
+export function oauthReturnToCookie(value: string, isProduction: boolean): string { return cookie(oauthReturnToCookieName, value, isProduction, 10 * 60); }
+export function clearOAuthReturnToCookie(isProduction: boolean): string { return cookie(oauthReturnToCookieName, "", isProduction, 0); }
 
 export function getCookie(request: Request, name: string): string | null {
   const header = request.headers.get("cookie");

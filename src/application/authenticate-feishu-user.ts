@@ -1,6 +1,6 @@
 import type { FeishuIdentity } from "@/src/infrastructure/auth/feishu-oauth";
 
-export type AuthenticatedEmployee = { id: string };
+export type AuthenticatedEmployee = { id: string; displayName?: string };
 
 export type FeishuEmployeeRepository = {
   findByFeishuUserId(feishuUserId: string): Promise<AuthenticatedEmployee | null>;

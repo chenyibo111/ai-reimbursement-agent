@@ -21,6 +21,7 @@ export type ClaimedInboundEvent = {
   mentionedOpenIds: string[];
   status: InboundChannelEventStatus;
   claimId: string | null;
+  attemptCount: number;
 };
 
 export class FeishuBotRepository {
@@ -54,7 +55,7 @@ export class FeishuBotRepository {
   async findInboundByEventId(eventId: string): Promise<Omit<ClaimedInboundEvent, "id" | "status" | "claimId"> | null> {
     return this.prisma.inboundChannelEvent.findUnique({
       where: { eventId },
-      select: { eventId: true, messageId: true, messageType: true, chatId: true, senderOpenId: true, chatType: true, mentionedOpenIds: true },
+      select: { eventId: true, messageId: true, messageType: true, chatId: true, senderOpenId: true, chatType: true, mentionedOpenIds: true, attemptCount: true },
     });
   }
 
@@ -69,7 +70,7 @@ export class FeishuBotRepository {
 
       const claimed = await tx.inboundChannelEvent.updateMany({
         where: { id: candidate.id, status: { in: ["PENDING", "RETRYABLE"] } },
-        data: { status: "PROCESSING", failureCode: null },
+        data: { status: "PROCESSING", failureCode: null, attemptCount: { increment: 1 } },
       });
       if (claimed.count !== 1) return null;
 
@@ -86,6 +87,7 @@ export class FeishuBotRepository {
           mentionedOpenIds: true,
           status: true,
           claimId: true,
+          attemptCount: true,
         },
       });
       return event;
@@ -112,10 +114,6 @@ export class FeishuBotRepository {
       where: { id },
       data: { status: "RETRYABLE", failureCode: code.slice(0, 80) },
     });
-  }
-
-  async findEmployeeByOpenId(openId: string): Promise<{ id: string } | null> {
-    return this.prisma.employee.findUnique({ where: { feishuUserId: openId }, select: { id: true } });
   }
 
   async getConversation(employeeId: string, chatId: string): Promise<{ claimId: string } | null> {

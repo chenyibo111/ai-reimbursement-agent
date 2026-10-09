@@ -27,8 +27,13 @@ import { createClamAvFileSafetyScanner } from "@/src/infrastructure/security/fil
 import { createS3ObjectStore } from "@/src/infrastructure/storage/object-store";
 import { createLogger } from "@/src/observability/logger";
 import { createWorkerHeartbeat } from "@/src/observability/worker-heartbeat";
+import { PrismaAgentToolCallRepository } from "@/src/infrastructure/prisma/agent-tool-call-repository";
 import { loadConfig, validateFeishuWorkerEnvironment } from "@/src/server/config";
+import { createFeishuIdentityEnsurer } from "@/src/server/employee-identity";
 import { createFeishuBotRuntime } from "@/src/worker/feishu-bot-runtime";
+import { ReimbursementApiClient } from "../../services/agent/src/adapters/reimbursement-api-client";
+import { createConversationReimbursementTools } from "../../services/agent/src/tool-gateway/conversation-reimbursement";
+import { ReimbursementToolGateway } from "../../services/agent/src/tool-gateway/reimbursement-tools";
 
 const logger = createLogger("feishu-worker");
 
@@ -110,14 +115,28 @@ function createProcessDeps(input: {
   const scanner = createClamAvFileSafetyScanner(process.env.CLAMAV_HOST ?? "localhost", Number(process.env.CLAMAV_PORT ?? 3310));
   const receipts = new PrismaReceiptRepository(input.prisma);
   const notifications = new ReceiptExtractionNotificationRepository(input.prisma);
+  const useGoReimbursement = process.env.REIMBURSEMENT_AGENT_MODE === "go-api";
+  const gateway = useGoReimbursement
+    ? new ReimbursementToolGateway(new ReimbursementApiClient({
+      baseUrl: requiredEnv("REIMBURSEMENT_API_URL"), serviceKey: requiredEnv("REIMBURSEMENT_AGENT_SERVICE_KEY"), signingSecret: requiredEnv("REIMBURSEMENT_AUTH_HS256_SECRET"),
+    }), new PrismaAgentToolCallRepository(input.prisma))
+    : null;
+  const ensureFeishuIdentity = createFeishuIdentityEnsurer(input.prisma);
 
   return {
     botOpenId: input.botOpenId,
     publicAppUrl: input.publicAppUrl,
     events: input.repository,
+    identities: { ensureEmployeeForInboundMessage: async ({ openId, displayName }) => {
+      const employee = await ensureFeishuIdentity({ openId, displayName });
+      return { id: employee.id, role: employee.role };
+    } },
     conversations,
     client: input.client,
-    runConversationTurn: (agentInput) => runConversationTurn(agentInput, {
+    runConversationTurn: (agentInput) => {
+      const goTools = gateway ? createConversationReimbursementTools(gateway, fetch, process.env.REIMBURSEMENT_AGENT_STORAGE_ENDPOINT) : null;
+      const context = { actorId: agentInput.actorId, actorRole: agentInput.actorRole, conversationId: agentInput.conversationId, channelMessageId: agentInput.channelMessageId };
+      return runConversationTurn(agentInput, {
       conversations: conversations as unknown as ConversationStore,
       model: createChatModel(config),
       searchPolicy: config.embedding ? (query) => searchPolicyKnowledge({ query, limit: 5 }, {
@@ -125,8 +144,8 @@ function createProcessDeps(input: {
         chunks: new PrismaPolicyKnowledgeRepository(input.prisma),
       }) : undefined,
       preflightAttachment: (attachment) => preflightReceiptUpload(attachment, scanner),
-      createClaim: ({ actorId, purpose }) => createClaimDraft({ actorId, purpose }, { claims, audit }),
-      uploadReceipt: (receiptInput) => uploadReceipt(receiptInput, {
+      createClaim: ({ actorId, purpose }) => goTools ? goTools.createClaim({ ...context, actorId }, purpose) : createClaimDraft({ actorId, purpose }, { claims, audit }),
+      uploadReceipt: (receiptInput) => goTools ? goTools.uploadReceipt(context, receiptInput.claimId, { filename: receiptInput.filename, mimeType: receiptInput.mimeType, bytes: receiptInput.bytes }).then((receipt) => ({ id: receipt.receiptId })) : uploadReceipt(receiptInput, {
         claims,
         receipts,
         jobs: new PrismaAsyncJobRepository(input.prisma),
@@ -154,14 +173,28 @@ function createProcessDeps(input: {
         audit,
       }),
       updatePurpose: async ({ actorId, claimId, value }) => {
+        if (goTools) return goTools.updatePurpose({ ...context, actorId }, claimId, value);
         const claim = await claims.getByIdOrThrow(claimId);
         const updated = await updateClaimField({ actorId, claimId, expectedVersion: claim.version, field: "purpose", value }, { claims, audit });
         return { version: updated.version };
       },
-      requestSubmission: ({ actorId, claimId }) => requestStoredSubmission({ prisma: input.prisma, actorId, claimId }),
-      submitClaim: ({ actorId, claimId, confirmationToken }) => submitStoredClaim({ prisma: input.prisma, actorId, claimId, confirmationToken }),
-    }),
+      requestSubmission: async ({ actorId, claimId }) => {
+        if (goTools) { const confirmation = await goTools.requestSubmission({ ...context, actorId }, claimId); return { token: confirmation.confirmationToken, claimId: confirmation.claimId, claimVersion: confirmation.claimVersion }; }
+        return requestStoredSubmission({ prisma: input.prisma, actorId, claimId });
+      },
+      submitClaim: async ({ actorId, claimId, confirmationToken }) => {
+        if (goTools) { const submission = await goTools.submit({ ...context, actorId }, claimId, confirmationToken); return { submissionNumber: submission.submissionNumber }; }
+        return submitStoredClaim({ prisma: input.prisma, actorId, claimId, confirmationToken });
+      },
+    });
+    },
   };
+}
+
+function requiredEnv(name: string) {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`${name} is required when REIMBURSEMENT_AGENT_MODE=go-api`);
+  return value;
 }
 
 void main().catch(() => {

@@ -183,7 +183,15 @@ async function applyDecision(
 
   if (decision.action === "REQUEST_SUBMISSION") {
     if (!intake?.claimId || !deps.requestSubmission) return persistReply(input, intake, "请先上传票据并补齐必填信息，再生成提交摘要。", [], deps.conversations);
-    const preview = await deps.requestSubmission({ actorId: input.actorId, claimId: intake.claimId });
+    let preview: Awaited<ReturnType<NonNullable<RunConversationTurnDeps["requestSubmission"]>>>;
+    try {
+      preview = await deps.requestSubmission({ actorId: input.actorId, claimId: intake.claimId });
+    } catch (error) {
+      if (error instanceof Error && error.message === "报销单尚未满足提交条件") {
+        return persistReply(input, intake, "当前报销单暂时不能提交：票据仍在识别中或尚未填写报销金额。请等待识别完成，并在工作台补齐金额后再试。", [], deps.conversations);
+      }
+      throw error;
+    }
     const submissionPreview = {
       claimVersion: preview.claimVersion ?? null,
       totalAmountCents: preview.totalAmountCents ?? null,

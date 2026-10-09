@@ -19,6 +19,7 @@ COPY --from=build /app/package-lock.json ./package-lock.json
 COPY --from=build /app/.next ./.next
 COPY --from=build /app/public ./public
 COPY --from=build /app/src ./src
+COPY --from=build /app/services/agent ./services/agent
 COPY --from=build /app/generated ./generated
 COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/prisma7.config.ts ./prisma7.config.ts

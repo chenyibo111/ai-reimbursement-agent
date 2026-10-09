@@ -32,10 +32,16 @@ it("requires explicit bot enablement before a Worker can start", () => {
   );
 });
 
-it("requires a public HTTPS workspace URL in production", () => {
-  expect(() => validateFeishuWorkerEnvironment({ ...productionBase, APP_PUBLIC_URL: "http://localhost:3000" })).toThrow(
+it("requires HTTPS for a non-loopback workspace URL in production", () => {
+  expect(() => validateFeishuWorkerEnvironment({ ...productionBase, APP_PUBLIC_URL: "http://reimbursement.example.test" })).toThrow(
     "APP_PUBLIC_URL must use HTTPS in production",
   );
+});
+
+it("permits an HTTP loopback workspace URL for local Docker verification", () => {
+  expect(validateFeishuWorkerEnvironment({ ...productionBase, APP_PUBLIC_URL: "http://localhost:8088" })).toMatchObject({
+    publicAppUrl: "http://localhost:8088",
+  });
 });
 
 it("requires shared data and receipt-processing services for the Worker", () => {

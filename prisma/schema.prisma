@@ -168,7 +168,6 @@ model ClaimDraft {
   agentProposals       AgentFieldProposal[]
   inboundEvents        InboundChannelEvent[]
   feishuConversations  FeishuConversation[]
-  reimbursementIntakes ReimbursementIntake[]
   asyncJobs            AsyncJob[]
   reviewCases          ReviewCase[]
   receiptExtractionNotifications ReceiptExtractionNotification[]
@@ -295,6 +294,7 @@ model InboundChannelEvent {
   senderOpenId     String
   status           InboundChannelEventStatus @default(PENDING)
   failureCode      String?
+  attemptCount     Int                       @default(0)
   claimId          String?
   claim            ClaimDraft?               @relation(fields: [claimId], references: [id], onDelete: SetNull)
   receivedAt       DateTime                  @default(now())
@@ -326,6 +326,7 @@ model AgentConversation {
   employee               Employee              @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   scopeKey               String
   kind                   AgentConversationKind
+  latestFeishuChatId     String?
   summary                String                @default("")
   summaryThroughSequence Int                   @default(0)
   nextSequence           Int                   @default(1)
@@ -358,13 +359,35 @@ model AgentMessage {
   @@index([conversationId, createdAt])
 }
 
+// Agent-owned idempotency record. It intentionally stores only the tool result
+// snapshot and no relation to reimbursement tables.
+model AgentToolCall {
+  toolCallId     String   @id
+  conversationId String
+  toolName       String
+  result         Json
+  completedAt    DateTime @default(now())
+
+  @@index([conversationId, completedAt])
+}
+
+// Agent-owned at-least-once event-consumption ledger. It prevents a NATS
+// redelivery from producing duplicate user-facing channel notifications.
+model AgentProcessedEvent {
+  eventId      String
+  consumerName String
+  processedAt  DateTime @default(now())
+
+  @@id([eventId, consumerName])
+  @@index([processedAt])
+}
+
 model ReimbursementIntake {
   id                     String                    @id @default(cuid())
   employeeId             String
   employee               Employee                  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   status                 ReimbursementIntakeStatus @default(COLLECTING)
   claimId                String?
-  claim                  ClaimDraft?               @relation(fields: [claimId], references: [id], onDelete: SetNull)
   conversationId         String
   conversation           AgentConversation         @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   collectedFields        Json                      @default("{}")
