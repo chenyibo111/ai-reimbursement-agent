@@ -9,10 +9,13 @@ RUN go build -o /out/reimbursement-api ./cmd/api \
 
 FROM nats:2.10-alpine
 RUN adduser -D -u 10001 app
-USER app
 COPY --from=build /out/reimbursement-api /usr/local/bin/reimbursement-api
 COPY --from=build /out/reimbursement-worker /usr/local/bin/reimbursement-worker
 COPY --from=build /out/legacy-import /usr/local/bin/legacy-import
 COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/reimbursement-entrypoint
+# Git checkouts on Windows can retain CRLF. Normalize before the shebang is
+# executed so `/bin/sh\r` is never treated as an interpreter path in Linux.
+RUN sed -i 's/\r$//' /usr/local/bin/reimbursement-entrypoint
+USER app
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/reimbursement-entrypoint", "/usr/local/bin/reimbursement-api"]

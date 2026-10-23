@@ -20,7 +20,7 @@ type testReceiptService struct {
 func newReceiptServiceForTest(t *testing.T) *testReceiptService {
 	t.Helper()
 	objects := &fakeObjectStore{objects: make(map[string]StoredObject)}
-	repository := &fakeReceiptRepository{receipts: make(map[string]domain.Receipt), submittedInvoiceNumbers: make(map[string]bool)}
+	repository := &fakeReceiptRepository{receipts: make(map[string]domain.Receipt), submittedInvoiceNumbers: make(map[string]bool), reviewReasons: make(map[string][]string)}
 	scanner := &fakeScanner{}
 	ocr := &fakeOCRClient{}
 	return &testReceiptService{
@@ -82,6 +82,7 @@ type fakeReceiptRepository struct {
 	mu                      sync.Mutex
 	receipts                map[string]domain.Receipt
 	submittedInvoiceNumbers map[string]bool
+	reviewReasons           map[string][]string
 }
 
 func (repository *fakeReceiptRepository) Create(_ context.Context, receipt domain.Receipt) error {
@@ -143,11 +144,37 @@ func (repository *fakeReceiptRepository) MarkReadyForOCR(_ context.Context, rece
 	return nil
 }
 
-func (repository *fakeReceiptRepository) MarkReviewRequired(_ context.Context, receiptID string, _ string) error {
+func (repository *fakeReceiptRepository) MarkReviewRequired(ctx context.Context, receiptID string, reason string) error {
+	return repository.TransitionToReview(ctx, receiptID, reason, nil)
+}
+
+func (repository *fakeReceiptRepository) TransitionToReview(_ context.Context, receiptID string, reason string, result *OCRResult) error {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
 	receipt := repository.receipts[receiptID]
+	if result != nil {
+		receipt.InvoiceNumber = result.InvoiceNumber
+		receipt.InvoiceDate = result.InvoiceDate
+		receipt.TotalAmountCent = result.TotalAmountCent
+		receipt.SellerName = result.SellerName
+		receipt.OCRConfidence = result.Confidence
+	}
 	receipt.Status = domain.ReceiptStatusReview
+	repository.receipts[receiptID] = receipt
+	for _, existing := range repository.reviewReasons[receiptID] {
+		if existing == reason {
+			return nil
+		}
+	}
+	repository.reviewReasons[receiptID] = append(repository.reviewReasons[receiptID], reason)
+	return nil
+}
+
+func (repository *fakeReceiptRepository) MarkQuarantined(_ context.Context, receiptID string) error {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	receipt := repository.receipts[receiptID]
+	receipt.Status = domain.ReceiptStatusQuarantined
 	repository.receipts[receiptID] = receipt
 	return nil
 }

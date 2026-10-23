@@ -7,7 +7,8 @@ import type { Receipt } from "../api/generated/reimbursement";
 import { useReceiptUpload } from "../features/receipts/use-receipt-upload";
 import { claimAmountSummary, formatCNYFromCent } from "../features/claims/claim-display";
 
-function statusText(status: string) {
+function statusText(status: string, closedByReview = false) {
+	if (status === "QUARANTINED" && closedByReview) return "票据已关闭，不计入本次报销";
   const labels: Record<string, string> = {
     UPLOAD_PENDING: "等待上传完成",
     READY_FOR_OCR: "OCR 处理中",
@@ -136,10 +137,10 @@ export function ClaimWorkbenchPage() {
 									<div><dt>销售方</dt><dd>{receipt.sellerName || "待补充"}</dd></div>
 									<div><dt>OCR 置信度</dt><dd>{Math.round(receipt.ocrConfidence * 100)}%</dd></div>
 								</dl>
-							) : <small>待 OCR 识别</small>}
+							) : receipt.status === "QUARANTINED" && receipt.closedByReview ? <small className="receipt-closed-guidance">请删除该附件后重新上传有效票据。</small> : <small>待 OCR 识别</small>}
 						</div>
                 <div className="receipt-actions">
-                  <span className={`status-tag receipt-${receipt.status.toLowerCase()}`}>{statusText(receipt.status)}</span>
+								<span className={`status-tag receipt-${receipt.status.toLowerCase()}`}>{statusText(receipt.status, receipt.closedByReview)}</span>
                   {claim.status === "DRAFT" ? <button className="danger-action" type="button" onClick={(event) => requestReceiptDeletion(receipt, event.currentTarget)} disabled={deleteReceipt.isPending}>删除附件</button> : null}
                 </div>
               </li>)}

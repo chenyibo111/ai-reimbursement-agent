@@ -27,6 +27,9 @@ type Receipt struct {
 	TotalAmountCent *int64
 	SellerName      *string
 	OCRConfidence   float64
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// ClosedByReview distinguishes a finance decision to exclude a receipt
+	// from a malware/security quarantine, which shares the QUARANTINED status.
+	ClosedByReview bool
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }

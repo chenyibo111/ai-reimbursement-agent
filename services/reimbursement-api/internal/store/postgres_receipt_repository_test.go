@@ -80,3 +80,61 @@ func TestPostgresReceiptRepositoryWritesAuditAndOutbox(t *testing.T) {
 		t.Fatalf("expected three audits and events, got audits=%d events=%d", audits, events)
 	}
 }
+
+func TestPostgresReceiptRepositoryTransitionToReviewIsIdempotent(t *testing.T) {
+	databaseURL := os.Getenv("TEST_REIMBURSEMENT_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_REIMBURSEMENT_DATABASE_URL is not configured")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	suffix := time.Now().UTC().Format("20060102150405.000000000")
+	ownerID := "review-transition-owner-" + suffix
+	claimID := "review-transition-claim-" + suffix
+	receiptID := "review-transition-receipt-" + suffix
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM reimbursement.review_case_audits WHERE review_case_id IN (SELECT id FROM reimbursement.review_cases WHERE receipt_id = $1)`, receiptID)
+		_, _ = pool.Exec(ctx, `DELETE FROM reimbursement.review_cases WHERE receipt_id = $1`, receiptID)
+		_, _ = pool.Exec(ctx, `DELETE FROM reimbursement.receipt_review_issues WHERE receipt_id = $1`, receiptID)
+		_, _ = pool.Exec(ctx, `DELETE FROM reimbursement.receipt_audits WHERE receipt_id = $1`, receiptID)
+		_, _ = pool.Exec(ctx, `DELETE FROM reimbursement.outbox_events WHERE aggregate_id = $1`, receiptID)
+		_, _ = pool.Exec(ctx, `DELETE FROM reimbursement.receipts WHERE id = $1`, receiptID)
+		_, _ = pool.Exec(ctx, `DELETE FROM reimbursement.claims WHERE id = $1`, claimID)
+		_, _ = pool.Exec(ctx, `DELETE FROM reimbursement.employees WHERE id = $1`, ownerID)
+	})
+	if _, err := pool.Exec(ctx, `INSERT INTO reimbursement.employees (id, display_name) VALUES ($1, 'Review transition test')`, ownerID); err != nil {
+		t.Fatalf("seed owner: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO reimbursement.claims (id, owner_id, purpose) VALUES ($1, $2, 'Receipt review transition test')`, claimID, ownerID); err != nil {
+		t.Fatalf("seed claim: %v", err)
+	}
+	repository := NewPostgresReceiptRepository(pool)
+	now := time.Now().UTC()
+	if err := repository.Create(ctx, domain.Receipt{ID: receiptID, ClaimID: claimID, OwnerID: ownerID, Filename: "invoice.png", ContentType: "image/png", ExpectedSize: 1, ObjectKey: "test/" + receiptID, Status: domain.ReceiptStatusReadyForOCR, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create receipt: %v", err)
+	}
+	amount := int64(10155)
+	result := application.OCRResult{InvoiceNumber: "INV-" + suffix, TotalAmountCent: &amount, Confidence: 0.69}
+	if err := repository.TransitionToReview(ctx, receiptID, "OCR_LOW_CONFIDENCE", &result); err != nil {
+		t.Fatalf("first review transition: %v", err)
+	}
+	if err := repository.TransitionToReview(ctx, receiptID, "OCR_LOW_CONFIDENCE", &result); err != nil {
+		t.Fatalf("duplicate review transition: %v", err)
+	}
+
+	var cases, issues int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM reimbursement.review_cases WHERE receipt_id = $1 AND status IN ('OPEN', 'CLAIMED')`, receiptID).Scan(&cases); err != nil {
+		t.Fatalf("count active review cases: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM reimbursement.receipt_review_issues WHERE receipt_id = $1 AND code = 'OCR_LOW_CONFIDENCE'`, receiptID).Scan(&issues); err != nil {
+		t.Fatalf("count review issues: %v", err)
+	}
+	if cases != 1 || issues != 1 {
+		t.Fatalf("active cases = %d, issues = %d; want one each", cases, issues)
+	}
+}

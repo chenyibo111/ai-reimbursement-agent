@@ -51,11 +51,16 @@ func (repository *PostgresReceiptRepository) FindOwned(ctx context.Context, rece
 
 func (repository *PostgresReceiptRepository) ListOwnedByClaim(ctx context.Context, claimID string, actorID string) ([]domain.Receipt, error) {
 	rows, err := repository.pool.Query(ctx, `
-		SELECT id, claim_id, owner_id, filename, content_type, expected_size, object_key,
-		       content_hash, status, invoice_number, invoice_date, total_amount_cent, seller_name, ocr_confidence, created_at, updated_at
-		FROM reimbursement.receipts
-		WHERE claim_id = $1 AND owner_id = $2
-		ORDER BY created_at ASC, id ASC
+		SELECT receipt.id, receipt.claim_id, receipt.owner_id, receipt.filename, receipt.content_type, receipt.expected_size, receipt.object_key,
+		       receipt.content_hash, receipt.status, receipt.invoice_number, receipt.invoice_date, receipt.total_amount_cent, receipt.seller_name, receipt.ocr_confidence, receipt.created_at, receipt.updated_at,
+		       EXISTS (
+		         SELECT 1
+		         FROM reimbursement.review_cases AS review_case
+		         WHERE review_case.receipt_id = receipt.id AND review_case.status = 'CLOSED'
+		       ) AS closed_by_review
+		FROM reimbursement.receipts AS receipt
+		WHERE receipt.claim_id = $1 AND receipt.owner_id = $2
+		ORDER BY receipt.created_at ASC, receipt.id ASC
 	`, claimID, actorID)
 	if err != nil {
 		return nil, fmt.Errorf("query owned receipts: %w", err)
@@ -63,7 +68,7 @@ func (repository *PostgresReceiptRepository) ListOwnedByClaim(ctx context.Contex
 	defer rows.Close()
 	receipts := make([]domain.Receipt, 0)
 	for rows.Next() {
-		receipt, scanErr := scanReceipt(rows)
+		receipt, scanErr := scanReceiptWithReviewClosure(rows)
 		if scanErr != nil {
 			return nil, scanErr
 		}
@@ -156,16 +161,80 @@ func (repository *PostgresReceiptRepository) MarkReadyForOCR(ctx context.Context
 }
 
 func (repository *PostgresReceiptRepository) MarkReviewRequired(ctx context.Context, receiptID string, reason string) error {
-	return repository.withReceiptMutation(ctx, receiptID, "RECEIPT_REVIEW_REQUIRED", "ReceiptReviewRequired", func(tx pgx.Tx) (string, string, error) {
-		result, err := tx.Exec(ctx, `UPDATE reimbursement.receipts SET status = 'REVIEW_REQUIRED', updated_at = now() WHERE id = $1`, receiptID)
+	return repository.TransitionToReview(ctx, receiptID, reason, nil)
+}
+
+// TransitionToReview records a finance-reviewable OCR anomaly as one atomic
+// state change. Repeated deliveries may add receipt audit/event history, but
+// cannot duplicate either the issue code or the active finance case.
+func (repository *PostgresReceiptRepository) TransitionToReview(ctx context.Context, receiptID string, reason string, ocrResult *application.OCRResult) error {
+	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin receipt review transition: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var actorID, claimID string
+	if err := tx.QueryRow(ctx, `SELECT owner_id, claim_id FROM reimbursement.receipts WHERE id = $1 FOR UPDATE`, receiptID).Scan(&actorID, &claimID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return application.ErrReceiptNotFound
+		}
+		return fmt.Errorf("lock receipt for review transition: %w", err)
+	}
+
+	if ocrResult == nil {
+		if _, err := tx.Exec(ctx, `UPDATE reimbursement.receipts SET status = 'REVIEW_REQUIRED', updated_at = now() WHERE id = $1`, receiptID); err != nil {
+			return fmt.Errorf("mark receipt review required: %w", err)
+		}
+	} else if _, err := tx.Exec(ctx, `
+		UPDATE reimbursement.receipts
+		SET invoice_number = NULLIF($2, ''), invoice_date = $3, total_amount_cent = $4,
+		    seller_name = NULLIF($5::text, ''), ocr_confidence = $6, status = 'REVIEW_REQUIRED', updated_at = now()
+		WHERE id = $1
+	`, receiptID, ocrResult.InvoiceNumber, ocrResult.InvoiceDate, ocrResult.TotalAmountCent, ocrResult.SellerName, ocrResult.Confidence); err != nil {
+		return fmt.Errorf("persist reviewable OCR candidate: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO reimbursement.receipt_review_issues (receipt_id, code)
+		VALUES ($1, $2)
+		ON CONFLICT (receipt_id, code) DO NOTHING
+	`, receiptID, reason); err != nil {
+		return fmt.Errorf("record receipt review issue: %w", err)
+	}
+
+	var reviewCaseID string
+	err = tx.QueryRow(ctx, `
+		INSERT INTO reimbursement.review_cases (id, claim_id, receipt_id, kind, reason_code, status)
+		VALUES ($1, $2, $3, 'RECEIPT_OCR', $4, 'OPEN')
+		ON CONFLICT (receipt_id) WHERE receipt_id IS NOT NULL AND status IN ('OPEN', 'CLAIMED') DO NOTHING
+		RETURNING id
+	`, "receipt-review-"+randomUUID(), claimID, receiptID, reason).Scan(&reviewCaseID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("create receipt review case: %w", err)
+	}
+	if reviewCaseID != "" {
+		if _, err := tx.Exec(ctx, `INSERT INTO reimbursement.review_case_audits (review_case_id, actor_id, action) VALUES ($1, $2, 'REVIEW_CASE_CREATED')`, reviewCaseID, actorID); err != nil {
+			return fmt.Errorf("audit receipt review case creation: %w", err)
+		}
+	}
+	if err := writeReceiptAuditAndEvent(ctx, tx, receiptID, claimID, actorID, "RECEIPT_REVIEW_REQUIRED", "ReceiptReviewRequired"); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit receipt review transition: %w", err)
+	}
+	return nil
+}
+
+func (repository *PostgresReceiptRepository) MarkQuarantined(ctx context.Context, receiptID string) error {
+	return repository.withReceiptMutation(ctx, receiptID, "RECEIPT_QUARANTINED", "ReceiptQuarantined", func(tx pgx.Tx) (string, string, error) {
+		result, err := tx.Exec(ctx, `UPDATE reimbursement.receipts SET status = 'QUARANTINED', updated_at = now() WHERE id = $1`, receiptID)
 		if err != nil {
 			return "", "", err
 		}
 		if result.RowsAffected() != 1 {
 			return "", "", application.ErrReceiptNotFound
-		}
-		if _, err = tx.Exec(ctx, `INSERT INTO reimbursement.receipt_review_issues (receipt_id, code) VALUES ($1, $2)`, receiptID, reason); err != nil {
-			return "", "", err
 		}
 		return receiptActorAndClaim(ctx, tx, receiptID)
 	})
@@ -246,6 +315,15 @@ func writeReceiptAuditAndEvent(ctx context.Context, tx pgx.Tx, receiptID string,
 type receiptRow interface{ Scan(...any) error }
 
 func scanReceipt(row receiptRow) (domain.Receipt, error) {
+	return scanReceiptWithOptionalReviewClosure(row, nil)
+}
+
+func scanReceiptWithReviewClosure(row receiptRow) (domain.Receipt, error) {
+	closedByReview := false
+	return scanReceiptWithOptionalReviewClosure(row, &closedByReview)
+}
+
+func scanReceiptWithOptionalReviewClosure(row receiptRow, closedByReview *bool) (domain.Receipt, error) {
 	var receipt domain.Receipt
 	var contentHash *string
 	var invoiceNumber *string
@@ -253,7 +331,11 @@ func scanReceipt(row receiptRow) (domain.Receipt, error) {
 	var totalAmountCent *int64
 	var sellerName *string
 	var confidence *float64
-	err := row.Scan(&receipt.ID, &receipt.ClaimID, &receipt.OwnerID, &receipt.Filename, &receipt.ContentType, &receipt.ExpectedSize, &receipt.ObjectKey, &contentHash, &receipt.Status, &invoiceNumber, &invoiceDate, &totalAmountCent, &sellerName, &confidence, &receipt.CreatedAt, &receipt.UpdatedAt)
+	targets := []any{&receipt.ID, &receipt.ClaimID, &receipt.OwnerID, &receipt.Filename, &receipt.ContentType, &receipt.ExpectedSize, &receipt.ObjectKey, &contentHash, &receipt.Status, &invoiceNumber, &invoiceDate, &totalAmountCent, &sellerName, &confidence, &receipt.CreatedAt, &receipt.UpdatedAt}
+	if closedByReview != nil {
+		targets = append(targets, closedByReview)
+	}
+	err := row.Scan(targets...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Receipt{}, application.ErrReceiptNotFound
 	}
@@ -271,6 +353,9 @@ func scanReceipt(row receiptRow) (domain.Receipt, error) {
 	receipt.SellerName = sellerName
 	if confidence != nil {
 		receipt.OCRConfidence = *confidence
+	}
+	if closedByReview != nil {
+		receipt.ClosedByReview = *closedByReview
 	}
 	return receipt, nil
 }

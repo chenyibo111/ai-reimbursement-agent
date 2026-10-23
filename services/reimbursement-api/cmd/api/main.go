@@ -45,6 +45,8 @@ func main() {
 		log.Fatal("OCR_SERVICE_URL is required")
 	}
 	claimRepository := store.NewPostgresClaimRepository(pool)
+	receiptRepository := store.NewPostgresReceiptRepository(pool)
+	reviewCaseRepository := store.NewPostgresReviewCaseRepository(pool)
 	provisioningKey := strings.TrimSpace(os.Getenv("REIMBURSEMENT_AUTH_PROVISIONING_KEY"))
 	if os.Getenv("REIMBURSEMENT_DEV_AUTH") != "true" && provisioningKey == "" {
 		log.Fatal("REIMBURSEMENT_AUTH_PROVISIONING_KEY is required")
@@ -84,8 +86,8 @@ func main() {
 	router := transport.NewRouter(transport.Dependencies{
 		Claims:             application.NewClaimService(claimRepository, application.SecureIDGenerator{}, store.NewPostgresClaimNumberGenerator(pool), time.Now, ocrSuggestionRefresher),
 		Submissions:        application.NewSubmissionService(store.NewPostgresSubmissionRepository(pool), nil),
-		Receipts:           application.NewReceiptServiceWithOptions(claimRepository, store.NewPostgresReceiptRepository(pool), objects, infrastructure.NewClamAVScanner(clamAddress), infrastructure.NewHTTPReceiptOCRClient(ocrURL), application.SecureIDGenerator{}, application.ReceiptServiceOptions{AllowDuplicateContentForTesting: allowDuplicateContentForTesting, AllowDuplicateSubmittedInvoiceForTesting: allowDuplicateSubmittedInvoiceForTesting}, ocrSuggestionRefresher),
-		Admin:              transport.AdminServices{Policies: application.NewPolicyRuleService(store.NewPostgresPolicyRuleRepository(pool)), Reviews: application.NewReviewCaseService(store.NewPostgresReviewCaseRepository(pool)), Role: store.EmployeeRole(pool)},
+		Receipts:           application.NewReceiptServiceWithOptions(claimRepository, receiptRepository, objects, infrastructure.NewClamAVScanner(clamAddress), infrastructure.NewHTTPReceiptOCRClient(ocrURL), application.SecureIDGenerator{}, application.ReceiptServiceOptions{AllowDuplicateContentForTesting: allowDuplicateContentForTesting, AllowDuplicateSubmittedInvoiceForTesting: allowDuplicateSubmittedInvoiceForTesting}, ocrSuggestionRefresher),
+		Admin:              transport.AdminServices{Policies: application.NewPolicyRuleService(store.NewPostgresPolicyRuleRepository(pool)), Reviews: application.NewReviewCaseService(reviewCaseRepository), Previews: application.NewReceiptPreviewService(reviewCaseRepository, receiptRepository, objects), Role: store.EmployeeRole(pool)},
 		EmployeeIdentities: application.NewEmployeeIdentityService(store.NewPostgresEmployeeIdentityRepository(pool)),
 		ProvisioningKey:    provisioningKey,
 		Auth:               resolver,

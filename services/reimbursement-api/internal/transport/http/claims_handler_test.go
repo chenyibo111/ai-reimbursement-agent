@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -133,6 +134,183 @@ func TestAdminAuthorizationRejectsOrdinaryEmployee(t *testing.T) {
 	}
 }
 
+func TestReviewQueueRejectsEmployeeWithoutCaseMetadata(t *testing.T) {
+	service := application.NewReviewCaseService(application.NewMemoryReviewCaseRepository(application.ReviewCase{ID: "review-1", ReceiptID: "receipt-1", Status: application.ReviewCaseOpen, Version: 1}))
+	handler := &adminHandler{services: AdminServices{Reviews: service, Role: func(context.Context, string) (string, error) { return "EMPLOYEE", nil }}}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/reviews", nil)
+	request = request.WithContext(context.WithValue(request.Context(), actorContextKey{}, Actor{ID: "employee-1", Role: "EMPLOYEE", Channel: "web"}))
+	response := httptest.NewRecorder()
+
+	handler.listReviews(response, request)
+
+	if response.Code != http.StatusForbidden || strings.Contains(response.Body.String(), "review-1") {
+		t.Fatalf("response = %d %s, want private 403", response.Code, response.Body.String())
+	}
+}
+
+func TestReviewReceiptPreviewReturnsOnlyShortLivedURLForFinance(t *testing.T) {
+	expiresAt := time.Date(2026, time.October, 23, 12, 10, 0, 0, time.UTC)
+	preview := application.NewReceiptPreviewService(
+		application.NewMemoryReviewCaseRepository(application.ReviewCase{ID: "review-1", ReceiptID: "receipt-1"}),
+		transportPreviewReceiptLookup{receipt: domain.Receipt{ID: "receipt-1", ObjectKey: "receipts/private-object"}},
+		transportPreviewStore{url: "https://files.example/receipts/receipt-1?signature=safe", expiresAt: expiresAt},
+	)
+	handler := &adminHandler{services: AdminServices{Previews: preview, Role: func(context.Context, string) (string, error) { return "FINANCE_REVIEWER", nil }}}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/reviews/review-1/receipt-preview", nil)
+	request.SetPathValue("reviewId", "review-1")
+	request = request.WithContext(context.WithValue(request.Context(), actorContextKey{}, Actor{ID: "finance-1", Role: "FINANCE_REVIEWER", Channel: "web"}))
+	response := httptest.NewRecorder()
+
+	handler.previewReceipt(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["url"] != "https://files.example/receipts/receipt-1?signature=safe" || body["expiresAt"] == nil || body["objectKey"] != nil {
+		t.Fatalf("preview body = %#v", body)
+	}
+}
+
+func TestReviewReceiptPreviewRejectsEmployee(t *testing.T) {
+	preview := application.NewReceiptPreviewService(
+		application.NewMemoryReviewCaseRepository(application.ReviewCase{ID: "review-1", ReceiptID: "receipt-1"}),
+		transportPreviewReceiptLookup{receipt: domain.Receipt{ID: "receipt-1", ObjectKey: "receipts/private-object"}},
+		transportPreviewStore{url: "https://files.example/receipts/receipt-1?signature=safe"},
+	)
+	handler := &adminHandler{services: AdminServices{Previews: preview, Role: func(context.Context, string) (string, error) { return "EMPLOYEE", nil }}}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/reviews/review-1/receipt-preview", nil)
+	request.SetPathValue("reviewId", "review-1")
+	request = request.WithContext(context.WithValue(request.Context(), actorContextKey{}, Actor{ID: "employee-1", Role: "EMPLOYEE", Channel: "web"}))
+	response := httptest.NewRecorder()
+
+	handler.previewReceipt(response, request)
+
+	if response.Code != http.StatusForbidden || strings.Contains(response.Body.String(), "files.example") {
+		t.Fatalf("response = %d %s, want private 403", response.Code, response.Body.String())
+	}
+}
+
+func TestReviewReceiptPreviewMapsUnavailableObjectToSafeConflict(t *testing.T) {
+	preview := application.NewReceiptPreviewService(
+		application.NewMemoryReviewCaseRepository(application.ReviewCase{ID: "review-1", ReceiptID: "receipt-1"}),
+		transportPreviewReceiptLookup{receipt: domain.Receipt{ID: "receipt-1", ObjectKey: "receipts/private-object"}},
+		transportPreviewStore{err: errors.New("minio object receipts/private-object is missing")},
+	)
+	handler := &adminHandler{services: AdminServices{Previews: preview, Role: func(context.Context, string) (string, error) { return "ADMIN", nil }}}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/reviews/review-1/receipt-preview", nil)
+	request.SetPathValue("reviewId", "review-1")
+	request = request.WithContext(context.WithValue(request.Context(), actorContextKey{}, Actor{ID: "admin-1", Role: "ADMIN", Channel: "web"}))
+	response := httptest.NewRecorder()
+
+	handler.previewReceipt(response, request)
+
+	if response.Code != http.StatusConflict || strings.Contains(response.Body.String(), "private-object") || strings.Contains(response.Body.String(), "minio") {
+		t.Fatalf("response = %d %s, want safe unavailable conflict", response.Code, response.Body.String())
+	}
+	var body map[string]string
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["code"] != "RECEIPT_PREVIEW_UNAVAILABLE" || body["message"] != "原票暂不可用，请联系系统管理员后重试。" {
+		t.Fatalf("safe error = %#v", body)
+	}
+}
+
+func TestReviewQueueSerializesCamelCaseFieldsForReactClient(t *testing.T) {
+	service := application.NewReviewCaseService(application.NewMemoryReviewCaseRepository(application.ReviewCase{
+		ID: "review-1", ClaimID: "claim-1", ReceiptID: "receipt-1", Kind: "RECEIPT_OCR", ReasonCode: "OCR_LOW_CONFIDENCE", Status: application.ReviewCaseOpen, Version: 1,
+	}))
+	handler := &adminHandler{services: AdminServices{Reviews: service, Role: func(context.Context, string) (string, error) { return "FINANCE_REVIEWER", nil }}}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/reviews", nil)
+	request = request.WithContext(context.WithValue(request.Context(), actorContextKey{}, Actor{ID: "finance-1", Role: "FINANCE_REVIEWER", Channel: "web"}))
+	response := httptest.NewRecorder()
+
+	handler.listReviews(response, request)
+
+	var body struct {
+		Items []map[string]json.RawMessage `json:"items"`
+	}
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", response.Code, response.Body.String())
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode review queue: %v", err)
+	}
+	if len(body.Items) != 1 {
+		t.Fatalf("response = %s, want one review case", response.Body.String())
+	}
+	var status, reasonCode string
+	if rawStatus, ok := body.Items[0]["status"]; !ok || json.Unmarshal(rawStatus, &status) != nil {
+		t.Fatalf("response = %s, want status JSON key", response.Body.String())
+	}
+	if rawReasonCode, ok := body.Items[0]["reasonCode"]; !ok || json.Unmarshal(rawReasonCode, &reasonCode) != nil {
+		t.Fatalf("response = %s, want reasonCode JSON key", response.Body.String())
+	}
+	for _, field := range []string{"claimNumber", "claimPurpose", "assignedToDisplayName"} {
+		if _, ok := body.Items[0][field]; !ok {
+			t.Fatalf("response = %s, want %s JSON key", response.Body.String(), field)
+		}
+	}
+	if status != "OPEN" || reasonCode != "OCR_LOW_CONFIDENCE" {
+		t.Fatalf("response = %s, want camelCase review fields", response.Body.String())
+	}
+}
+
+func TestReviewQueueClaimReturnsConflictForStaleVersion(t *testing.T) {
+	service := application.NewReviewCaseService(application.NewMemoryReviewCaseRepository(application.ReviewCase{ID: "review-1", ReceiptID: "receipt-1", Status: application.ReviewCaseOpen, Version: 2}))
+	handler := &adminHandler{services: AdminServices{Reviews: service, Role: func(context.Context, string) (string, error) { return "FINANCE_REVIEWER", nil }}}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/reviews/review-1/claim", bytes.NewBufferString(`{"expectedVersion":1}`))
+	request.SetPathValue("reviewId", "review-1")
+	request = request.WithContext(context.WithValue(request.Context(), actorContextKey{}, Actor{ID: "finance-1", Role: "FINANCE_REVIEWER", Channel: "web"}))
+	response := httptest.NewRecorder()
+
+	handler.claimReview(response, request)
+
+	if response.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestReviewQueueResolveForwardsCorrectedReceiptFields(t *testing.T) {
+	repository := &capturingReviewCaseRepository{reviewCase: application.ReviewCase{ID: "review-1", ReceiptID: "receipt-1", Status: application.ReviewCaseClaimed, AssignedTo: "finance-1", Version: 2}}
+	service := application.NewReviewCaseService(repository)
+	handler := &adminHandler{services: AdminServices{Reviews: service, Role: func(context.Context, string) (string, error) { return "FINANCE_REVIEWER", nil }}}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/reviews/review-1/resolve", bytes.NewBufferString(`{"expectedVersion":2,"action":"CORRECT_FIELDS","resolution":"已根据原票更正","invoiceNumber":"INV-2026-1","invoiceDate":"2026-10-14","totalAmountCent":12345,"sellerName":"示例商户"}`))
+	request.SetPathValue("reviewId", "review-1")
+	request = request.WithContext(context.WithValue(request.Context(), actorContextKey{}, Actor{ID: "finance-1", Role: "FINANCE_REVIEWER", Channel: "web"}))
+	response := httptest.NewRecorder()
+
+	handler.resolveReview(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", response.Code, response.Body.String())
+	}
+	command := repository.command
+	if command.Action != application.ReviewCaseActionCorrectFields || command.InvoiceNumber != "INV-2026-1" || command.InvoiceDate == nil || command.InvoiceDate.Format("2006-01-02") != "2026-10-14" || command.TotalAmountCent == nil || *command.TotalAmountCent != 12345 || command.SellerName == nil || *command.SellerName != "示例商户" {
+		t.Fatalf("corrected fields were not forwarded: %#v", command)
+	}
+}
+
+func TestReviewQueueResolveReturnsConflictForDuplicateSubmittedInvoice(t *testing.T) {
+	repository := &capturingReviewCaseRepository{reviewCase: application.ReviewCase{ID: "review-1", ReceiptID: "receipt-1", Status: application.ReviewCaseClaimed, AssignedTo: "finance-1", Version: 2}, resolveErr: application.ErrDuplicateSubmittedInvoice}
+	service := application.NewReviewCaseService(repository)
+	handler := &adminHandler{services: AdminServices{Reviews: service, Role: func(context.Context, string) (string, error) { return "FINANCE_REVIEWER", nil }}}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/reviews/review-1/resolve", bytes.NewBufferString(`{"expectedVersion":2,"action":"CONFIRM","resolution":"确认原始识别结果"}`))
+	request.SetPathValue("reviewId", "review-1")
+	request = request.WithContext(context.WithValue(request.Context(), actorContextKey{}, Actor{ID: "finance-1", Role: "FINANCE_REVIEWER", Channel: "web"}))
+	response := httptest.NewRecorder()
+
+	handler.resolveReview(response, request)
+
+	if response.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestInternalEmployeeProvisioningRequiresDedicatedKey(t *testing.T) {
 	service := &fakeEmployeeIdentityService{}
 	handler := NewRouter(Dependencies{EmployeeIdentities: service, ProvisioningKey: "provision-key", Auth: StaticActorResolver{}})
@@ -157,6 +335,57 @@ func TestInternalEmployeeProvisioningRequiresDedicatedKey(t *testing.T) {
 
 type fakeEmployeeIdentityService struct {
 	command application.EmployeeIdentityCommand
+}
+
+type transportPreviewReceiptLookup struct {
+	receipt domain.Receipt
+	err     error
+}
+
+func (lookup transportPreviewReceiptLookup) FindByID(context.Context, string) (domain.Receipt, error) {
+	return lookup.receipt, lookup.err
+}
+
+type transportPreviewStore struct {
+	url       string
+	expiresAt time.Time
+	err       error
+}
+
+func (store transportPreviewStore) CreateDownloadURL(context.Context, string) (string, time.Time, error) {
+	return store.url, store.expiresAt, store.err
+}
+
+type capturingReviewCaseRepository struct {
+	reviewCase application.ReviewCase
+	command    application.ResolveReceiptCaseCommand
+	resolveErr error
+}
+
+func (repository *capturingReviewCaseRepository) ListReceiptCases(context.Context) ([]application.ReviewCase, error) {
+	return []application.ReviewCase{repository.reviewCase}, nil
+}
+
+func (repository *capturingReviewCaseRepository) GetReceiptCase(context.Context, string) (application.ReviewCase, error) {
+	return repository.reviewCase, nil
+}
+
+func (repository *capturingReviewCaseRepository) ClaimReceiptCase(_ context.Context, actorID, _ string, expectedVersion int64) (application.ReviewCase, error) {
+	repository.reviewCase.AssignedTo = actorID
+	repository.reviewCase.Status = application.ReviewCaseClaimed
+	repository.reviewCase.Version = expectedVersion + 1
+	return repository.reviewCase, nil
+}
+
+func (repository *capturingReviewCaseRepository) ResolveReceiptCase(_ context.Context, actorID string, command application.ResolveReceiptCaseCommand, _ bool) (application.ReviewCase, error) {
+	repository.command = command
+	if repository.resolveErr != nil {
+		return application.ReviewCase{}, repository.resolveErr
+	}
+	repository.reviewCase.Status = application.ReviewCaseResolved
+	repository.reviewCase.AssignedTo = actorID
+	repository.reviewCase.Version++
+	return repository.reviewCase, nil
 }
 
 func (service *fakeEmployeeIdentityService) Upsert(_ context.Context, command application.EmployeeIdentityCommand) error {
@@ -272,7 +501,7 @@ func TestDeleteReceiptDeletesOwnedDraftReceipt(t *testing.T) {
 }
 
 func TestReceiptResponseKeepsMissingMetadataNull(t *testing.T) {
-	encoded, err := json.Marshal(receiptResponse(application.ReceiptView{ID: "receipt-1", ClaimID: "claim-1", Filename: "pending.pdf"}))
+	encoded, err := json.Marshal(receiptResponse(application.ReceiptView{ID: "receipt-1", ClaimID: "claim-1", Filename: "pending.pdf", ClosedByReview: true}))
 	if err != nil {
 		t.Fatalf("encode receipt response: %v", err)
 	}
@@ -284,6 +513,9 @@ func TestReceiptResponseKeepsMissingMetadataNull(t *testing.T) {
 		if value, ok := response[field]; !ok || value != nil {
 			t.Fatalf("expected %s to be explicitly null, got %#v", field, response)
 		}
+	}
+	if response["closedByReview"] != true {
+		t.Fatalf("closedByReview = %#v, want true", response["closedByReview"])
 	}
 }
 

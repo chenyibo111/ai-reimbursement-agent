@@ -22,6 +22,10 @@ func TestListReceiptsPreservesRecognizedAndMissingMetadata(t *testing.T) {
 			ID: "missing", ClaimID: "claim-1", OwnerID: "employee-1", Filename: "missing.pdf",
 			Status: domain.ReceiptStatusExtracted,
 		},
+		"review-closed": {
+			ID: "review-closed", ClaimID: "claim-1", OwnerID: "employee-1", Filename: "closed.pdf",
+			Status: domain.ReceiptStatusQuarantined, ClosedByReview: true,
+		},
 	}}
 	service := NewReceiptService(fakeClaimReader{}, repository, nil, nil, nil, NewSequentialIDGenerator())
 
@@ -38,5 +42,8 @@ func TestListReceiptsPreservesRecognizedAndMissingMetadata(t *testing.T) {
 	}
 	if got := byID["missing"]; got.InvoiceDate != nil || got.TotalAmountCent != nil || got.SellerName != nil {
 		t.Fatalf("missing metadata = %#v, want nil values", got)
+	}
+	if got := byID["review-closed"]; !got.ClosedByReview {
+		t.Fatalf("review-closed receipt = %#v, want ClosedByReview", got)
 	}
 }

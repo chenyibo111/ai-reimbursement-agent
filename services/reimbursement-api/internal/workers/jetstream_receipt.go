@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/application"
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/events"
 	"github.com/nats-io/nats.go"
 )
@@ -63,8 +64,16 @@ func ConsumeReceiptReady(ctx context.Context, stream nats.JetStreamContext, work
 
 func processReceiptMessage(ctx context.Context, message *nats.Msg, worker *ReceiptExtractionWorker, reviews ReceiptReviewMarker) error {
 	envelope, payload, err := decodeReceiptEvent(message.Data)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	if err := worker.Handle(ctx, envelope.EventID, payload.ReceiptID); err != nil {
+		if errors.Is(err, application.ErrDuplicateSubmittedInvoice) || errors.Is(err, application.ErrLowOCRConfidence) || errors.Is(err, application.ErrDuplicateReceiptContent) {
+			if seenErr := worker.MarkHandled(ctx, envelope.EventID); seenErr != nil {
+				return seenErr
+			}
+			return message.Ack()
+		}
 		metadata, metadataErr := message.Metadata()
 		if metadataErr != nil {
 			return fmt.Errorf("read receipt event metadata: %w", metadataErr)

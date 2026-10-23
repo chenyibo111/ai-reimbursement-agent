@@ -25,8 +25,11 @@ it("resolves a Feishu open ID to the configured role or employee default", () =>
   expect(resolveFeishuRole("ou-employee", env())).toBe("EMPLOYEE");
 });
 
-it("rejects an open ID appearing in both privileged role lists", () => {
-  expect(() => validateRoleConfiguration(env({ FEISHU_FINANCE_REVIEWER_OPEN_IDS: "ou-finance,ou-admin" }))).toThrow("role configuration overlaps");
+it("allows an administrator to also appear in the finance reviewer list", () => {
+  const overlapping = env({ FEISHU_FINANCE_REVIEWER_OPEN_IDS: "ou-finance,ou-admin" });
+
+  expect(() => validateRoleConfiguration(overlapping)).not.toThrow();
+  expect(resolveFeishuRole("ou-admin", overlapping)).toBe("ADMIN");
 });
 
 it("issues a fifteen minute Web JWT with the reimbursement audience", () => {

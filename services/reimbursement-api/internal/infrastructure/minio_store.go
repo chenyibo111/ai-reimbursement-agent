@@ -42,6 +42,19 @@ func (store *MinIOStore) CreateUploadURL(ctx context.Context, objectKey string, 
 	return url.String(), nil
 }
 
+// CreateDownloadURL verifies that the original object still exists through
+// the private MinIO endpoint before signing a browser-reachable GET URL.
+func (store *MinIOStore) CreateDownloadURL(ctx context.Context, objectKey string) (string, time.Time, error) {
+	if _, err := store.client.StatObject(ctx, store.bucket, objectKey, minio.StatObjectOptions{}); err != nil {
+		return "", time.Time{}, fmt.Errorf("stat minio object: %w", err)
+	}
+	url, err := store.presignClient.PresignedGetObject(ctx, store.bucket, objectKey, store.expiresIn, nil)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("presign minio get object: %w", err)
+	}
+	return url.String(), time.Now().UTC().Add(store.expiresIn), nil
+}
+
 func (store *MinIOStore) ReadObject(ctx context.Context, objectKey string) (application.StoredObject, error) {
 	object, err := store.client.GetObject(ctx, store.bucket, objectKey, minio.GetObjectOptions{})
 	if err != nil {

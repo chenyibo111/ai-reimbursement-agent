@@ -138,6 +138,7 @@ func receiptResponse(receipt application.ReceiptView) map[string]any {
 		"totalAmountCent": receipt.TotalAmountCent,
 		"sellerName":      receipt.SellerName,
 		"ocrConfidence":   receipt.OCRConfidence,
+		"closedByReview":  receipt.ClosedByReview,
 		"updatedAt":       receipt.UpdatedAt,
 	}
 }
