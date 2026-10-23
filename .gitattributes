@@ -1,0 +1,3 @@
+# Executable scripts are copied into Linux containers. Keep their shebangs
+# executable by preventing Windows checkout conversion to CRLF.
+*.sh text eol=lf

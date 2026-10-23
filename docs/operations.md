@@ -119,11 +119,29 @@ npm run roles:bootstrap -- <employeeId>
 
 任务状态含义如下：`PENDING` 等待领取，`RUNNING` 正在执行并持有 lease，`RETRY_WAIT` 按 1/5/30 分钟退避，`SUCCEEDED` 已完成，`REVIEW_REQUIRED` 需要人工判断，`CLOSED` 因目标不存在或明确关闭而终止。Worker 重启会回收过期 lease；不要通过直接修改任务状态或删除任务来“重试”。
 
-OCR 低置信度、重复票据和重试耗尽会创建 `RECEIPT_OCR` 复核任务，由财务复核员领取。更正字段时系统校验报销单版本、写入审计事件；若发生冲突，刷新任务和报销单后重新判断。政策同步重试耗尽会创建 `POLICY_SYNC` 任务，仅管理员可重新排队。员工端不显示失败码、对象键或原始错误。
+OCR 低置信度、重复票据和重试耗尽会由 Go API 原子创建或复用 `reimbursement.review_cases` 中的 `RECEIPT_OCR` 复核案件，由财务复核员领取。案件领取和处理均带版本号；若发生冲突，刷新案件后重新判断。`CORRECT_FIELDS` 会再次校验已提交报销单的发票号；`REQUEST_REUPLOAD` 与 `CLOSE_INVALID` 只隔离票据，不会删除原始审计事实。政策同步重试耗尽仍使用 `AsyncJob` 的 `POLICY_SYNC` 任务，仅管理员可重新排队。员工端不显示失败码、对象键、复核原因或处理说明。
 
 排障顺序：先确认 `docker compose ps` 中 `job-worker` 正在运行，再查看 `docker compose logs --tail=200 job-worker`；随后检查依赖服务健康与任务的安全状态/失败分类。不可通过清空 `AsyncJob`、`ReviewCase` 或迁移记录恢复服务；先修复 OCR、Embedding、数据库或飞书依赖，再让 Worker 按既有退避和复核流程处理。
 
 政策监控另包括：管理员 `403` 比例、草稿保存/发布版本冲突、发布审计事件、政策阻断与预警数量、以及无有效发布政策的持续时长。日志不得记录飞书 App Secret、完整规则配置、员工票据或向量内容。
+
+### Go 票据复核队列验收
+
+`000012_receipt_review_queue.sql` 是 Go `reimbursement` schema 的前向迁移。它会规范化历史票据问题、为既有 `REVIEW_REQUIRED` 票据回填可领取案件，并保证每张票据至多一个 `OPEN` 或 `CLAIMED` 案件。执行前按既有 PostgreSQL 备份流程备份目标库；不要通过清空 `review_cases`、删除票据或重建数据卷来重新开始。
+
+本地 Compose 环境由受控 DDL 账号执行：
+
+```powershell
+Get-Content -Raw services/reimbursement-api/db/migrations/000012_receipt_review_queue.sql |
+  docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U reimbursement -d reimbursement
+
+docker compose --profile migration up -d --build reimbursement-api reimbursement-worker reimbursement-web reimbursement-edge
+docker compose --profile migration ps
+```
+
+验收时使用测试员工和非敏感样票：制造一张置信度低于 `0.70`、内容重复或已提交发票号重复的票据；以 `FINANCE_REVIEWER` 或 `ADMIN` 登录 `/admin/reviews`，领取案件后选择确认、更正字段、要求重新上传或关闭无效票据。确认案件版本递增、`review_case_audits` 有对应动作，且员工报销工作台只显示票据安全状态，不显示原因码、复核人和处理说明。使用普通员工访问任意 `/api/v1/admin/reviews` 路径必须返回 `403`，且响应不包含案件 ID 或票据字段。
+
+本地测试专用的 `REIMBURSEMENT_ALLOW_DUPLICATE_*_FOR_TESTING` 开关只能用于开发环境，不能带入生产配置；它用于降低有限样票的重复校验阻塞，不改变复核队列的数据安全和审计规则。
 
 ## 日志平台与失败告警
 

@@ -19,6 +19,74 @@ paths:
       responses:
         "201": { description: Policy published }
         default: { $ref: "#/components/responses/Error" }
+  /api/v1/admin/reviews:
+    get:
+      operationId: listReviewCases
+      responses:
+        "200":
+          description: Finance-visible receipt review queue
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ReviewCase" }
+        default: { $ref: "#/components/responses/Error" }
+  /api/v1/admin/reviews/{reviewId}:
+    get:
+      operationId: getReviewCase
+      parameters:
+        - name: reviewId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Finance-visible receipt review case
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReviewCase" }
+        default: { $ref: "#/components/responses/Error" }
+  /api/v1/admin/reviews/{reviewId}/receipt-preview:
+    get:
+      operationId: getReviewReceiptPreview
+      parameters:
+        - name: reviewId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Finance-only, short-lived URL for opening the original receipt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReceiptPreview" }
+        "403": { description: Caller is not a finance reviewer }
+        "404": { description: Receipt review case does not exist }
+        "409": { description: Original receipt is temporarily unavailable }
+        default: { $ref: "#/components/responses/Error" }
+  /api/v1/admin/reviews/{reviewId}/claim:
+    post:
+      operationId: claimReviewCase
+      parameters:
+        - name: reviewId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedVersion]
+              properties: { expectedVersion: { type: integer, minimum: 1 } }
+      responses:
+        "200": { description: Review case claimed }
+        default: { $ref: "#/components/responses/Error" }
   /api/v1/admin/reviews/{reviewId}/resolve:
     post:
       operationId: resolveReviewCase
@@ -33,9 +101,15 @@ paths:
           application/json:
             schema:
               type: object
-              required: [resolution]
+              required: [expectedVersion, action, resolution]
               properties:
+                expectedVersion: { type: integer, minimum: 1 }
+                action: { type: string, enum: [CONFIRM, CORRECT_FIELDS, REQUEST_REUPLOAD, CLOSE_INVALID] }
                 resolution: { type: string, minLength: 1 }
+                invoiceNumber: { type: string, minLength: 1, description: Required when action is CORRECT_FIELDS }
+                invoiceDate: { type: string, format: date, description: Required when action is CORRECT_FIELDS }
+                totalAmountCent: { type: integer, format: int64, minimum: 0, description: Required when action is CORRECT_FIELDS }
+                sellerName: { type: string, maxLength: 160 }
       responses:
         "200": { description: Review case resolved }
         default: { $ref: "#/components/responses/Error" }
@@ -359,7 +433,7 @@ components:
         updatedAt: { type: string, format: date-time }
     Receipt:
       type: object
-      required: [id, claimId, filename, status, ocrConfidence, updatedAt]
+      required: [id, claimId, filename, status, closedByReview, ocrConfidence, updatedAt]
       properties:
         id:
           type: string
@@ -370,6 +444,9 @@ components:
         status:
           type: string
           enum: [UPLOAD_PENDING, READY_FOR_OCR, EXTRACTED, REVIEW_REQUIRED, QUARANTINED]
+        closedByReview:
+          type: boolean
+          description: True only when a finance reviewer closed the receipt. Security quarantines remain false.
         invoiceNumber:
           type: string
         invoiceDate:
@@ -387,6 +464,34 @@ components:
           minimum: 0
           maximum: 1
         updatedAt:
+          type: string
+          format: date-time
+    ReviewCase:
+      type: object
+      required: [id, claimId, receiptId, claimNumber, claimPurpose, kind, reasonCode, status, assignedToDisplayName, version, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        claimId: { type: string }
+        receiptId: { type: string }
+        claimNumber: { type: string }
+        claimPurpose: { type: string }
+        kind: { type: string, enum: [RECEIPT_OCR] }
+        reasonCode: { type: string }
+        status: { type: string, enum: [OPEN, CLAIMED, RESOLVED, CLOSED] }
+        assignedTo: { type: string }
+        assignedToDisplayName: { type: string }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ReceiptPreview:
+      type: object
+      required: [url, expiresAt]
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Ten-minute, read-only object-store URL. Never persist or expose to non-finance users.
+        expiresAt:
           type: string
           format: date-time
     ValidationIssue:

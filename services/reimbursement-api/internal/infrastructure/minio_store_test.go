@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMinIOStorePresignsBrowserUploadsWithPublicEndpoint(t *testing.T) {
@@ -57,5 +58,47 @@ func TestMinIOStorePresignsWithoutServerAccessToBrowserPublicEndpoint(t *testing
 	}
 	if !strings.HasPrefix(rawURL, "http://localhost:9000/") {
 		t.Fatalf("expected browser public URL, got %s", rawURL)
+	}
+}
+
+func TestMinIOStorePresignsVerifiedBrowserDownloadsWithPublicEndpoint(t *testing.T) {
+	internalServer := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodHead || request.URL.Path != "/receipts/receipts/receipt-1" {
+			t.Fatalf("expected object stat request, got %s %s", request.Method, request.URL.String())
+		}
+		response.Header().Set("Content-Length", "42")
+		response.Header().Set("Last-Modified", "Thu, 23 Oct 2026 12:00:00 GMT")
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer internalServer.Close()
+	internalURL, err := url.Parse(internalServer.URL)
+	if err != nil {
+		t.Fatalf("parse internal server URL: %v", err)
+	}
+	publicServer := httptest.NewServer(http.NotFoundHandler())
+	defer publicServer.Close()
+	publicURL, err := url.Parse(publicServer.URL)
+	if err != nil {
+		t.Fatalf("parse public server URL: %v", err)
+	}
+	store, err := NewMinIOStore(internalURL.Host, publicURL.Host, "access-key", "secret-key", false, false, "receipts")
+	if err != nil {
+		t.Fatalf("new minio store: %v", err)
+	}
+
+	rawURL, expiresAt, err := store.CreateDownloadURL(context.Background(), "receipts/receipt-1")
+
+	if err != nil {
+		t.Fatalf("create download URL: %v", err)
+	}
+	downloadURL, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatalf("parse download URL: %v", err)
+	}
+	if downloadURL.Host != publicURL.Host || strings.Contains(rawURL, internalURL.Host) {
+		t.Fatalf("download URL = %s, want public host %q", rawURL, publicURL.Host)
+	}
+	if downloadURL.Query().Get("X-Amz-Signature") == "" || expiresAt.Before(time.Now().UTC().Add(9*time.Minute)) {
+		t.Fatalf("download URL is not a ten-minute signed URL: %s expires %s", rawURL, expiresAt)
 	}
 }

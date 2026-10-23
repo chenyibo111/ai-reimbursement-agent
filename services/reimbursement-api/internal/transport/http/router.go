@@ -55,6 +55,12 @@ func NewRouter(dependencies Dependencies) http.Handler {
 	if dependencies.Admin.Policies != nil && dependencies.Admin.Reviews != nil && dependencies.Admin.Role != nil {
 		admin := &adminHandler{services: dependencies.Admin}
 		mux.HandleFunc("POST /api/v1/admin/policies/publish", admin.publishPolicy)
+		mux.HandleFunc("GET /api/v1/admin/reviews", admin.listReviews)
+		mux.HandleFunc("GET /api/v1/admin/reviews/{reviewId}", admin.getReview)
+		if dependencies.Admin.Previews != nil {
+			mux.HandleFunc("GET /api/v1/admin/reviews/{reviewId}/receipt-preview", admin.previewReceipt)
+		}
+		mux.HandleFunc("POST /api/v1/admin/reviews/{reviewId}/claim", admin.claimReview)
 		mux.HandleFunc("POST /api/v1/admin/reviews/{reviewId}/resolve", admin.resolveReview)
 	}
 	mux.HandleFunc("GET /healthz", func(response http.ResponseWriter, _ *http.Request) { response.WriteHeader(http.StatusNoContent) })

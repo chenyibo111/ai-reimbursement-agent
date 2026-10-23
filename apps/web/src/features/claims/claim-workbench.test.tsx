@@ -205,4 +205,24 @@ describe("ClaimWorkbenchPage", () => {
 		expect(page.getByText("上海象鲜网络科技有限公司")).toBeVisible();
 		expect(page.getByRole("heading", { name: "申请报销信息" })).toBeVisible();
 	});
+
+	it("explains that a finance-closed receipt is excluded and can be replaced", async () => {
+		const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+		const { reimbursementApi } = await import("../../api/client");
+		vi.mocked(reimbursementApi.listReceipts).mockResolvedValueOnce({
+			items: [{ id: "receipt-closed", claimId: "claim-1", filename: "invalid-invoice.pdf", status: "QUARANTINED", closedByReview: true, invoiceNumber: "", invoiceDate: null, totalAmountCent: null, sellerName: null, ocrConfidence: 0, updatedAt: "2026-10-08T08:00:00.000Z" }],
+		});
+
+		render(
+			<QueryClientProvider client={queryClient}>
+				<MemoryRouter initialEntries={["/claims/claim-1"]}>
+					<Routes><Route path="/claims/:claimId" element={<ClaimWorkbenchPage />} /></Routes>
+				</MemoryRouter>
+			</QueryClientProvider>,
+		);
+
+		expect(await screen.findByText("票据已关闭，不计入本次报销")).toBeVisible();
+		expect(screen.getByText("请删除该附件后重新上传有效票据。")).toBeVisible();
+		expect(screen.getByRole("button", { name: "删除附件" })).toBeEnabled();
+	});
 });

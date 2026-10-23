@@ -41,6 +41,7 @@ export interface Receipt {
   claimId: string;
   filename: string;
   status: ReceiptStatus;
+	closedByReview: boolean;
   invoiceNumber: string;
 	invoiceDate: string | null;
 	totalAmountCent: number | null;
@@ -74,4 +75,38 @@ export interface SubmissionSnapshot {
   claimId: string;
   submissionId?: string;
   status?: string;
+}
+
+export type ReviewCaseStatus = "OPEN" | "CLAIMED" | "RESOLVED" | "CLOSED";
+export type ReviewCaseAction = "CONFIRM" | "CORRECT_FIELDS" | "REQUEST_REUPLOAD" | "CLOSE_INVALID";
+
+export interface ReviewCase {
+  id: string;
+  claimId: string;
+  receiptId: string;
+  claimNumber: string;
+  claimPurpose: string;
+  kind: string;
+  reasonCode: string;
+  status: ReviewCaseStatus;
+  assignedTo: string;
+  assignedToDisplayName: string;
+  createdAt: string;
+  updatedAt: string;
+  version: number;
+}
+
+export interface ReceiptPreview {
+  url: string;
+  expiresAt: string;
+}
+
+export interface ResolveReviewCaseInput {
+  expectedVersion: number;
+  action: ReviewCaseAction;
+  resolution: string;
+  invoiceNumber?: string;
+  invoiceDate?: string;
+  totalAmountCent?: number;
+  sellerName?: string;
 }

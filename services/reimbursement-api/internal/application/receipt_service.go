@@ -26,6 +26,7 @@ var (
 	ErrUnsafeReceiptFile         = errors.New("receipt file is unsafe")
 	ErrDuplicateReceiptContent   = errors.New("receipt content was already uploaded")
 	ErrDuplicateSubmittedInvoice = errors.New("invoice number already exists on a submitted claim")
+	ErrLowOCRConfidence          = errors.New("receipt OCR confidence requires review")
 	ErrReceiptNotFound           = errors.New("receipt not found")
 	pdfPageTypePattern           = regexp.MustCompile(`/Type\s*/Page\b`)
 )
@@ -67,6 +68,7 @@ type ReceiptView struct {
 	TotalAmountCent *int64
 	SellerName      *string
 	OCRConfidence   float64
+	ClosedByReview  bool
 	UpdatedAt       time.Time
 }
 
@@ -109,6 +111,8 @@ type ReceiptRepository interface {
 	DeleteOwned(context.Context, string, string, string) error
 	MarkReadyForOCR(context.Context, string, string) error
 	MarkReviewRequired(context.Context, string, string) error
+	TransitionToReview(context.Context, string, string, *OCRResult) error
+	MarkQuarantined(context.Context, string) error
 	MarkExtracted(context.Context, string, OCRResult) error
 	HasSubmittedInvoice(context.Context, string) (bool, error)
 }
@@ -205,7 +209,7 @@ func (service *ReceiptService) FinalizeReceiptUpload(ctx context.Context, actorI
 		return fmt.Errorf("scan receipt: %w", err)
 	}
 	if unsafe {
-		if err := service.repository.MarkReviewRequired(ctx, receipt.ID, "MALWARE_DETECTED"); err != nil {
+		if err := service.repository.MarkQuarantined(ctx, receipt.ID); err != nil {
 			return fmt.Errorf("quarantine unsafe receipt: %w", err)
 		}
 		return ErrUnsafeReceiptFile
@@ -216,7 +220,7 @@ func (service *ReceiptService) FinalizeReceiptUpload(ctx context.Context, actorI
 	} else {
 		existing, err := service.repository.FindByContentHash(ctx, hash)
 		if err == nil && existing.ID != receipt.ID {
-			if err := service.repository.MarkReviewRequired(ctx, receipt.ID, "DUPLICATE_CONTENT"); err != nil {
+			if err := service.repository.TransitionToReview(ctx, receipt.ID, "DUPLICATE_CONTENT", nil); err != nil {
 				return fmt.Errorf("flag duplicate receipt: %w", err)
 			}
 			return ErrDuplicateReceiptContent
@@ -282,7 +286,7 @@ func (service *ReceiptService) ListReceipts(ctx context.Context, actorID string,
 			ID: receipt.ID, ClaimID: receipt.ClaimID, Filename: receipt.Filename,
 			Status: receipt.Status, InvoiceNumber: receipt.InvoiceNumber,
 			InvoiceDate: cloneTime(receipt.InvoiceDate), TotalAmountCent: cloneInt64(receipt.TotalAmountCent),
-			SellerName: cloneString(receipt.SellerName), OCRConfidence: receipt.OCRConfidence, UpdatedAt: receipt.UpdatedAt,
+			SellerName: cloneString(receipt.SellerName), OCRConfidence: receipt.OCRConfidence, ClosedByReview: receipt.ClosedByReview, UpdatedAt: receipt.UpdatedAt,
 		})
 	}
 	return views, nil
@@ -334,11 +338,17 @@ func (service *ReceiptService) ExtractReceipt(ctx context.Context, actorID strin
 			return fmt.Errorf("check submitted invoice: %w", err)
 		}
 		if exists && !service.allowDuplicateSubmittedInvoiceForTesting {
-			if err := service.repository.MarkReviewRequired(ctx, receipt.ID, "DUPLICATE_SUBMITTED_INVOICE"); err != nil {
+			if err := service.repository.TransitionToReview(ctx, receipt.ID, "DUPLICATE_SUBMITTED_INVOICE", &result); err != nil {
 				return fmt.Errorf("flag duplicate invoice: %w", err)
 			}
 			return ErrDuplicateSubmittedInvoice
 		}
+	}
+	if result.Confidence > 0 && result.Confidence < 0.7 {
+		if err := service.repository.TransitionToReview(ctx, receipt.ID, "OCR_LOW_CONFIDENCE", &result); err != nil {
+			return fmt.Errorf("flag low-confidence receipt: %w", err)
+		}
+		return ErrLowOCRConfidence
 	}
 	if err := service.repository.MarkExtracted(ctx, receipt.ID, result); err != nil {
 		return fmt.Errorf("persist ocr result: %w", err)
