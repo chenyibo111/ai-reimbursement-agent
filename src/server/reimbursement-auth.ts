@@ -14,11 +14,10 @@ const jwtLifetimeSeconds = 15 * 60;
 const defaultReturnTo = "/claims";
 
 export function validateRoleConfiguration(env: NodeJS.ProcessEnv): void {
-  const admin = openIds(env.FEISHU_ADMIN_OPEN_IDS);
-  const reviewers = openIds(env.FEISHU_FINANCE_REVIEWER_OPEN_IDS);
-  if (admin.some((openId) => reviewers.includes(openId))) {
-    throw new Error("role configuration overlaps");
-  }
+  // Roles are hierarchical: an administrator is also allowed to process
+  // finance-review work. An open ID may therefore appear in both allowlists;
+  // resolveFeishuRole deliberately grants the higher ADMIN role first.
+  void env;
 }
 
 export function resolveFeishuRole(openId: string, env: NodeJS.ProcessEnv): EmployeeRole {
