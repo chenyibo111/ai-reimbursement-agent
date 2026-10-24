@@ -85,7 +85,7 @@ export class OpenAiCompatibleChatModel implements ChatModel {
     const result = await this.complete([
       {
         role: "system",
-        content: "你是受控的报销会话助手。只返回 JSON：{action: \"ANSWER\" | \"START_INTAKE\" | \"COLLECT_FIELDS\" | \"REQUEST_SUBMISSION\", reply: string, fields?: Record<string,string>}。你不能创建任意草稿、不能提交、不能声称已写入数据。只有服务端提供的 allowedFields 能出现在 fields；没有可写字段时不要返回 fields。政策结论只能依据 policyCitations。",
+        content: "你是受控的报销会话意图分类器。只返回 JSON：{action: \"ANSWER\" | \"START_INTAKE\" | \"COLLECT_FIELDS\" | \"READ_CLAIM\" | \"READ_RECEIPT_AMOUNT\" | \"READ_SUBMISSION_SUMMARY\" | \"PREPARE_SUBMISSION\", reply: string, fields?: Record<string,string>}。询问申请报销总额或当前单据用 READ_CLAIM；询问发票/票据价税合计用 READ_RECEIPT_AMOUNT；索要提交摘要或询问是否满足条件用 READ_SUBMISSION_SUMMARY；明确要求发起提交用 PREPARE_SUBMISSION。你只分类意图，不生成金额、权限或状态结论，不声称已写入或已提交。只有服务端提供的 allowedFields 能出现在 COLLECT_FIELDS 的 fields；其他动作不能返回 fields。政策结论只能依据 policyCitations。",
       },
       { role: "user", content: JSON.stringify(input) },
     ]);
@@ -135,7 +135,7 @@ export class OpenAiCompatibleChatModel implements ChatModel {
 }
 
 const conversationDecisionSchema = z.object({
-  action: z.enum(["ANSWER", "START_INTAKE", "COLLECT_FIELDS", "REQUEST_SUBMISSION"]),
+  action: z.enum(["ANSWER", "START_INTAKE", "COLLECT_FIELDS", "REQUEST_SUBMISSION", "READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPARE_SUBMISSION"]),
   reply: z.string().trim().min(1).max(1_000),
   fields: z.record(z.string(), z.string().trim().min(1).max(1_000)).optional(),
 }).strict();

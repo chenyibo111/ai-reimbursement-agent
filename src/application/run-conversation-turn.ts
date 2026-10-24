@@ -178,7 +178,9 @@ async function applyDecision(
       pendingFields,
       ...(invalidatesSubmission ? { status: "COLLECTING" as const, submissionToken: null, submissionPreview: null } : {}),
     });
-    return persistReply(input, updated, decision.reply, [], deps.conversations);
+    const fieldLabels: Record<string, string> = { purpose: "报销事由", expenseCategory: "费用类别", participants: "参与人员", projectCode: "项目编号" };
+    const saved = Object.entries(decision.fields ?? {}).map(([name, value]) => `${fieldLabels[name] ?? name}：${value}`);
+    return persistReply(input, updated, saved.length ? `已记录${saved.join("；")}。` : "没有可记录的字段，请说明要补充的报销信息。", [], deps.conversations);
   }
 
   if (decision.action === "REQUEST_SUBMISSION") {
@@ -205,7 +207,7 @@ async function applyDecision(
     return persistReply(input, updated, reply, [], deps.conversations);
   }
 
-  return persistReply(input, intake, decision.reply, [], deps.conversations);
+  return persistReply(input, intake, "如需查询当前报销单或票据金额，请明确提出查询；如需继续办理，请在报销工作台查看和填写。", [], deps.conversations);
 }
 
 async function confirmSubmission(

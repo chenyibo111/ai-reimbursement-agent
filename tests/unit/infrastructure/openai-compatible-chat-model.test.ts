@@ -93,6 +93,26 @@ describe("OpenAiCompatibleChatModel", () => {
   });
 
   it.each([
+    ["这张发票多少钱", "READ_RECEIPT_AMOUNT"],
+    ["申请报销总额", "READ_CLAIM"],
+    ["生成提交摘要", "READ_SUBMISSION_SUMMARY"],
+    ["我要提交", "PREPARE_SUBMISSION"],
+  ])("accepts structured intent for %s", async (message, action) => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ action, reply: "模型文本不可作事实依据" }) } }] }), { status: 200 }));
+    const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "secret", fetchImpl });
+    const decision = await model.decideConversation({ summary: { text: "", throughSequence: 0 }, messages: [{ sequence: 1, role: "USER", channel: "WEB", text: message }], intake: null, policyCitations: [], allowedFields: [] });
+    expect(decision.action).toBe(action);
+    const body = JSON.parse(String(fetchImpl.mock.calls[0][1].body));
+    expect(body.messages[0].content).toContain(action);
+  });
+
+  it("rejects fields attached to a read action", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: '{"action":"READ_CLAIM","reply":"金额100元","fields":{"purpose":"出差"}}' } }] }), { status: 200 }));
+    const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "secret", fetchImpl });
+    await expect(model.decideConversation({ summary: { text: "", throughSequence: 0 }, messages: [], intake: null, policyCitations: [], allowedFields: ["purpose"] })).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  });
+
+  it.each([
     ["unauthorized", new Response("provider detail", { status: 401 })],
     ["empty choices", new Response(JSON.stringify({ choices: [] }), { status: 200 })],
     ["null envelope", new Response("null", { status: 200, headers: { "content-type": "application/json" } })],

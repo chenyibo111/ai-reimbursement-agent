@@ -175,6 +175,22 @@ it("writes only allowlisted Intake fields through the claim field use case", asy
   expect(getIntake()).toMatchObject({ collectedFields: { purpose: "客户拜访" } });
 });
 
+it.each(["这张发票金额是 999 元", "你没有读取报销单的权限"])("does not repeat ungrounded model facts: %s", async (reply) => {
+  const { deps } = createDeps({ model: { decideConversation: async () => ({ action: "ANSWER" as const, reply }) } });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "当前单据怎么样" }, deps);
+  expect(result.reply).not.toContain("999");
+  expect(result.reply).not.toContain("没有读取报销单的权限");
+  expect(result.reply).toContain("工作台");
+});
+
+it("acknowledges the persisted purpose rather than a fabricated model reply", async () => {
+  const { deps } = createDeps({ model: { decideConversation: async () => ({ action: "COLLECT_FIELDS" as const, reply: "已写入金额 999 元", fields: { purpose: "客户拜访" } }) } });
+  await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1" });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "报销事由是客户拜访" }, deps);
+  expect(result.reply).toContain("客户拜访");
+  expect(result.reply).not.toContain("999");
+});
+
 it("submits exactly once only after the server has prepared the active Intake", async () => {
   const { deps, requestSubmission, submitClaim, getIntake } = createDeps({
     model: { decideConversation: async () => ({ action: "REQUEST_SUBMISSION" as const, reply: "请确认提交。" }) },
