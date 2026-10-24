@@ -12,7 +12,7 @@ type ApiClientOptions = {
 };
 
 export class ReimbursementApiHttpError extends Error {
-  constructor(message: string, readonly status: number) {
+  constructor(message: string, readonly status: number, readonly code?: string) {
     super(message);
     this.name = "ReimbursementApiHttpError";
   }
@@ -46,7 +46,7 @@ export class ReimbursementApiClient implements ReimbursementPort {
   private async request<T>(context: ToolCallContext, path: string, method: string, body?: unknown): Promise<T> {
     const response = await this.fetcher(`${this.baseUrl}${path}`, { method, headers: { "Accept": "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json" }), "Authorization": `Bearer ${this.token(context)}`, "X-Agent-Service-Key": this.options.serviceKey, "Idempotency-Key": context.idempotencyKey }, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new ReimbursementApiHttpError(typeof payload.message === "string" ? payload.message : "报销服务暂不可用", response.status);
+    if (!response.ok) throw new ReimbursementApiHttpError(typeof payload.message === "string" ? payload.message : "报销服务暂不可用", response.status, typeof payload.code === "string" ? payload.code : undefined);
     return payload as T;
   }
 

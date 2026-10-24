@@ -98,9 +98,9 @@ function createProcessDeps(input: {
         updatePurpose: ({ claimId, value }) => tools.updatePurpose(context, claimId, value),
         readWorkbench: ({ claimId }) => tools.readWorkbench(context, claimId),
         readValidation: ({ claimId }) => tools.readValidation(context, claimId),
-        requestSubmission: async ({ claimId }) => {
-          const confirmation = await tools.requestSubmission(context, claimId);
-          return { token: confirmation.confirmationToken, claimId: confirmation.claimId, claimVersion: confirmation.claimVersion, totalAmountCents: confirmation.totalAmountCents ?? undefined, receiptCount: confirmation.receiptCount, purpose: confirmation.purpose };
+        prepareSubmission: async ({ claimId }) => {
+          const confirmation = await tools.prepareSubmission(context, claimId);
+          return { token: confirmation.confirmationToken, claimId: confirmation.claimId, claimVersion: confirmation.claimVersion, workbench: confirmation.workbench };
         },
         submitClaim: async ({ claimId, confirmationToken }) => {
           const submission = await tools.submit(context, claimId, confirmationToken);

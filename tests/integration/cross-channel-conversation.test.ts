@@ -30,7 +30,7 @@ it("continues an Intake from Feishu in the employee private Web history while ke
   let submitCalls = 0;
   const model = {
     classifyIntent: async () => "OTHER" as const,
-    decideConversation: async () => ({ action: "REQUEST_SUBMISSION" as const, reply: "请确认提交。" }),
+    decideConversation: async () => ({ action: "PREPARE_SUBMISSION" as const, reply: "请确认提交。" }),
   };
   const deps = {
     conversations,
@@ -38,7 +38,8 @@ it("continues an Intake from Feishu in the employee private Web history while ke
     createClaim,
     preflightAttachment: async () => undefined,
     uploadReceipt,
-    requestSubmission: async ({ claimId }: { actorId: string; claimId: string }) => ({ token: "cross-channel-token", claimId }),
+    readValidation: async ({ claimId }: { actorId: string; claimId: string }) => ({ claimId, claimVersion: 1, policyVersion: "p1", issues: [] }),
+    prepareSubmission: async ({ claimId }: { actorId: string; claimId: string }) => ({ token: "cross-channel-token", claimId, claimVersion: 1, workbench: { claim: { id: claimId, claimNumber: "BX-CROSS", version: 1, status: "DRAFT", purpose: "出差", requestedAmountCent: 10000, totalAmountCent: 10000, currency: "CNY" as const, receiptCount: 1 }, receipts: [{ id: "receipt-cross-channel", claimId, filename: "receipt.jpg", status: "EXTRACTED", invoiceNumber: "123", ocrConfidence: 0.9, totalAmountCent: 10000 }] } }),
     submitClaim: async () => { submitCalls += 1; return { submissionNumber: "RB-CROSS-CHANNEL" }; },
     searchPolicy: async () => [{ id: "policy-group", title: "差旅制度", url: "https://example.test/policy", excerpt: "群聊也可回答制度问题。", headingPath: [], score: 0.9 }],
   };

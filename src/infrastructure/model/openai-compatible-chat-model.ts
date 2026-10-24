@@ -135,7 +135,7 @@ export class OpenAiCompatibleChatModel implements ChatModel {
 }
 
 const conversationDecisionSchema = z.object({
-  action: z.enum(["ANSWER", "START_INTAKE", "COLLECT_FIELDS", "REQUEST_SUBMISSION", "READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPARE_SUBMISSION"]),
+  action: z.enum(["ANSWER", "START_INTAKE", "COLLECT_FIELDS", "READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPARE_SUBMISSION"]),
   reply: z.string().trim().min(1).max(1_000),
   fields: z.record(z.string(), z.string().trim().min(1).max(1_000)).optional(),
 }).strict();

@@ -17,7 +17,7 @@ export type PolicyAnswerInput = {
 };
 
 export type ConversationDecision = {
-  action: "ANSWER" | "START_INTAKE" | "COLLECT_FIELDS" | "REQUEST_SUBMISSION" | "READ_CLAIM" | "READ_RECEIPT_AMOUNT" | "READ_SUBMISSION_SUMMARY" | "PREPARE_SUBMISSION";
+  action: "ANSWER" | "START_INTAKE" | "COLLECT_FIELDS" | "READ_CLAIM" | "READ_RECEIPT_AMOUNT" | "READ_SUBMISSION_SUMMARY" | "PREPARE_SUBMISSION";
   reply: string;
   fields?: Partial<Record<ConversationCollectedFieldName, string>>;
 };
