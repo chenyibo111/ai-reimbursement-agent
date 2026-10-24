@@ -1,4 +1,5 @@
 import { ReimbursementToolGateway, type ReimbursementToolName } from "./reimbursement-tools";
+import type { ClaimSnapshot, ReceiptSnapshot, ValidationSnapshot } from "../ports/reimbursement-port";
 
 export type ConversationReimbursementContext = { actorId: string; actorRole: "EMPLOYEE" | "FINANCE_REVIEWER" | "ADMIN"; channel: "WEB" | "FEISHU"; conversationId: string; turnId: string };
 type Attachment = { filename: string; mimeType: string; bytes: Uint8Array };
@@ -16,6 +17,17 @@ export function createConversationReimbursementTools(gateway: ReimbursementToolG
     arguments: args,
   });
   return {
+    async readWorkbench(context: ConversationReimbursementContext, claimId: string) {
+      return (await execute(context, "get_claim_workbench", { claimId })).workbench as { claim: ClaimSnapshot; receipts: ReceiptSnapshot[] };
+    },
+    async readValidation(context: ConversationReimbursementContext, claimId: string) {
+      return (await execute(context, "get_claim_validation", { claimId })).validation as ValidationSnapshot;
+    },
+    async prepareSubmission(context: ConversationReimbursementContext, claimId: string) {
+      const workbench = (await execute(context, "get_claim_workbench", { claimId })).workbench as { claim: ClaimSnapshot; receipts: ReceiptSnapshot[] };
+      const confirmation = (await execute(context, "request_submission_confirmation", { claimId, version: workbench.claim.version })).confirmation as { confirmationToken: string; claimId: string; claimVersion: number };
+      return { ...confirmation, workbench };
+    },
     async createClaim(context: ConversationReimbursementContext, purpose?: string) {
       const result = await execute(context, "create_claim_draft", { purpose: purpose?.trim() ?? "" });
       return result.claim as { id: string; version: number };

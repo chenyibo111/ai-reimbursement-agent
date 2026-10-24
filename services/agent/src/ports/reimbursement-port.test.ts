@@ -3,6 +3,15 @@ import { describe, expect, it, vi } from "vitest";
 import { ReimbursementApiClient } from "../adapters/reimbursement-api-client";
 
 describe("ReimbursementApiClient", () => {
+  it("preserves Go claim and receipt money fields including null", async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "claim-1", claimNumber: "BX-1", version: 2, status: "DRAFT", purpose: null, requestedAmountCent: 8900, totalAmountCent: null, currency: "CNY" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [{ id: "receipt-1", claimId: "claim-1", filename: "invoice.pdf", status: "REVIEW_REQUIRED", invoiceNumber: "001", ocrConfidence: 0.5, totalAmountCent: null }] })));
+    const client = new ReimbursementApiClient({ baseUrl: "http://reimbursement-api:8080", serviceKey: "key", signingSecret: "secret", fetcher });
+    const context = { actorEmployeeId: "employee-1", actorRole: "EMPLOYEE" as const, channel: "FEISHU" as const, conversationId: "conversation-1", toolCallId: "read-1", idempotencyKey: "read-1" };
+
+    await expect(client.getClaimWorkbench({ ...context, claimId: "claim-1" })).resolves.toMatchObject({ claim: { claimNumber: "BX-1", requestedAmountCent: 8900, totalAmountCent: null, currency: "CNY" }, receipts: [{ totalAmountCent: null }] });
+  });
   it("passes actor, channel, conversation, tool call, and idempotency metadata to Go", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       id: "claim-1", version: 1, status: "DRAFT", purpose: "客户拜访",
