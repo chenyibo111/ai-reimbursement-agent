@@ -2,6 +2,8 @@ import { buildConversationContext, type ConversationContext } from "@/src/applic
 import type { AgentMessageChannel, AgentMessageRole, ReimbursementIntakeStatus } from "@/src/domain/agent-conversation";
 import type { ConversationDecision, ChatModel } from "@/src/infrastructure/model/chat-model";
 import type { PolicyCitation } from "@/src/application/search-policy-knowledge";
+import { formatClaimFacts, type ClaimFactKind } from "@/src/application/format-claim-facts";
+import type { ClaimSnapshot, ReceiptSnapshot, ValidationSnapshot } from "@/services/agent/src/ports/reimbursement-port";
 
 type ConversationRecord = { id: string; summary: string; summaryThroughSequence: number };
 type ConversationMessage = { id?: string; sequence: number; role: AgentMessageRole; channel: AgentMessageChannel; text: string; citations?: unknown; result?: unknown };
@@ -38,6 +40,8 @@ export type RunConversationTurnDeps = {
   uploadReceipt?: (input: { actorId: string; claimId: string; filename: string; mimeType: string; bytes: Uint8Array; notificationTarget?: { conversationId: string; chatId: string } }) => Promise<{ id: string; jobId?: string }>;
   extractReceipt?: (input: { actorId: string; claimId: string; receiptId: string }) => Promise<unknown>;
   updatePurpose?: (input: { actorId: string; claimId: string; value: string }) => Promise<{ version: number }>;
+  readWorkbench?: (input: { actorId: string; claimId: string }) => Promise<{ claim: ClaimSnapshot; receipts: ReceiptSnapshot[] }>;
+  readValidation?: (input: { actorId: string; claimId: string }) => Promise<ValidationSnapshot>;
   requestSubmission?: (input: { actorId: string; claimId: string }) => Promise<{ token: string; claimId: string; claimVersion?: number; totalAmountCents?: number; receiptCount?: number; purpose?: string | null; issues?: unknown[] }>;
   submitClaim?: (input: { actorId: string; claimId: string; confirmationToken: string }) => Promise<{ submissionNumber: string }>;
 };
@@ -164,6 +168,17 @@ async function applyDecision(
   decision: ConversationDecision,
   deps: RunConversationTurnDeps,
 ): Promise<ConversationTurnResult> {
+  if (decision.action === "READ_CLAIM" || decision.action === "READ_RECEIPT_AMOUNT" || decision.action === "READ_SUBMISSION_SUMMARY") {
+    if (!intake?.claimId) return persistReply(input, intake, "当前会话没有绑定报销单。请先输入“开始报销”并上传票据，或在 Web 工作台查看已有单据。", [], deps.conversations);
+    if (!deps.readWorkbench || (decision.action === "READ_SUBMISSION_SUMMARY" && !deps.readValidation)) return persistReply(input, intake, "报销数据暂时无法查询，请稍后重试。", [], deps.conversations);
+    try {
+      const workbench = await deps.readWorkbench({ actorId: input.actorId, claimId: intake.claimId });
+      const validation = decision.action === "READ_SUBMISSION_SUMMARY" ? await deps.readValidation!({ actorId: input.actorId, claimId: intake.claimId }) : undefined;
+      return persistReply(input, intake, formatClaimFacts(decision.action as ClaimFactKind, workbench, validation), [], deps.conversations);
+    } catch {
+      return persistReply(input, intake, "报销数据暂时无法查询，请稍后重试。", [], deps.conversations);
+    }
+  }
   if (decision.action === "COLLECT_FIELDS") {
     if (!intake) return persistReply(input, null, "请先输入“开始报销”或上传票据，再补充报销信息。", [], deps.conversations);
     const collectedFields = { ...intake.collectedFields, ...(decision.fields ?? {}) };

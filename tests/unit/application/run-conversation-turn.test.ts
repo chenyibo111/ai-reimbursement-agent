@@ -191,6 +191,45 @@ it("acknowledges the persisted purpose rather than a fabricated model reply", as
   expect(result.reply).not.toContain("999");
 });
 
+it("reads current Go facts for an amount question without trusting the model reply", async () => {
+  const readWorkbench = vi.fn(async () => ({ claim: { id: "agent-claim-1", claimNumber: "BX-001", version: 2, status: "DRAFT", purpose: "客户拜访", requestedAmountCent: 12345, totalAmountCent: 10155, currency: "CNY" as const, receiptCount: 1 }, receipts: [{ id: "receipt-1", claimId: "agent-claim-1", filename: "invoice.pdf", status: "EXTRACTED", invoiceNumber: "123", ocrConfidence: 0.97, totalAmountCent: 10155 }] }));
+  const { deps } = createDeps({ readWorkbench, model: { decideConversation: async () => ({ action: "READ_RECEIPT_AMOUNT" as const, reply: "没有权限，金额为999元" }) } });
+  await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1" });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", message: "发票多少钱" }, deps);
+  expect(result.reply).toContain("¥101.55");
+  expect(result.reply).not.toContain("999");
+  expect(readWorkbench).toHaveBeenCalledWith({ actorId: "employee-1", claimId: "agent-claim-1" });
+});
+
+it("asks to start an Intake when no claim is bound instead of reading an arbitrary claim", async () => {
+  const readWorkbench = vi.fn();
+  const { deps } = createDeps({ readWorkbench, model: { decideConversation: async () => ({ action: "READ_CLAIM" as const, reply: "金额999元" }) } });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "申请报销总额多少" }, deps);
+  expect(result.reply).toContain("开始报销");
+  expect(readWorkbench).not.toHaveBeenCalled();
+});
+
+it("keeps a submission summary read-only", async () => {
+  const workbench = { claim: { id: "agent-claim-1", claimNumber: "BX-001", version: 2, status: "DRAFT", purpose: "客户拜访", requestedAmountCent: 12345, totalAmountCent: 10155, currency: "CNY" as const, receiptCount: 1 }, receipts: [{ id: "receipt-1", claimId: "agent-claim-1", filename: "invoice.pdf", status: "EXTRACTED", invoiceNumber: "123", ocrConfidence: 0.97, totalAmountCent: 10155 }] };
+  const readValidation = vi.fn(async () => ({ claimId: "agent-claim-1", claimVersion: 2, policyVersion: "p1", issues: [{ code: "PURPOSE", severity: "WARNING" as const, message: "请确认事由" }] }));
+  const { deps, requestSubmission, updateIntake } = createDeps({ readWorkbench: async () => workbench, readValidation, model: { decideConversation: async () => ({ action: "READ_SUBMISSION_SUMMARY" as const, reply: "已经提交" }) } });
+  await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1" });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "生成提交摘要" }, deps);
+  expect(result.reply).toContain("只读摘要");
+  expect(result.reply).toContain("请确认事由");
+  expect(requestSubmission).not.toHaveBeenCalled();
+  expect(updateIntake).not.toHaveBeenCalled();
+  expect(readValidation).toHaveBeenCalledWith({ actorId: "employee-1", claimId: "agent-claim-1" });
+});
+
+it("does not interpret a Go read failure as lack of permission", async () => {
+  const { deps } = createDeps({ readWorkbench: async () => { throw new Error("upstream unavailable"); }, model: { decideConversation: async () => ({ action: "READ_CLAIM" as const, reply: "无权限" }) } });
+  await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1" });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "申请报销总额多少" }, deps);
+  expect(result.reply).toContain("暂时无法查询");
+  expect(result.reply).not.toContain("无权限");
+});
+
 it("submits exactly once only after the server has prepared the active Intake", async () => {
   const { deps, requestSubmission, submitClaim, getIntake } = createDeps({
     model: { decideConversation: async () => ({ action: "REQUEST_SUBMISSION" as const, reply: "请确认提交。" }) },

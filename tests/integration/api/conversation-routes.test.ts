@@ -6,6 +6,7 @@ import { GET as getPrivateConversation } from "@/app/api/conversations/private/r
 import { POST as postMessage } from "@/app/api/conversations/private/messages/route";
 import { POST as postAttachment } from "@/app/api/conversations/private/attachments/route";
 import { createPrismaClient } from "@/src/infrastructure/prisma/client";
+import { AgentConversationRepository } from "@/src/infrastructure/prisma/agent-conversation-repository";
 import { createSessionToken } from "@/src/server/session";
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? "postgresql://reimbursement:reimbursement@127.0.0.1:5433/reimbursement_test";
@@ -148,5 +149,52 @@ it("uploads an attachment through the Go tools without writing a legacy claim", 
     expect(await prisma.agentToolCall.count({ where: { conversationId: conversation.id } })).toBe(3);
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+it("answers a private amount query from the signed-in employee's Go claim", async () => {
+  const employeeId = `conversation-api-${crypto.randomUUID()}`;
+  await prisma.employee.create({ data: { id: employeeId, displayName: "员工 A" } });
+  const conversations = new AgentConversationRepository(prisma);
+  const conversation = await conversations.getOrCreatePrivate(employeeId);
+  await conversations.createIntake({ employeeId, conversationId: conversation.id, claimId: "go-claim-1", pendingFields: [] });
+  const originalFetch = globalThis.fetch;
+  const originalModelProvider = process.env.MODEL_PROVIDER;
+  const originalModelBaseUrl = process.env.MODEL_BASE_URL;
+  const originalModelName = process.env.MODEL_NAME;
+  const originalModelKey = process.env.MODEL_PROVIDER_API_KEY;
+  process.env.MODEL_PROVIDER = "openai-compatible";
+  process.env.MODEL_BASE_URL = "http://model.test/v1";
+  process.env.MODEL_NAME = "fixture";
+  process.env.MODEL_PROVIDER_API_KEY = "fixture-key";
+  const calls: string[] = [];
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    calls.push(url);
+    if (url === "http://model.test/v1/chat/completions") {
+      const body = JSON.parse(String(init?.body));
+      const system = String(body.messages[0].content);
+      const content = system.includes("意图分类器") && !system.includes("会话意图")
+        ? { intent: "CLAIM_ACTION" }
+        : { action: "READ_RECEIPT_AMOUNT", reply: "模型虚构金额 999 元" };
+      return Response.json({ choices: [{ message: { content: JSON.stringify(content) } }] });
+    }
+    if (url.endsWith("/api/v1/claims/go-claim-1")) return Response.json({ id: "go-claim-1", claimNumber: "BX-001", version: 2, status: "DRAFT", purpose: "出差", requestedAmountCent: 20000, totalAmountCent: 10155, currency: "CNY", receiptCount: 1 });
+    if (url.endsWith("/api/v1/claims/go-claim-1/receipts")) return Response.json({ items: [{ id: "receipt-1", claimId: "go-claim-1", filename: "invoice.pdf", status: "EXTRACTED", invoiceNumber: "123", ocrConfidence: 0.98, totalAmountCent: 10155 }] });
+    throw new Error(`unexpected request: ${url}`);
+  }) as typeof fetch;
+  try {
+    const response = await postMessage(new Request("http://localhost/api/conversations/private/messages", { method: "POST", headers: { "content-type": "application/json", cookie: session(employeeId) }, body: JSON.stringify({ message: "这张发票多少钱", turnId: `read-${crypto.randomUUID()}` }) }));
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.reply).toContain("¥101.55");
+    expect(body.reply).not.toContain("999");
+    expect(calls).toContain("http://127.0.0.1:8088/api/v1/claims/go-claim-1");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalModelProvider === undefined) delete process.env.MODEL_PROVIDER; else process.env.MODEL_PROVIDER = originalModelProvider;
+    if (originalModelBaseUrl === undefined) delete process.env.MODEL_BASE_URL; else process.env.MODEL_BASE_URL = originalModelBaseUrl;
+    if (originalModelName === undefined) delete process.env.MODEL_NAME; else process.env.MODEL_NAME = originalModelName;
+    if (originalModelKey === undefined) delete process.env.MODEL_PROVIDER_API_KEY; else process.env.MODEL_PROVIDER_API_KEY = originalModelKey;
   }
 });

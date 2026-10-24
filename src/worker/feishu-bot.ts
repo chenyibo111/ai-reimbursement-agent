@@ -96,6 +96,8 @@ function createProcessDeps(input: {
           return { id: receipt.receiptId };
         },
         updatePurpose: ({ claimId, value }) => tools.updatePurpose(context, claimId, value),
+        readWorkbench: ({ claimId }) => tools.readWorkbench(context, claimId),
+        readValidation: ({ claimId }) => tools.readValidation(context, claimId),
         requestSubmission: async ({ claimId }) => {
           const confirmation = await tools.requestSubmission(context, claimId);
           return { token: confirmation.confirmationToken, claimId: confirmation.claimId, claimVersion: confirmation.claimVersion, totalAmountCents: confirmation.totalAmountCents ?? undefined, receiptCount: confirmation.receiptCount, purpose: confirmation.purpose };
