@@ -3,6 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 import { ReimbursementToolGateway, type ToolCallResultStore } from "./reimbursement-tools";
 
 describe("ReimbursementToolGateway", () => {
+  it("allows an attachment-first draft with an empty purpose", async () => {
+    const port = { createClaimDraft: vi.fn().mockResolvedValue({ id: "claim-1", version: 1, status: "DRAFT", purpose: null }) };
+    const store: ToolCallResultStore = { findCompleted: vi.fn().mockResolvedValue(null), saveCompleted: vi.fn() };
+    const gateway = new ReimbursementToolGateway(port as never, store);
+    await expect(gateway.execute({ actorEmployeeId: "employee-1", actorRole: "EMPLOYEE", channel: "WEB", conversationId: "conversation-1", toolCallId: "turn-1:create_claim_draft", idempotencyKey: "turn-1:create_claim_draft", name: "create_claim_draft", arguments: { purpose: "" } })).resolves.toMatchObject({ claim: { id: "claim-1" } });
+    expect(port.createClaimDraft).toHaveBeenCalledWith(expect.objectContaining({ purpose: "" }));
+  });
   it("does not retry a completed tool call after a duplicate Feishu message", async () => {
     const port = { createClaimDraft: vi.fn() };
     const store: ToolCallResultStore = {
@@ -18,6 +25,18 @@ describe("ReimbursementToolGateway", () => {
 
     expect(result).toEqual({ claim: { id: "claim-existing", version: 1, status: "DRAFT", purpose: "客户拜访" } });
     expect(port.createClaimDraft).not.toHaveBeenCalled();
+    expect(store.saveCompleted).not.toHaveBeenCalled();
+  });
+  it("reports a failed Go tool without recording a completed result", async () => {
+    const failure = new Error("Go API unavailable");
+    const port = { createClaimDraft: vi.fn().mockRejectedValue(failure) };
+    const store: ToolCallResultStore = { findCompleted: vi.fn().mockResolvedValue(null), saveCompleted: vi.fn() };
+    const onFailure = vi.fn();
+    const gateway = new ReimbursementToolGateway(port as never, store, onFailure);
+    const call = { actorEmployeeId: "employee-1", actorRole: "EMPLOYEE" as const, channel: "WEB" as const, conversationId: "conversation-1", toolCallId: "turn-1:create", idempotencyKey: "turn-1:create", name: "create_claim_draft" as const, arguments: { purpose: "" } };
+
+    await expect(gateway.execute(call)).rejects.toBe(failure);
+    expect(onFailure).toHaveBeenCalledWith(failure, call);
     expect(store.saveCompleted).not.toHaveBeenCalled();
   });
 });

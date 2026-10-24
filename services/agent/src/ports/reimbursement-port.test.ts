@@ -28,6 +28,7 @@ describe("ReimbursementApiClient", () => {
 
     expect(fetcher).toHaveBeenCalledWith("http://reimbursement-api:8080/api/v1/claims", expect.objectContaining({
       method: "POST",
+      signal: expect.any(AbortSignal),
       headers: expect.objectContaining({
         "X-Agent-Service-Key": "agent-service-key",
         "Idempotency-Key": "idempotency-1",

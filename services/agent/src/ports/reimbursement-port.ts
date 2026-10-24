@@ -8,7 +8,14 @@ export type ToolCallContext = {
   idempotencyKey: string;
 };
 
-export type ClaimSnapshot = { id: string; version: number; status: string; purpose: string | null };
+export type ClaimSnapshot = {
+  id: string;
+  version: number;
+  status: string;
+  purpose: string | null;
+  requestedAmountCent?: number | null;
+  receiptCount?: number;
+};
 export type ReceiptSnapshot = { id: string; claimId: string; filename: string; status: string; invoiceNumber: string; ocrConfidence: number };
 export type ValidationSnapshot = { claimId: string; claimVersion: number; policyVersion: string; issues: Array<{ code: string; severity: "BLOCKING" | "WARNING"; message: string }> };
 
