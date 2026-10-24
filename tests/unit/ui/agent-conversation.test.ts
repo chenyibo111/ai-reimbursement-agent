@@ -1,6 +1,15 @@
 import { expect, it, vi } from "vitest";
 
-import { loadAgentConversation, sendAgentConversationMessage } from "@/src/ui/use-agent-conversation";
+import { clearPendingAgentTurn, getOrCreatePendingAgentTurn, loadAgentConversation, sendAgentConversationMessage } from "@/src/ui/use-agent-conversation";
+
+it("reuses a failed browser turn until the same action succeeds", () => {
+  const values = new Map<string, string>();
+  const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { values.delete(key); } };
+  const first = getOrCreatePendingAgentTurn(storage, "message:客户拜访");
+  expect(getOrCreatePendingAgentTurn(storage, "message:客户拜访")).toBe(first);
+  clearPendingAgentTurn(storage);
+  expect(getOrCreatePendingAgentTurn(storage, "message:客户拜访")).not.toBe(first);
+});
 
 it("loads only the persisted employee-private conversation", async () => {
   const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
@@ -23,19 +32,19 @@ it("sends a policy-only message without assigning a claim ID", async () => {
     intake: null,
   }), { status: 200 }));
 
-  await expect(sendAgentConversationMessage({ message: "住宿上限是多少", fetchImpl })).resolves.toMatchObject({
+  await expect(sendAgentConversationMessage({ message: "住宿上限是多少", turnId: "turn-12345678", fetchImpl })).resolves.toMatchObject({
     reply: "住宿上限为每晚 500 元。",
     intake: null,
   });
-  expect(fetchImpl).toHaveBeenCalledWith("/api/conversations/private/messages", expect.objectContaining({ method: "POST", body: JSON.stringify({ message: "住宿上限是多少" }) }));
+  expect(fetchImpl).toHaveBeenCalledWith("/api/conversations/private/messages", expect.objectContaining({ method: "POST", body: JSON.stringify({ message: "住宿上限是多少", turnId: "turn-12345678" }) }));
 });
 
 it("sends the exact confirmation command through the ordinary message endpoint", async () => {
   const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ reply: "报销单已提交。", citations: [], intake: { id: "intake-1", status: "SUBMITTED", claimId: "claim-1" } }), { status: 200 }));
 
-  await sendAgentConversationMessage({ message: "确认提交", fetchImpl });
+  await sendAgentConversationMessage({ message: "确认提交", turnId: "turn-12345679", fetchImpl });
 
-  expect(fetchImpl).toHaveBeenCalledWith("/api/conversations/private/messages", expect.objectContaining({ body: JSON.stringify({ message: "确认提交" }) }));
+  expect(fetchImpl).toHaveBeenCalledWith("/api/conversations/private/messages", expect.objectContaining({ body: JSON.stringify({ message: "确认提交", turnId: "turn-12345679" }) }));
 });
 
 it("keeps the server-derived submission preview with the ready Intake", async () => {

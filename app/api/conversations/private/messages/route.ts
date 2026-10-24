@@ -1,17 +1,15 @@
 import { NextResponse } from "next/server";
 
 import { runConversationTurn, type ConversationStore } from "@/src/application/run-conversation-turn";
-import { createPrismaAuditEventWriter } from "@/src/application/audit-event";
+import { createAgentReimbursementRuntime } from "@/src/agent/reimbursement-runtime";
 import { searchPolicyKnowledge } from "@/src/application/search-policy-knowledge";
-import { requestStoredSubmission, submitStoredClaim } from "@/src/application/stored-submission";
-import { updateClaimField } from "@/src/application/update-claim-field";
 import { createEmbeddingProvider } from "@/src/infrastructure/embedding/embedding-provider-factory";
 import { createChatModel } from "@/src/infrastructure/model/chat-model-factory";
 import { AgentConversationRepository } from "@/src/infrastructure/prisma/agent-conversation-repository";
-import { PrismaClaimRepository } from "@/src/infrastructure/prisma/claim-repository";
 import { createPrismaClient } from "@/src/infrastructure/prisma/client";
 import { PrismaPolicyKnowledgeRepository } from "@/src/infrastructure/prisma/policy-knowledge-repository";
 import { loadConfig } from "@/src/server/config";
+import { ensureStoredEmployee } from "@/src/server/employee-identity";
 import { getSessionActorId } from "@/src/server/session";
 
 export const runtime = "nodejs";
@@ -19,18 +17,21 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   try {
     const actorId = getSessionActorId(request);
-    const body = await request.json() as { message?: unknown };
+    const body = await request.json() as { message?: unknown; turnId?: unknown };
     if (typeof body.message !== "string" || !body.message.trim() || body.message.trim().length > 2_000) {
       return NextResponse.json({ error: "message is invalid" }, { status: 400 });
     }
+    if (typeof body.turnId !== "string" || !/^[a-zA-Z0-9_-]{8,100}$/.test(body.turnId)) return NextResponse.json({ error: "turnId is invalid" }, { status: 400 });
     const prisma = getPrisma();
+    const actor = await ensureStoredEmployee(actorId);
+    if (!actor?.isActive) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+    const tools = createAgentReimbursementRuntime(prisma);
     const repository = new AgentConversationRepository(prisma);
-    const claims = new PrismaClaimRepository(prisma);
-    const audit = createPrismaAuditEventWriter(prisma);
     const conversation = await repository.getOrCreatePrivate(actorId);
+    const context = { actorId, actorRole: actor.role, channel: "WEB" as const, conversationId: conversation.id, turnId: body.turnId };
     const config = loadConfig(process.env);
     const result = await runConversationTurn(
-      { actorId, conversationId: conversation.id, channel: "WEB", message: body.message },
+      { actorId, conversationId: conversation.id, channel: "WEB", channelMessageId: `web:${actorId}:${body.turnId}`, message: body.message },
       {
         conversations: repository as unknown as ConversationStore,
         model: createChatModel(config),
@@ -38,16 +39,10 @@ export async function POST(request: Request) {
           embeddings: createEmbeddingProvider(config),
           chunks: new PrismaPolicyKnowledgeRepository(prisma),
         }) : undefined,
-        updatePurpose: async ({ actorId: claimActorId, claimId, value }) => {
-          const claim = await claims.getByIdOrThrow(claimId);
-          const updated = await updateClaimField({ actorId: claimActorId, claimId, expectedVersion: claim.version, field: "purpose", value }, { claims, audit });
-          return { version: updated.version };
-        },
-        requestSubmission: ({ actorId: submissionActorId, claimId }) => requestStoredSubmission({ prisma, actorId: submissionActorId, claimId }),
-        submitClaim: async ({ actorId: submissionActorId, claimId, confirmationToken }) => {
-          const submitted = await submitStoredClaim({ prisma, actorId: submissionActorId, claimId, confirmationToken });
-          return { submissionNumber: submitted.submissionNumber };
-        },
+        createClaim: ({ purpose }) => tools.createClaim(context, purpose),
+        updatePurpose: ({ claimId, value }) => tools.updatePurpose(context, claimId, value),
+        requestSubmission: async ({ claimId }) => { const confirmation = await tools.requestSubmission(context, claimId); return { token: confirmation.confirmationToken, claimId: confirmation.claimId, claimVersion: confirmation.claimVersion, totalAmountCents: confirmation.totalAmountCents ?? undefined, receiptCount: confirmation.receiptCount, purpose: confirmation.purpose }; },
+        submitClaim: async ({ claimId, confirmationToken }) => { const submitted = await tools.submit(context, claimId, confirmationToken); return { submissionNumber: submitted.submissionNumber }; },
       },
     );
     return NextResponse.json(result);
@@ -63,6 +58,6 @@ function getPrisma() {
 
 function errorResponse(error: unknown) {
   const message = error instanceof Error ? error.message : "request failed";
-  const status = message === "unauthenticated" ? 401 : message === "message is invalid" || message === "no ready Intake" ? 400 : 500;
-  return NextResponse.json({ error: message === "unauthenticated" || status === 400 ? message : "request failed" }, { status });
+  const status = message === "unauthenticated" ? 401 : message === "message is invalid" || message === "no ready Intake" ? 400 : 503;
+  return NextResponse.json({ error: status === 503 ? "报销服务暂不可用，请稍后重试。" : message }, { status });
 }

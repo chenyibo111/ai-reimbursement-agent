@@ -200,7 +200,9 @@ async function applyDecision(
       issueCount: preview.issues?.length ?? 0,
     };
     const updated = await deps.conversations.updateIntake({ id: intake.id, status: "READY_TO_SUBMIT", submissionToken: preview.token, submissionPreview });
-    return persistReply(input, updated, decision.reply, [], deps.conversations);
+    const amount = typeof preview.totalAmountCents === "number" ? `${(preview.totalAmountCents / 100).toFixed(2)} 元` : "待确认";
+    const reply = `提交前请核对：报销事由 ${preview.purpose || "未填写"}；申请金额 ${amount}；票据 ${preview.receiptCount ?? 0} 张。确认无误后回复“确认提交”。`;
+    return persistReply(input, updated, reply, [], deps.conversations);
   }
 
   return persistReply(input, intake, decision.reply, [], deps.conversations);
