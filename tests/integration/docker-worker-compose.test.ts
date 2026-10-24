@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { expect, it } from "vitest";
 
 it("runs the durable job worker with the same secret and dependencies as the web service", async () => {
-  const compose = await readFile(new URL("../../docker-compose.yml", import.meta.url), "utf8");
+  const compose = (await readFile(new URL("../../docker-compose.yml", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
 
   expect(compose).toMatch(/^  job-worker:\r?\n/m);
   expect(compose).toMatch(/job-worker:[\s\S]*?command: npm run job:worker:container/);
@@ -44,6 +44,7 @@ it("rewrites host-only service addresses for the Compose network at runtime", as
   expect(runtime).toContain('rewriteUrl("S3_ENDPOINT", "minio", "9000")');
   expect(runtime).toContain('rewriteUrl("OCR_SERVICE_URL", "ocr", "8000")');
   expect(runtime).toContain('rewriteUrl("EMBEDDING_BASE_URL", "embedding-service", "8080")');
+  expect(runtime).toContain('rewriteUrl("REIMBURSEMENT_API_URL", "reimbursement-api", "8080")');
   expect(runtime).toContain('process.env.CLAMAV_HOST = "clamav"');
   expect(dockerfile).toContain("COPY --from=build /app/scripts ./scripts");
   expect(compose).toContain('entrypoint: ["node", "/app/scripts/docker-runtime.mjs"]');

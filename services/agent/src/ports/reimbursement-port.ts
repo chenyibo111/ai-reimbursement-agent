@@ -8,8 +8,18 @@ export type ToolCallContext = {
   idempotencyKey: string;
 };
 
-export type ClaimSnapshot = { id: string; version: number; status: string; purpose: string | null };
-export type ReceiptSnapshot = { id: string; claimId: string; filename: string; status: string; invoiceNumber: string; ocrConfidence: number };
+export type ClaimSnapshot = {
+  id: string;
+  claimNumber: string;
+  version: number;
+  status: string;
+  purpose: string | null;
+  totalAmountCent: number | null;
+  currency: "CNY";
+  requestedAmountCent?: number | null;
+  receiptCount?: number;
+};
+export type ReceiptSnapshot = { id: string; claimId: string; filename: string; status: string; invoiceNumber: string; ocrConfidence: number; totalAmountCent: number | null };
 export type ValidationSnapshot = { claimId: string; claimVersion: number; policyVersion: string; issues: Array<{ code: string; severity: "BLOCKING" | "WARNING"; message: string }> };
 
 export interface ReimbursementPort {

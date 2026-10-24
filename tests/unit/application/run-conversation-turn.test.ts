@@ -1,6 +1,7 @@
 import { expect, it, vi } from "vitest";
 
 import { runConversationTurn } from "@/src/application/run-conversation-turn";
+import { ReimbursementApiHttpError } from "@/services/agent/src/adapters/reimbursement-api-client";
 
 type Intake = {
   id: string;
@@ -39,7 +40,8 @@ function createDeps(overrides: Partial<Record<string, unknown>> = {}) {
   const createClaim = vi.fn(async () => ({ id: "agent-claim-1", version: 1 }));
   const uploadReceipt = vi.fn(async () => ({ id: "receipt-1", jobId: "ocr-job-1" }));
   const updatePurpose = vi.fn(async () => ({ version: 2 }));
-  const requestSubmission = vi.fn(async () => ({ token: "confirmation-token", claimId: "agent-claim-1", claimVersion: 2, totalAmountCents: 12_345, receiptCount: 2, purpose: "客户拜访", issues: [] }));
+  const prepareSubmission = vi.fn(async () => ({ token: "confirmation-token", claimId: "agent-claim-1", claimVersion: 2, workbench: { claim: { id: "agent-claim-1", claimNumber: "BX-001", version: 2, status: "DRAFT", purpose: "客户拜访", requestedAmountCent: 12_345, totalAmountCent: 12_345, currency: "CNY" as const, receiptCount: 2 }, receipts: [{ id: "r1", claimId: "agent-claim-1", filename: "a.pdf", status: "EXTRACTED", invoiceNumber: "1", ocrConfidence: 0.9, totalAmountCent: 5000 }, { id: "r2", claimId: "agent-claim-1", filename: "b.pdf", status: "EXTRACTED", invoiceNumber: "2", ocrConfidence: 0.9, totalAmountCent: 7345 }] } }));
+  const readValidation = vi.fn(async () => ({ claimId: "agent-claim-1", claimVersion: 2, policyVersion: "p1", issues: [] }));
   const submitClaim = vi.fn(async () => ({ submissionNumber: "RB20260001" }));
   return {
     deps: {
@@ -49,7 +51,8 @@ function createDeps(overrides: Partial<Record<string, unknown>> = {}) {
       preflightAttachment: async () => undefined,
       uploadReceipt,
       updatePurpose,
-      requestSubmission,
+      readValidation,
+      prepareSubmission,
       submitClaim,
       ...overrides,
     },
@@ -58,7 +61,7 @@ function createDeps(overrides: Partial<Record<string, unknown>> = {}) {
     createClaim,
     uploadReceipt,
     updatePurpose,
-    requestSubmission,
+    prepareSubmission,
     submitClaim,
     createIntake,
     updateIntake,
@@ -175,34 +178,170 @@ it("writes only allowlisted Intake fields through the claim field use case", asy
   expect(getIntake()).toMatchObject({ collectedFields: { purpose: "客户拜访" } });
 });
 
+it.each(["这张发票金额是 999 元", "你没有读取报销单的权限"])("does not repeat ungrounded model facts: %s", async (reply) => {
+  const { deps } = createDeps({ model: { decideConversation: async () => ({ action: "ANSWER" as const, reply }) } });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "当前单据怎么样" }, deps);
+  expect(result.reply).not.toContain("999");
+  expect(result.reply).not.toContain("没有读取报销单的权限");
+  expect(result.reply).toContain("工作台");
+});
+
+it("acknowledges the persisted purpose rather than a fabricated model reply", async () => {
+  const { deps } = createDeps({ model: { decideConversation: async () => ({ action: "COLLECT_FIELDS" as const, reply: "已写入金额 999 元", fields: { purpose: "客户拜访" } }) } });
+  await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1" });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "报销事由是客户拜访" }, deps);
+  expect(result.reply).toContain("客户拜访");
+  expect(result.reply).not.toContain("999");
+});
+
+it("reads current Go facts for an amount question without trusting the model reply", async () => {
+  const readWorkbench = vi.fn(async () => ({ claim: { id: "agent-claim-1", claimNumber: "BX-001", version: 2, status: "DRAFT", purpose: "客户拜访", requestedAmountCent: 12345, totalAmountCent: 10155, currency: "CNY" as const, receiptCount: 1 }, receipts: [{ id: "receipt-1", claimId: "agent-claim-1", filename: "invoice.pdf", status: "EXTRACTED", invoiceNumber: "123", ocrConfidence: 0.97, totalAmountCent: 10155 }] }));
+  const { deps } = createDeps({ readWorkbench, model: { decideConversation: async () => ({ action: "READ_RECEIPT_AMOUNT" as const, reply: "没有权限，金额为999元" }) } });
+  await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1" });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "发票多少钱" }, deps);
+  expect(result.reply).toContain("¥101.55");
+  expect(result.reply).not.toContain("999");
+  expect(readWorkbench).toHaveBeenCalledWith({ actorId: "employee-1", claimId: "agent-claim-1" });
+});
+
+it("asks to start an Intake when no claim is bound instead of reading an arbitrary claim", async () => {
+  const readWorkbench = vi.fn();
+  const { deps } = createDeps({ readWorkbench, model: { decideConversation: async () => ({ action: "READ_CLAIM" as const, reply: "金额999元" }) } });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "申请报销总额多少" }, deps);
+  expect(result.reply).toContain("开始报销");
+  expect(readWorkbench).not.toHaveBeenCalled();
+});
+
+it("keeps a submission summary read-only", async () => {
+  const workbench = { claim: { id: "agent-claim-1", claimNumber: "BX-001", version: 2, status: "DRAFT", purpose: "客户拜访", requestedAmountCent: 12345, totalAmountCent: 10155, currency: "CNY" as const, receiptCount: 1 }, receipts: [{ id: "receipt-1", claimId: "agent-claim-1", filename: "invoice.pdf", status: "EXTRACTED", invoiceNumber: "123", ocrConfidence: 0.97, totalAmountCent: 10155 }] };
+  const readValidation = vi.fn(async () => ({ claimId: "agent-claim-1", claimVersion: 2, policyVersion: "p1", issues: [{ code: "PURPOSE", severity: "WARNING" as const, message: "请确认事由" }] }));
+  const { deps, prepareSubmission, updateIntake } = createDeps({ readWorkbench: async () => workbench, readValidation, model: { decideConversation: async () => ({ action: "READ_SUBMISSION_SUMMARY" as const, reply: "已经提交" }) } });
+  await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1" });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "生成提交摘要" }, deps);
+  expect(result.reply).toContain("只读摘要");
+  expect(result.reply).toContain("请确认事由");
+  expect(prepareSubmission).not.toHaveBeenCalled();
+  expect(updateIntake).not.toHaveBeenCalled();
+  expect(readValidation).toHaveBeenCalledWith({ actorId: "employee-1", claimId: "agent-claim-1" });
+});
+
+it("does not interpret a Go read failure as lack of permission", async () => {
+  const { deps } = createDeps({ readWorkbench: async () => { throw new Error("upstream unavailable"); }, model: { decideConversation: async () => ({ action: "READ_CLAIM" as const, reply: "无权限" }) } });
+  await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1" });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "申请报销总额多少" }, deps);
+  expect(result.reply).toContain("暂时无法查询");
+  expect(result.reply).not.toContain("无权限");
+});
+
+it("does not reveal whether a 404 claim exists when reading facts", async () => {
+  const { deps } = createDeps({ readWorkbench: async () => { throw new ReimbursementApiHttpError("private backend detail", 404, "NOT_FOUND"); }, model: { decideConversation: async () => ({ action: "READ_CLAIM" as const, reply: "单据存在" }) } });
+  await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1" });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "申请报销总额" }, deps);
+  expect(result.reply).toContain("无法访问当前报销单");
+  expect(result.reply).not.toContain("单据存在");
+  expect(result.reply).not.toContain("private backend detail");
+});
+
+it.each(["READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPARE_SUBMISSION"] as const)("keeps %s private in a Feishu group", async (action) => {
+  const readWorkbench = vi.fn();
+  const readValidation = vi.fn();
+  const prepareSubmission = vi.fn();
+  const { deps } = createDeps({ readWorkbench, readValidation, prepareSubmission, model: { decideConversation: async () => ({ action, reply: "金额为999元" }) } });
+  await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1" });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "group", message: "@机器人 帮我看看报销" }, deps);
+  expect(result.reply).toContain("私聊");
+  expect(result.reply).not.toContain("999");
+  expect(result.intake).toBeNull();
+  expect(readWorkbench).not.toHaveBeenCalled();
+  expect(readValidation).not.toHaveBeenCalled();
+  expect(prepareSubmission).not.toHaveBeenCalled();
+});
+
+it("never submits on a group confirmation even when a token exists", async () => {
+  const { deps, submitClaim } = createDeps();
+  await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1", status: "READY_TO_SUBMIT", submissionToken: "token-1" });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "group", message: "确认提交" }, deps);
+  expect(result.reply).toContain("私聊");
+  expect(result.intake).toBeNull();
+  expect(submitClaim).not.toHaveBeenCalled();
+});
+
+it("fails closed when a Feishu confirmation has no trusted chat type", async () => {
+  const { deps, submitClaim } = createDeps();
+  await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1", status: "READY_TO_SUBMIT", submissionToken: "token-1" });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", message: "确认提交" }, deps);
+  expect(result.reply).toContain("私聊");
+  expect(submitClaim).not.toHaveBeenCalled();
+});
+
+it("does not request a confirmation token when Go validation blocks submission", async () => {
+  const prepareSubmission = vi.fn();
+  const { deps, getIntake } = createDeps({ prepareSubmission, readValidation: async () => ({ claimId: "agent-claim-1", claimVersion: 2, policyVersion: "p1", issues: [{ code: "AMOUNT_REQUIRED", severity: "BLOCKING" as const, message: "请填写申请金额" }] }), model: { decideConversation: async () => ({ action: "PREPARE_SUBMISSION" as const, reply: "直接提交" }) } });
+  await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1" });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "我要提交" }, deps);
+  expect(result.reply).toContain("请填写申请金额");
+  expect(prepareSubmission).not.toHaveBeenCalled();
+  expect(getIntake()).toMatchObject({ status: "COLLECTING", submissionToken: null });
+});
+
+it("prepares a fresh token and displays Go's current amount before asking confirmation", async () => {
+  const workbench = { claim: { id: "agent-claim-1", claimNumber: "BX-001", version: 3, status: "DRAFT", purpose: "客户拜访", requestedAmountCent: 12345, totalAmountCent: 10155, currency: "CNY" as const, receiptCount: 1 }, receipts: [{ id: "receipt-1", claimId: "agent-claim-1", filename: "invoice.pdf", status: "EXTRACTED", invoiceNumber: "123", ocrConfidence: 0.97, totalAmountCent: 10155 }] };
+  const prepareSubmission = vi.fn(async () => ({ token: "token-3", claimId: "agent-claim-1", claimVersion: 3, workbench }));
+  const { deps, getIntake } = createDeps({ prepareSubmission, readValidation: async () => ({ claimId: "agent-claim-1", claimVersion: 3, policyVersion: "p1", issues: [] }), model: { decideConversation: async () => ({ action: "PREPARE_SUBMISSION" as const, reply: "金额999元" }) } });
+  await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1" });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "我要提交" }, deps);
+  expect(result.reply).toContain("¥123.45");
+  expect(result.reply).toContain("确认提交");
+  expect(result.reply).not.toContain("999");
+  expect(prepareSubmission).toHaveBeenCalledWith({ actorId: "employee-1", claimId: "agent-claim-1" });
+  expect(getIntake()).toMatchObject({ status: "READY_TO_SUBMIT", submissionToken: "token-3" });
+});
+
+it("guides an unprepared confirmation without throwing or submitting", async () => {
+  const { deps, submitClaim } = createDeps();
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "确认提交" }, deps);
+  expect(result.reply).toContain("先发起提交");
+  expect(submitClaim).not.toHaveBeenCalled();
+});
+
+it.each([["VERSION_CONFLICT", "单据已变化"], ["CONFIRMATION_EXPIRED", "确认已过期"]])("invalidates stale confirmation on %s", async (code, expected) => {
+  const submitClaim = vi.fn(async () => { throw new ReimbursementApiHttpError("Go detail", 409, code); });
+  const { deps, getIntake } = createDeps({ submitClaim });
+  await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1", status: "READY_TO_SUBMIT", submissionToken: "old-token" });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "确认提交" }, deps);
+  expect(result.reply).toContain(expected);
+  expect(getIntake()).toMatchObject({ status: "COLLECTING", submissionToken: null });
+});
+
 it("submits exactly once only after the server has prepared the active Intake", async () => {
-  const { deps, requestSubmission, submitClaim, getIntake } = createDeps({
-    model: { decideConversation: async () => ({ action: "REQUEST_SUBMISSION" as const, reply: "请确认提交。" }) },
+  const { deps, prepareSubmission, submitClaim, getIntake } = createDeps({
+    model: { decideConversation: async () => ({ action: "PREPARE_SUBMISSION" as const, reply: "请确认提交。" }) },
   });
   await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1", pendingFields: [] });
 
   await expect(runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "可以提交了吗" }, deps)).resolves.toMatchObject({
+    reply: expect.stringContaining("¥123.45"),
     intake: { status: "READY_TO_SUBMIT", submissionPreview: { totalAmountCents: 12_345, receiptCount: 2, purpose: "客户拜访" } },
   });
   await expect(runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "确认提交" }, deps)).resolves.toMatchObject({
     submissionNumber: "RB20260001",
     intake: { status: "SUBMITTED" },
   });
-  await expect(runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "确认提交" }, deps)).rejects.toThrow("no ready Intake");
+  await expect(runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "确认提交" }, deps)).resolves.toMatchObject({ reply: expect.stringContaining("先发起提交") });
 
-  expect(requestSubmission).toHaveBeenCalledTimes(1);
+  expect(prepareSubmission).toHaveBeenCalledTimes(1);
   expect(submitClaim).toHaveBeenCalledTimes(1);
   expect(getIntake()).toMatchObject({ status: "SUBMITTED" });
 });
 
 it("keeps the conversation responsive when server-side submission validation blocks confirmation", async () => {
   const { deps, appendMessage, getIntake } = createDeps({
-    model: { decideConversation: async () => ({ action: "REQUEST_SUBMISSION" as const, reply: "请确认提交。" }) },
-    requestSubmission: async () => { throw new Error("报销单尚未满足提交条件"); },
+    model: { decideConversation: async () => ({ action: "PREPARE_SUBMISSION" as const, reply: "请确认提交。" }) },
+    readValidation: async () => ({ claimId: "agent-claim-1", claimVersion: 2, policyVersion: "p1", issues: [{ code: "AMOUNT_REQUIRED", severity: "BLOCKING" as const, message: "请填写申请金额" }] }),
   });
   await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1", pendingFields: [] });
 
-  await expect(runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", channelMessageId: "message-validation-blocked", message: "可以提交了吗" }, deps)).resolves.toMatchObject({
+  await expect(runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", channelMessageId: "message-validation-blocked", message: "可以提交了吗" }, deps)).resolves.toMatchObject({
     reply: expect.stringContaining("暂时不能提交"),
     intake: { status: "COLLECTING" },
   });
@@ -216,7 +355,7 @@ it("keeps the conversation responsive when server-side submission validation blo
 
 it("invalidates a prepared submission when another attachment changes the claim", async () => {
   const { deps, getIntake } = createDeps({
-    model: { decideConversation: async () => ({ action: "REQUEST_SUBMISSION" as const, reply: "请确认提交。" }) },
+    model: { decideConversation: async () => ({ action: "PREPARE_SUBMISSION" as const, reply: "请确认提交。" }) },
   });
   await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1", pendingFields: [] });
   await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "可以提交了吗" }, deps);

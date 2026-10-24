@@ -36,3 +36,24 @@ it("does not issue access when the employee projection fails", async () => {
     provision: async () => { throw new Error("IDENTITY_PROVISIONING_UNAVAILABLE"); },
   })).rejects.toThrow("IDENTITY_PROVISIONING_UNAVAILABLE");
 });
+
+it("does not map two different Feishu open IDs to the same employee", async () => {
+  const employees = new Map<string, { id: string }>();
+  const ids = ["employee-a", "employee-b"];
+  const deps = {
+    employees: {
+      findByFeishuUserId: async (openId: string) => employees.get(openId) ?? null,
+      create: async ({ feishuUserId }: { feishuUserId: string }) => {
+        const employee = { id: ids[employees.size] };
+        employees.set(feishuUserId, employee);
+        return employee;
+      },
+    },
+    resolveRole: () => "EMPLOYEE" as const,
+    provision: async () => undefined,
+  };
+  const owner = await ensureEmployeeIdentity({ openId: "ou_owner" }, deps);
+  const other = await ensureEmployeeIdentity({ openId: "ou_other" }, deps);
+  expect(owner.id).toBe("employee-a");
+  expect(other.id).toBe("employee-b");
+});

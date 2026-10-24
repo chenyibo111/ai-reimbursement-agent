@@ -3,16 +3,12 @@ import { expect, it } from "vitest";
 import { processFeishuEvent, type ProcessFeishuEventDeps } from "@/src/application/process-feishu-event";
 
 function fixture(overrides: Partial<ProcessFeishuEventDeps> = {}) {
-  const calls = { findEmployee: 0, ensureEmployee: 0, private: 0, group: 0, deliveryTargets: [] as Array<{ conversationId: string; chatId: string }>, turn: [] as Array<Record<string, unknown>>, download: 0 };
+  const calls = { ensureEmployee: 0, private: 0, group: 0, deliveryTargets: [] as Array<{ conversationId: string; chatId: string }>, turn: [] as Array<Record<string, unknown>>, download: 0 };
   const deps: ProcessFeishuEventDeps = {
     botOpenId: "ou-bot",
     publicAppUrl: "https://reimbursement.example.test",
     events: {
       findInboundByEventId: async () => ({ eventId: "event-1", messageId: "om-1", messageType: "text", chatId: "oc-1", senderOpenId: "ou-employee", chatType: "p2p", mentionedOpenIds: [] }),
-      findEmployeeByOpenId: async () => {
-        calls.findEmployee += 1;
-        return { id: "employee-1" };
-      },
     },
     identities: {
       ensureEmployeeForInboundMessage: async () => {
@@ -63,7 +59,7 @@ it("ignores a group message that does not mention the bot before looking up an e
   });
 
   await expect(processFeishuEvent({ eventId: "event-1" }, deps)).resolves.toEqual({ kind: "IGNORED" });
-  expect(calls.findEmployee).toBe(0);
+  expect(calls.ensureEmployee).toBe(0);
   expect(calls.turn).toHaveLength(0);
 });
 
@@ -141,7 +137,19 @@ it("uses a per-employee group conversation only for mentioned group messages", a
   await processFeishuEvent({ eventId: "event-1" }, deps);
   expect(calls.private).toBe(0);
   expect(calls.group).toBe(1);
-  expect(calls.turn[0]).toMatchObject({ conversationId: "group-employee-1-oc-team" });
+  expect(calls.turn[0]).toMatchObject({ conversationId: "group-employee-1-oc-team", chatType: "group" });
+});
+
+it("does not append a claim-specific link to a group reply", async () => {
+  const base = fixture();
+  const { deps } = fixture({
+    events: { findInboundByEventId: async () => ({ eventId: "event-1", messageId: "om-1", messageType: "text", chatId: "oc-team", senderOpenId: "ou-employee", chatType: "group", mentionedOpenIds: ["ou-bot"] }) },
+    client: { ...base.deps.client, getMessage: async () => ({ messageId: "om-1", chatId: "oc-team", chatType: "group", senderOpenId: "ou-employee", messageType: "text", text: "@机器人 政策", mentions: [], attachments: [] }) },
+    runConversationTurn: async () => ({ reply: "政策说明", citations: [], intake: { id: "intake-1", employeeId: "employee-1", conversationId: "group-employee-1-oc-team", status: "COLLECTING", claimId: "secret-claim", collectedFields: {}, pendingFields: [], submissionToken: null } }),
+  });
+  const result = await processFeishuEvent({ eventId: "event-1" }, deps);
+  expect(result.kind).toBe("AGENT_REPLIED");
+  if (result.kind === "AGENT_REPLIED") expect(result.replyText).not.toContain("secret-claim");
 });
 
 it("downloads an attachment and delegates draft creation and extraction to the shared conversation turn", async () => {

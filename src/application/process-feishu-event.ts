@@ -40,6 +40,7 @@ export type ProcessFeishuEventDeps = {
     actorRole: EmployeeRole;
     conversationId: string;
     channel: "FEISHU";
+    chatType: "p2p" | "group";
     chatId: string;
     channelMessageId: string;
     message: string;
@@ -83,7 +84,8 @@ export async function processFeishuEvent(
       actorRole: employee.role,
       conversationId: conversation.id,
       channel: "FEISHU",
-    chatId: message.chatId,
+      chatType: message.chatType,
+      chatId: message.chatId,
       channelMessageId: message.messageId,
       message: normalizeMessage(message.text, Boolean(attachment)),
       ...(attachment ? { attachment } : {}),
@@ -91,7 +93,7 @@ export async function processFeishuEvent(
     return {
       kind: "AGENT_REPLIED",
       claimId: result.intake?.claimId ?? null,
-      replyText: formatReply(result, deps.publicAppUrl),
+      replyText: formatReply(result, deps.publicAppUrl, message.chatType),
     };
   } catch (error) {
     if (isAttachmentValidationError(error)) {
@@ -126,14 +128,14 @@ function normalizeMessage(text: string, hasAttachment: boolean): string {
   return hasAttachment ? "上传票据" : "你好";
 }
 
-function formatReply(result: ConversationTurnResult, publicAppUrl: string): string {
+function formatReply(result: ConversationTurnResult, publicAppUrl: string, chatType: "p2p" | "group"): string {
   const reply = result.reply.trim().slice(0, 1_000) || "我已收到你的消息。";
   const citations = result.citations.slice(0, 3).map((citation) => {
     const section = citation.headingPath.filter(Boolean).join(" > ");
     const excerpt = citation.excerpt.trim().replace(/\s+/g, " ").slice(0, 280);
     return `政策依据：${citation.title}${section ? `（${section}）` : ""}${excerpt ? `\n证据摘录：${excerpt}` : ""}`;
   }).join("\n");
-  const workspace = result.intake?.claimId
+  const workspace = chatType === "group" ? "如需继续办理个人报销，请私聊机器人或打开 Web 工作台。" : result.intake?.claimId
     ? `请在工作台确认或补充信息：${claimUrl(publicAppUrl, result.intake.claimId)}`
     : `可在报销工作台继续办理：${publicAppUrl}/claims`;
   return [reply, citations, workspace].filter(Boolean).join("\n\n");

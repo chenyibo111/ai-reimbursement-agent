@@ -89,6 +89,8 @@ services:
     build: .
     command: npm run start
     entrypoint: ["node", "/app/scripts/docker-runtime.mjs"]
+    environment:
+      REIMBURSEMENT_AGENT_STORAGE_ENDPOINT: http://minio:9000
     secrets:
       - app_env
     ports:

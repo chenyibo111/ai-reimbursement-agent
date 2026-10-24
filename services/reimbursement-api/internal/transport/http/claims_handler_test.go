@@ -445,6 +445,33 @@ func TestGetClaimReturnsActorScopedClaim(t *testing.T) {
 	}
 }
 
+func TestAnotherEmployeeCannotReadOrSubmitAnOwnedClaim(t *testing.T) {
+	handler := NewRouter(Dependencies{Claims: fakeClaims{}, Receipts: fakeReceipts{}, Submissions: fakeSubmissions{err: application.ErrClaimNotFound}, Auth: StaticActorResolver{}})
+	cases := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodGet, "/api/v1/claims/claim-1", ""},
+		{http.MethodGet, "/api/v1/claims/claim-1/receipts", ""},
+		{http.MethodGet, "/api/v1/claims/claim-1/validation", ""},
+		{http.MethodPost, "/api/v1/claims/claim-1/submit", `{"confirmationToken":"stolen-token"}`},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.method+" "+testCase.path, func(t *testing.T) {
+			request := httptest.NewRequest(testCase.method, testCase.path, bytes.NewBufferString(testCase.body))
+			request.Header.Set("Authorization", "Bearer employee-2")
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Idempotency-Key", "key-other")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404; body = %s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
 func TestListClaimsReturnsOnlyAuthenticatedActorsClaims(t *testing.T) {
 	handler := NewRouter(Dependencies{Claims: fakeClaims{}, Auth: StaticActorResolver{}})
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/claims", nil)

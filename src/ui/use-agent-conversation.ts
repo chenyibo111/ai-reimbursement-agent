@@ -14,6 +14,22 @@ export type AgentConversationState = {
 export type AgentConversationTurn = { reply: string; citations: ConversationCitation[]; intake: AgentConversationIntake | null; submissionNumber?: string };
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+type PendingTurnStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+const pendingTurnKey = "agent:pending-turn";
+
+export function getOrCreatePendingAgentTurn(storage: PendingTurnStorage, action: string): string {
+  try {
+    const pending = JSON.parse(storage.getItem(pendingTurnKey) ?? "null") as { action?: unknown; turnId?: unknown } | null;
+    if (pending?.action === action && typeof pending.turnId === "string") return pending.turnId;
+  } catch { /* stale session data is replaced below */ }
+  const turnId = crypto.randomUUID();
+  storage.setItem(pendingTurnKey, JSON.stringify({ action, turnId }));
+  return turnId;
+}
+
+export function clearPendingAgentTurn(storage: PendingTurnStorage): void {
+  storage.removeItem(pendingTurnKey);
+}
 
 export async function loadAgentConversation(fetchImpl: FetchLike = fetch, signal?: AbortSignal): Promise<AgentConversationState> {
   const response = await fetchImpl("/api/conversations/private", { signal });
@@ -22,22 +38,23 @@ export async function loadAgentConversation(fetchImpl: FetchLike = fetch, signal
   return normalizeConversation(payload);
 }
 
-export async function sendAgentConversationMessage(input: { message: string; fetchImpl?: FetchLike }): Promise<AgentConversationTurn> {
+export async function sendAgentConversationMessage(input: { message: string; turnId?: string; fetchImpl?: FetchLike }): Promise<AgentConversationTurn> {
   const message = input.message.trim();
   if (!message) throw new Error("请输入消息。");
   const response = await (input.fetchImpl ?? fetch)("/api/conversations/private/messages", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, turnId: input.turnId ?? crypto.randomUUID() }),
   });
   const payload = await readJson(response);
   if (!response.ok) throw new Error(errorMessage(payload, "暂时无法发送消息。"));
   return normalizeTurn(payload);
 }
 
-export async function uploadAgentConversationAttachment(input: { file: File; fetchImpl?: FetchLike }): Promise<AgentConversationTurn> {
+export async function uploadAgentConversationAttachment(input: { file: File; turnId?: string; fetchImpl?: FetchLike }): Promise<AgentConversationTurn> {
   const form = new FormData();
   form.set("file", input.file);
+  form.set("turnId", input.turnId ?? crypto.randomUUID());
   const response = await (input.fetchImpl ?? fetch)("/api/conversations/private/attachments", { method: "POST", body: form });
   const payload = await readJson(response);
   if (!response.ok) throw new Error(errorMessage(payload, "暂时无法上传票据。"));
@@ -75,7 +92,8 @@ export function useAgentConversation() {
   const send = useCallback(async (message: string) => {
     setIsSending(true);
     try {
-      const turn = await sendAgentConversationMessage({ message });
+      const turn = await sendAgentConversationMessage({ message, turnId: getOrCreatePendingAgentTurn(window.sessionStorage, `message:${message.trim()}`) });
+      clearPendingAgentTurn(window.sessionStorage);
       await refresh();
       return turn;
     } catch (cause) {
@@ -90,7 +108,8 @@ export function useAgentConversation() {
   const upload = useCallback(async (file: File) => {
     setIsSending(true);
     try {
-      const turn = await uploadAgentConversationAttachment({ file });
+      const turn = await uploadAgentConversationAttachment({ file, turnId: getOrCreatePendingAgentTurn(window.sessionStorage, `file:${file.name}:${file.size}:${file.lastModified}`) });
+      clearPendingAgentTurn(window.sessionStorage);
       await refresh();
       return turn;
     } catch (cause) {

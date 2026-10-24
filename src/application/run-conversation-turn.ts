@@ -2,6 +2,9 @@ import { buildConversationContext, type ConversationContext } from "@/src/applic
 import type { AgentMessageChannel, AgentMessageRole, ReimbursementIntakeStatus } from "@/src/domain/agent-conversation";
 import type { ConversationDecision, ChatModel } from "@/src/infrastructure/model/chat-model";
 import type { PolicyCitation } from "@/src/application/search-policy-knowledge";
+import { formatClaimFacts, type ClaimFactKind } from "@/src/application/format-claim-facts";
+import type { ClaimSnapshot, ReceiptSnapshot, ValidationSnapshot } from "@/services/agent/src/ports/reimbursement-port";
+import { ReimbursementApiHttpError } from "@/services/agent/src/adapters/reimbursement-api-client";
 
 type ConversationRecord = { id: string; summary: string; summaryThroughSequence: number };
 type ConversationMessage = { id?: string; sequence: number; role: AgentMessageRole; channel: AgentMessageChannel; text: string; citations?: unknown; result?: unknown };
@@ -38,7 +41,9 @@ export type RunConversationTurnDeps = {
   uploadReceipt?: (input: { actorId: string; claimId: string; filename: string; mimeType: string; bytes: Uint8Array; notificationTarget?: { conversationId: string; chatId: string } }) => Promise<{ id: string; jobId?: string }>;
   extractReceipt?: (input: { actorId: string; claimId: string; receiptId: string }) => Promise<unknown>;
   updatePurpose?: (input: { actorId: string; claimId: string; value: string }) => Promise<{ version: number }>;
-  requestSubmission?: (input: { actorId: string; claimId: string }) => Promise<{ token: string; claimId: string; claimVersion?: number; totalAmountCents?: number; receiptCount?: number; purpose?: string | null; issues?: unknown[] }>;
+  readWorkbench?: (input: { actorId: string; claimId: string }) => Promise<{ claim: ClaimSnapshot; receipts: ReceiptSnapshot[] }>;
+  readValidation?: (input: { actorId: string; claimId: string }) => Promise<ValidationSnapshot>;
+  prepareSubmission?: (input: { actorId: string; claimId: string }) => Promise<{ token: string; claimId: string; claimVersion: number; workbench: { claim: ClaimSnapshot; receipts: ReceiptSnapshot[] } }>;
   submitClaim?: (input: { actorId: string; claimId: string; confirmationToken: string }) => Promise<{ submissionNumber: string }>;
 };
 
@@ -50,7 +55,7 @@ export type ConversationTurnResult = {
 };
 
 export async function runConversationTurn(
-  input: { actorId: string; conversationId: string; channel: AgentMessageChannel; chatId?: string; channelMessageId?: string; message: string; attachment?: { filename: string; mimeType: string; bytes: Uint8Array } },
+  input: { actorId: string; conversationId: string; channel: AgentMessageChannel; chatType?: "p2p" | "group"; chatId?: string; channelMessageId?: string; message: string; attachment?: { filename: string; mimeType: string; bytes: Uint8Array } },
   deps: RunConversationTurnDeps,
 ): Promise<ConversationTurnResult> {
   const message = normalizeMessage(input.message);
@@ -68,6 +73,9 @@ export async function runConversationTurn(
 
   const attachment = input.attachment;
   if (attachment) return handleAttachment({ ...input, attachment }, active, deps);
+  if (message === "确认提交" && input.channel === "FEISHU" && input.chatType !== "p2p") {
+    return persistReply(input, null, "为保护报销信息，请私聊机器人或在 Web 工作台发起并确认提交。", [], deps.conversations);
+  }
   if (message === "确认提交") return confirmSubmission(input, active, deps);
   if (message === "开始报销") return startIntake(input, active, deps);
 
@@ -159,11 +167,25 @@ async function answerPolicyQuestion(
 }
 
 async function applyDecision(
-  input: { actorId: string; conversationId: string; channel: AgentMessageChannel; channelMessageId?: string },
+  input: { actorId: string; conversationId: string; channel: AgentMessageChannel; chatType?: "p2p" | "group"; channelMessageId?: string },
   intake: IntakeRecord | null,
   decision: ConversationDecision,
   deps: RunConversationTurnDeps,
 ): Promise<ConversationTurnResult> {
+  if (input.channel === "FEISHU" && input.chatType !== "p2p" && ["READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPARE_SUBMISSION"].includes(decision.action)) {
+    return persistReply(input, null, "为保护报销信息，请私聊机器人或在 Web 工作台查询金额、查看摘要与提交。", [], deps.conversations);
+  }
+  if (decision.action === "READ_CLAIM" || decision.action === "READ_RECEIPT_AMOUNT" || decision.action === "READ_SUBMISSION_SUMMARY") {
+    if (!intake?.claimId) return persistReply(input, intake, "当前会话没有绑定报销单。请先输入“开始报销”并上传票据，或在 Web 工作台查看已有单据。", [], deps.conversations);
+    if (!deps.readWorkbench || (decision.action === "READ_SUBMISSION_SUMMARY" && !deps.readValidation)) return persistReply(input, intake, "报销数据暂时无法查询，请稍后重试。", [], deps.conversations);
+    try {
+      const workbench = await deps.readWorkbench({ actorId: input.actorId, claimId: intake.claimId });
+      const validation = decision.action === "READ_SUBMISSION_SUMMARY" ? await deps.readValidation!({ actorId: input.actorId, claimId: intake.claimId }) : undefined;
+      return persistReply(input, intake, formatClaimFacts(decision.action as ClaimFactKind, workbench, validation), [], deps.conversations);
+    } catch (error) {
+      return persistReply(input, intake, claimReadErrorReply(error), [], deps.conversations);
+    }
+  }
   if (decision.action === "COLLECT_FIELDS") {
     if (!intake) return persistReply(input, null, "请先输入“开始报销”或上传票据，再补充报销信息。", [], deps.conversations);
     const collectedFields = { ...intake.collectedFields, ...(decision.fields ?? {}) };
@@ -178,32 +200,46 @@ async function applyDecision(
       pendingFields,
       ...(invalidatesSubmission ? { status: "COLLECTING" as const, submissionToken: null, submissionPreview: null } : {}),
     });
-    return persistReply(input, updated, decision.reply, [], deps.conversations);
+    const fieldLabels: Record<string, string> = { purpose: "报销事由", expenseCategory: "费用类别", participants: "参与人员", projectCode: "项目编号" };
+    const saved = Object.entries(decision.fields ?? {}).map(([name, value]) => `${fieldLabels[name] ?? name}：${value}`);
+    return persistReply(input, updated, saved.length ? `已记录${saved.join("；")}。` : "没有可记录的字段，请说明要补充的报销信息。", [], deps.conversations);
   }
 
-  if (decision.action === "REQUEST_SUBMISSION") {
-    if (!intake?.claimId || !deps.requestSubmission) return persistReply(input, intake, "请先上传票据并补齐必填信息，再生成提交摘要。", [], deps.conversations);
-    let preview: Awaited<ReturnType<NonNullable<RunConversationTurnDeps["requestSubmission"]>>>;
+  if (decision.action === "PREPARE_SUBMISSION") {
+    if (!intake?.claimId) return persistReply(input, intake, "当前会话没有绑定报销单，请先输入“开始报销”并上传票据。", [], deps.conversations);
+    if (!deps.readValidation || !deps.prepareSubmission) return persistReply(input, intake, "报销服务暂时无法准备提交，请稍后重试。", [], deps.conversations);
+    let validation: ValidationSnapshot;
     try {
-      preview = await deps.requestSubmission({ actorId: input.actorId, claimId: intake.claimId });
+      validation = await deps.readValidation({ actorId: input.actorId, claimId: intake.claimId });
     } catch (error) {
-      if (error instanceof Error && error.message === "报销单尚未满足提交条件") {
-        return persistReply(input, intake, "当前报销单暂时不能提交：票据仍在识别中或尚未填写报销金额。请等待识别完成，并在工作台补齐金额后再试。", [], deps.conversations);
-      }
-      throw error;
+      return persistReply(input, intake, submissionErrorReply(error), [], deps.conversations);
     }
+    const blocking = validation.issues.filter((issue) => issue.severity === "BLOCKING");
+    if (blocking.length) {
+      const cleared = await clearSubmissionPreparation(intake, deps.conversations);
+      return persistReply(input, cleared, `当前报销单暂时不能提交：${blocking.map((issue) => issue.message).join("；")}。请在工作台补齐后重新发起提交。`, [], deps.conversations);
+    }
+    let prepared: Awaited<ReturnType<NonNullable<RunConversationTurnDeps["prepareSubmission"]>>>;
+    try {
+      prepared = await deps.prepareSubmission({ actorId: input.actorId, claimId: intake.claimId });
+    } catch (error) {
+      const cleared = await clearSubmissionPreparation(intake, deps.conversations);
+      return persistReply(input, cleared, submissionErrorReply(error), [], deps.conversations);
+    }
+    const { claim, receipts } = prepared.workbench;
     const submissionPreview = {
-      claimVersion: preview.claimVersion ?? null,
-      totalAmountCents: preview.totalAmountCents ?? null,
-      receiptCount: preview.receiptCount ?? null,
-      purpose: preview.purpose ?? null,
-      issueCount: preview.issues?.length ?? 0,
+      claimVersion: prepared.claimVersion,
+      totalAmountCents: claim.requestedAmountCent ?? null,
+      receiptCount: receipts.length,
+      purpose: claim.purpose,
     };
-    const updated = await deps.conversations.updateIntake({ id: intake.id, status: "READY_TO_SUBMIT", submissionToken: preview.token, submissionPreview });
-    return persistReply(input, updated, decision.reply, [], deps.conversations);
+    const updated = await deps.conversations.updateIntake({ id: intake.id, status: "READY_TO_SUBMIT", submissionToken: prepared.token, submissionPreview });
+    const amount = typeof claim.requestedAmountCent === "number" ? `¥${(claim.requestedAmountCent / 100).toFixed(2)}` : "未填写";
+    const reply = `提交前请核对：报销事由 ${claim.purpose || "未填写"}；申请金额 ${amount}；票据 ${receipts.length} 张。确认无误后回复“确认提交”。`;
+    return persistReply(input, updated, reply, [], deps.conversations);
   }
 
-  return persistReply(input, intake, decision.reply, [], deps.conversations);
+  return persistReply(input, intake, "如需查询当前报销单或票据金额，请明确提出查询；如需继续办理，请在报销工作台查看和填写。", [], deps.conversations);
 }
 
 async function confirmSubmission(
@@ -212,11 +248,39 @@ async function confirmSubmission(
   deps: RunConversationTurnDeps,
 ): Promise<ConversationTurnResult> {
   if (!intake || intake.status !== "READY_TO_SUBMIT" || !intake.claimId || !intake.submissionToken || !deps.submitClaim) {
-    throw new Error("no ready Intake");
+    return persistReply(input, intake, "当前没有有效的提交确认。请先发起提交并核对最新信息，再回复“确认提交”。", [], deps.conversations);
   }
-  const submitted = await deps.submitClaim({ actorId: input.actorId, claimId: intake.claimId, confirmationToken: intake.submissionToken });
+  let submitted: { submissionNumber: string };
+  try {
+    submitted = await deps.submitClaim({ actorId: input.actorId, claimId: intake.claimId, confirmationToken: intake.submissionToken });
+  } catch (error) {
+    const cleared = await clearSubmissionPreparation(intake, deps.conversations);
+    return persistReply(input, cleared, submissionErrorReply(error), [], deps.conversations);
+  }
   const updated = await deps.conversations.updateIntake({ id: intake.id, status: "SUBMITTED", lastUserConfirmationAt: new Date() });
   return persistReply(input, updated, `报销单已提交，提交编号：${submitted.submissionNumber}。`, [], deps.conversations, submitted.submissionNumber);
+}
+
+async function clearSubmissionPreparation(intake: IntakeRecord, conversations: ConversationStore): Promise<IntakeRecord> {
+  if (intake.status !== "READY_TO_SUBMIT" && !intake.submissionToken) return intake;
+  return conversations.updateIntake({ id: intake.id, status: "COLLECTING", submissionToken: null, submissionPreview: null });
+}
+
+function submissionErrorReply(error: unknown): string {
+  if (error instanceof ReimbursementApiHttpError) {
+    if (error.code === "VERSION_CONFLICT") return "单据已变化，原确认不再有效。请重新发起提交并核对最新信息。";
+    if (error.code === "CONFIRMATION_EXPIRED") return "提交确认已过期，请重新发起提交并核对最新信息。";
+    if (error.code === "VALIDATION_BLOCKED") return "当前报销单暂时不能提交，请在工作台查看并补齐提交条件后重试。";
+    if (error.code === "NOT_FOUND" || error.status === 401 || error.status === 403 || error.status === 404) return "无法访问当前报销单，请确认登录身份和工作台中的单据。";
+  }
+  return "报销服务暂时无法确认操作结果，请先在工作台核对单据状态，稍后重新发起提交。";
+}
+
+function claimReadErrorReply(error: unknown): string {
+  if (error instanceof ReimbursementApiHttpError && (error.code === "NOT_FOUND" || error.status === 401 || error.status === 403 || error.status === 404)) {
+    return "无法访问当前报销单，请确认登录身份和工作台中的单据。";
+  }
+  return "报销数据暂时无法查询，请稍后重试。";
 }
 
 async function getContext(

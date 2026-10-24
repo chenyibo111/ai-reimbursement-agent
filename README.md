@@ -12,6 +12,8 @@ The current Next.js application remains the active product while the new archite
 
 面向中国单企业员工的 AI 报销服务。它把“上传票据、识别票据、补齐报销信息、校验制度、生成并提交报销单”组织成一条可审计、可人工确认的链路。
 
+Agent 的 Web 对话和飞书机器人统一通过 Go 报销工具网关办理报销。启动这两个入口前，必须配置 `REIMBURSEMENT_API_URL`、`REIMBURSEMENT_AGENT_SERVICE_KEY`、`REIMBURSEMENT_AUTH_HS256_SECRET`；Go API 不可用时会返回服务不可用，不会将报销操作写入旧 Next.js 领域路径。容器内上传票据使用 `REIMBURSEMENT_AGENT_STORAGE_ENDPOINT` 访问 MinIO。
+
 项目当前提供独立 Web 工作台，并可选接入飞书 OAuth、飞书机器人和以飞书文档为来源的报销政策知识库。
 
 > **当前边界**：Agent 会话独立于报销单。Web 悬浮入口与飞书单聊共享同一员工私有历史；飞书群聊按成员隔离。政策问答不会建单，只有明确“开始报销”或上传合规票据才进入受控办理，且仅精确输入“确认提交”会触发服务端复核并提交。
@@ -222,7 +224,7 @@ npm run feishu:worker
 
 机器人权限、群聊 `@机器人` 限制、故障恢复和验收清单见[飞书集成说明](docs/feishu-integration.md)。
 
-飞书上传票据会收到两条消息：第一条确认已接收并开始识别；`job-worker` 结束 OCR 后，`feishu-bot-worker` 会向原会话发送第二条识别摘要。摘要会列出发票号码、开票日期和价税合计；任一字段缺失或置信度低于 0.9 时，会明确要求员工确认，并在需要时提示“已转人工复核”。Web 上传不发送飞书通知。
+飞书上传票据会先收到接收确认；Go OCR 流程完成后，由 `agent-event-worker` 消费领域事件并向原会话发送识别摘要。摘要会列出发票号码、开票日期和价税合计；缺失字段或低置信度会提示员工确认。Web 上传不发送飞书通知。
 
 ### 异步任务 Worker 与角色初始化
 
@@ -246,7 +248,7 @@ npm run roles:bootstrap -- <employeeId>
 Web、飞书 Worker 与异步任务 Worker 使用同一个 Docker 镜像，分别运行 `npm run start`、`npm run feishu:worker` 与 `npm run job:worker`：
 
 ```powershell
-docker compose up -d --build web feishu-bot-worker job-worker
+docker compose --profile migration up -d --build web feishu-bot-worker agent-event-worker reimbursement-api reimbursement-worker reimbursement-edge
 ```
 
 React + Go 迁移演练使用统一边缘入口，而不是直接暴露 Go API：

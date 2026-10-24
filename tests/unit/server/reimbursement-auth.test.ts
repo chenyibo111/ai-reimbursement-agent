@@ -9,6 +9,7 @@ import {
 
 function env(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
   return {
+    NODE_ENV: "test",
     FEISHU_ADMIN_OPEN_IDS: "ou-admin",
     FEISHU_FINANCE_REVIEWER_OPEN_IDS: "ou-finance",
     ...overrides,
