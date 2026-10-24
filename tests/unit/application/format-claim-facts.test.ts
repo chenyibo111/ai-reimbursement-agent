@@ -28,6 +28,33 @@ it("keeps unknown and review-pending amounts unknown instead of zero", () => {
   expect(reply).not.toContain("¥0.00");
 });
 
+it("labels a non-null review-pending amount as an unconfirmed OCR candidate", () => {
+  const reply = formatClaimFacts("READ_RECEIPT_AMOUNT", { claim, receipts: [{ ...receipt, status: "REVIEW_REQUIRED", totalAmountCent: 50000 }] });
+  expect(reply).toContain("OCR 候选金额：¥500.00");
+  expect(reply).toContain("待人工复核，尚未确认");
+  expect(reply).not.toContain("价税合计：¥500.00");
+});
+
+it("does not describe a partial recognized sum as the total of all receipts", () => {
+  const workbench = { claim: { ...claim, receiptCount: 2 }, receipts: [receipt, { ...receipt, id: "receipt-2", status: "REVIEW_REQUIRED", totalAmountCent: 50000 }] };
+  for (const kind of ["READ_CLAIM", "READ_SUBMISSION_SUMMARY"] as const) {
+    const reply = formatClaimFacts(kind, workbench);
+    expect(reply).toContain("已识别票据小计：¥101.55");
+    expect(reply).toContain("另有 1 张票据金额待确认");
+    expect(reply).not.toContain("票据价税合计：¥101.55");
+  }
+});
+
+it("numbers receipts with duplicate filenames and missing invoice numbers", () => {
+  const reply = formatClaimFacts("READ_RECEIPT_AMOUNT", { claim: { ...claim, receiptCount: 2 }, receipts: [
+    { ...receipt, invoiceNumber: "", filename: "invoice.pdf" },
+    { ...receipt, id: "receipt-2", invoiceNumber: "", filename: "invoice.pdf" },
+  ] });
+  expect(reply).toContain("第 1 张：invoice.pdf");
+  expect(reply).toContain("第 2 张：invoice.pdf");
+  expect(reply).toContain("请根据序号");
+});
+
 it("does not claim a submission was prepared when only formatting a summary", () => {
   const reply = formatClaimFacts("READ_SUBMISSION_SUMMARY", { claim, receipts: [receipt] }, { claimId: "claim-1", claimVersion: 2, policyVersion: "p1", issues: [] });
   expect(reply).toContain("只读摘要");
