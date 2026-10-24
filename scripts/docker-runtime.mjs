@@ -19,6 +19,7 @@ rewriteUrl("DATABASE_URL", "postgres", "5432");
 rewriteUrl("S3_ENDPOINT", "minio", "9000");
 rewriteUrl("OCR_SERVICE_URL", "ocr", "8000");
 rewriteUrl("EMBEDDING_BASE_URL", "embedding-service", "8080");
+rewriteUrl("REIMBURSEMENT_API_URL", "reimbursement-api", "8080");
 process.env.CLAMAV_HOST = "clamav";
 process.env.CLAMAV_PORT = "3310";
 

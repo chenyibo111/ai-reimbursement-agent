@@ -2,8 +2,10 @@
 .env.local
 node_modules
 .next
+**/.next
 playwright-report
 test-results
 output
 .superpowers
 .git
+.worktrees

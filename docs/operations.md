@@ -102,6 +102,8 @@ POLICY_ADMIN_FEISHU_OPEN_IDS="ou_finance_a,ou_finance_b"
 
 ## 异步任务与人工复核运行
 
+Agent 报销办理仅调用 Go API。部署前确认 Go API、NATS、MinIO 与 `REIMBURSEMENT_API_URL`、`REIMBURSEMENT_AGENT_SERVICE_KEY`、`REIMBURSEMENT_AUTH_HS256_SECRET` 已就绪；容器内预签名上传通过 `REIMBURSEMENT_AGENT_STORAGE_ENDPOINT` 访问 MinIO。Go 服务故障时先恢复服务，不能让 Agent 切换到旧 Prisma 报销写入路径；需要回滚时应整体回滚 Web、飞书 Worker 与 Go API 的兼容镜像版本。
+
 部署前先执行 Prisma 迁移，再启动 `web`、`feishu-bot-worker` 与 `job-worker`。三个进程必须使用同一份受控密钥环境和同一 PostgreSQL 数据库；`job-worker` 领取 OCR 与政策来源同步任务，Web 只负责创建和查询任务。
 
 ```powershell
@@ -194,7 +196,7 @@ Grafana Explore 选择 `Loki` 数据源，以 `{service="job-worker"} | json | j
 容器部署：
 
 ```powershell
-docker compose up -d --build web feishu-bot-worker
+docker compose --profile migration up -d --build web feishu-bot-worker agent-event-worker reimbursement-api reimbursement-worker reimbursement-edge
 docker compose logs -f feishu-bot-worker
 docker compose restart feishu-bot-worker
 ```
@@ -202,6 +204,8 @@ docker compose restart feishu-bot-worker
 Worker 重启后会恢复未领取或可安全重试的事件。若 OCR、病毒扫描或对象存储不可用，先恢复相应依赖，再在 Web 工作台确认草稿和附件状态；不要通过删除数据库事件来“重试”。
 
 ### OCR 结果主动通知
+
+Go 工具网关硬切换后，新的飞书票据上传由 `reimbursement-worker` 完成 OCR，并由 `agent-event-worker` 消费 Go 领域事件投递识别结果。以下 `ReceiptExtractionNotification` 步骤仅用于排查切换前遗留的 Next.js 异步任务记录，不能作为新 Agent 票据链路的验收依据。
 
 飞书附件上传会创建 `ReceiptExtractionNotification` Outbox；它与 OCR `AsyncJob` 一一对应，仅保存原会话 `chatId`、关联 ID 和安全状态，不保存附件字节、对象键或飞书凭据。附件接收与识别结果分别是两条飞书消息：第二条由 `feishu-bot-worker` 在 OCR 任务进入 `SUCCEEDED`、`REVIEW_REQUIRED` 或 `CLOSED` 后投递。
 
