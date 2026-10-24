@@ -51,6 +51,7 @@ it("persists private and group scopes without creating a draft for a policy-only
     expect.objectContaining({ employeeId: "employee-1", kind: "GROUP", scopeKey: "oc-group" }),
   ]);
   expect(turns.map((turn) => turn.conversationId)).toHaveLength(2);
+  expect(turns.map((turn) => turn.chatType)).toEqual(["p2p", "group"]);
   expect(new Set(turns.map((turn) => turn.conversationId)).size).toBe(2);
   expect(replies).toHaveLength(2);
 });
@@ -74,7 +75,7 @@ it("deduplicates a redelivered message before it reaches the conversation turn",
 function createRuntime(messages: Map<string, FeishuInboundMessage>, replies: string[]) {
   const repository = new FeishuBotRepository(prisma);
   const conversations = new AgentConversationRepository(prisma);
-  const turns: Array<{ conversationId: string; channelMessageId: string }> = [];
+  const turns: Array<{ conversationId: string; channelMessageId: string; chatType: string }> = [];
   const client: FeishuBotClient = {
     async getMessage(messageId) {
       const message = messages.get(messageId);
@@ -103,7 +104,7 @@ function createRuntime(messages: Map<string, FeishuInboundMessage>, replies: str
     conversations,
     client,
     runConversationTurn: async (turn) => {
-      turns.push({ conversationId: turn.conversationId, channelMessageId: turn.channelMessageId });
+      turns.push({ conversationId: turn.conversationId, channelMessageId: turn.channelMessageId, chatType: turn.chatType });
       return { reply: "根据制度，住宿费用上限为每晚 500 元。", citations: [], intake: null };
     },
   });

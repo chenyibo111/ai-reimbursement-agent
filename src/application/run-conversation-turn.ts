@@ -55,7 +55,7 @@ export type ConversationTurnResult = {
 };
 
 export async function runConversationTurn(
-  input: { actorId: string; conversationId: string; channel: AgentMessageChannel; chatId?: string; channelMessageId?: string; message: string; attachment?: { filename: string; mimeType: string; bytes: Uint8Array } },
+  input: { actorId: string; conversationId: string; channel: AgentMessageChannel; chatType?: "p2p" | "group"; chatId?: string; channelMessageId?: string; message: string; attachment?: { filename: string; mimeType: string; bytes: Uint8Array } },
   deps: RunConversationTurnDeps,
 ): Promise<ConversationTurnResult> {
   const message = normalizeMessage(input.message);
@@ -73,6 +73,9 @@ export async function runConversationTurn(
 
   const attachment = input.attachment;
   if (attachment) return handleAttachment({ ...input, attachment }, active, deps);
+  if (message === "确认提交" && input.channel === "FEISHU" && input.chatType !== "p2p") {
+    return persistReply(input, null, "为保护报销信息，请私聊机器人或在 Web 工作台发起并确认提交。", [], deps.conversations);
+  }
   if (message === "确认提交") return confirmSubmission(input, active, deps);
   if (message === "开始报销") return startIntake(input, active, deps);
 
@@ -164,11 +167,14 @@ async function answerPolicyQuestion(
 }
 
 async function applyDecision(
-  input: { actorId: string; conversationId: string; channel: AgentMessageChannel; channelMessageId?: string },
+  input: { actorId: string; conversationId: string; channel: AgentMessageChannel; chatType?: "p2p" | "group"; channelMessageId?: string },
   intake: IntakeRecord | null,
   decision: ConversationDecision,
   deps: RunConversationTurnDeps,
 ): Promise<ConversationTurnResult> {
+  if (input.channel === "FEISHU" && input.chatType !== "p2p" && ["READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPARE_SUBMISSION"].includes(decision.action)) {
+    return persistReply(input, null, "为保护报销信息，请私聊机器人或在 Web 工作台查询金额、查看摘要与提交。", [], deps.conversations);
+  }
   if (decision.action === "READ_CLAIM" || decision.action === "READ_RECEIPT_AMOUNT" || decision.action === "READ_SUBMISSION_SUMMARY") {
     if (!intake?.claimId) return persistReply(input, intake, "当前会话没有绑定报销单。请先输入“开始报销”并上传票据，或在 Web 工作台查看已有单据。", [], deps.conversations);
     if (!deps.readWorkbench || (decision.action === "READ_SUBMISSION_SUMMARY" && !deps.readValidation)) return persistReply(input, intake, "报销数据暂时无法查询，请稍后重试。", [], deps.conversations);
@@ -176,8 +182,8 @@ async function applyDecision(
       const workbench = await deps.readWorkbench({ actorId: input.actorId, claimId: intake.claimId });
       const validation = decision.action === "READ_SUBMISSION_SUMMARY" ? await deps.readValidation!({ actorId: input.actorId, claimId: intake.claimId }) : undefined;
       return persistReply(input, intake, formatClaimFacts(decision.action as ClaimFactKind, workbench, validation), [], deps.conversations);
-    } catch {
-      return persistReply(input, intake, "报销数据暂时无法查询，请稍后重试。", [], deps.conversations);
+    } catch (error) {
+      return persistReply(input, intake, claimReadErrorReply(error), [], deps.conversations);
     }
   }
   if (decision.action === "COLLECT_FIELDS") {
@@ -268,6 +274,13 @@ function submissionErrorReply(error: unknown): string {
     if (error.code === "NOT_FOUND" || error.status === 401 || error.status === 403 || error.status === 404) return "无法访问当前报销单，请确认登录身份和工作台中的单据。";
   }
   return "报销服务暂时无法确认操作结果，请先在工作台核对单据状态，稍后重新发起提交。";
+}
+
+function claimReadErrorReply(error: unknown): string {
+  if (error instanceof ReimbursementApiHttpError && (error.code === "NOT_FOUND" || error.status === 401 || error.status === 403 || error.status === 404)) {
+    return "无法访问当前报销单，请确认登录身份和工作台中的单据。";
+  }
+  return "报销数据暂时无法查询，请稍后重试。";
 }
 
 async function getContext(

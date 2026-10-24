@@ -184,7 +184,7 @@ describe("ClaimWorkbenchPage", () => {
 			createdAt: "2026-10-08T08:00:00.000Z", updatedAt: "2026-10-08T08:00:00.000Z",
 		});
 		vi.mocked(reimbursementApi.listReceipts).mockResolvedValueOnce({
-			items: [{ id: "receipt-2", claimId: "claim-2", filename: "hotel.png", status: "EXTRACTED", invoiceNumber: "26317000001513684420", invoiceDate: "2026-05-01", totalAmountCent: 10155, sellerName: "上海象鲜网络科技有限公司", ocrConfidence: 0.96, updatedAt: "2026-10-08T08:00:00.000Z" }],
+			items: [{ id: "receipt-2", claimId: "claim-2", filename: "hotel.png", status: "EXTRACTED", invoiceNumber: "26317000001513684420", invoiceDate: "2026-05-01", totalAmountCent: 10155, sellerName: "上海象鲜网络科技有限公司", ocrConfidence: 0.96, closedByReview: false, updatedAt: "2026-10-08T08:00:00.000Z" }],
 		});
 		const { container } = render(
 			<QueryClientProvider client={queryClient}>

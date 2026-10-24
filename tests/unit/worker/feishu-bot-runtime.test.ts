@@ -4,7 +4,7 @@ import { createFeishuBotRuntime } from "@/src/worker/feishu-bot-runtime";
 
 function fixture() {
   const calls = { record: 0, recorded: [] as unknown[], processed: 0, retryable: 0, process: 0, replies: 0, close: 0 };
-  const pending = [{ id: "inbound-1", eventId: "event-1", messageId: "om-1", messageType: "text", chatId: "oc-1", senderOpenId: "ou-1", chatType: "p2p", mentionedOpenIds: [], status: "PROCESSING" as const, claimId: null }];
+  const pending = [{ id: "inbound-1", eventId: "event-1", messageId: "om-1", messageType: "text", chatId: "oc-1", senderOpenId: "ou-1", chatType: "p2p", mentionedOpenIds: [], status: "PROCESSING" as const, claimId: null, attemptCount: 1 }];
   const runtime = createFeishuBotRuntime({
     repository: {
       recordInbound: async (input) => {
@@ -59,7 +59,7 @@ it("returns retryable processing failures to the pending queue", async () => {
   const retryable = createFeishuBotRuntime({
     repository: {
       recordInbound: async () => ({ id: "inbound-1", shouldProcess: true }),
-      claimNextPending: async () => ({ id: "inbound-1", eventId: "event-1", messageId: "om-1", messageType: "text", chatId: "oc-1", senderOpenId: "ou-1", chatType: "p2p", mentionedOpenIds: [], status: "PROCESSING", claimId: null }),
+      claimNextPending: async () => ({ id: "inbound-1", eventId: "event-1", messageId: "om-1", messageType: "text", chatId: "oc-1", senderOpenId: "ou-1", chatType: "p2p", mentionedOpenIds: [], status: "PROCESSING", claimId: null, attemptCount: 1 }),
       markProcessed: async () => { calls.processed += 1; },
       markRetryableFailure: async (_id, code) => { expect(code).toBe("RETRYABLE_FAILURE"); calls.retryable += 1; },
     },
