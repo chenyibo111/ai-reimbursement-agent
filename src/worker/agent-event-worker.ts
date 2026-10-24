@@ -15,10 +15,6 @@ import { createAgentEventNotificationHandler } from "@/src/worker/agent-event-ru
 const logger = createLogger("agent-event-worker");
 
 async function main() {
-  if (process.env.REIMBURSEMENT_AGENT_MODE !== "go-api") {
-    logger.info("worker.disabled", "Agent 事件 Worker 未启用 Go 报销服务模式");
-    return;
-  }
   const bot = validateFeishuWorkerEnvironment(process.env);
   const databaseUrl = requiredEnv("DATABASE_URL");
   const prisma = createPrismaClient(databaseUrl);
