@@ -36,7 +36,7 @@ export async function syncPolicySource(input: { actorId: string; sourceId: strin
     const vectors: number[][] = [];
     for (let offset = 0; offset < chunks.length; offset += MAX_EMBEDDING_BATCH_SIZE) {
       const batch = chunks.slice(offset, offset + MAX_EMBEDDING_BATCH_SIZE);
-      vectors.push(...await deps.embeddings.embed({ texts: batch.map((chunk) => chunk.content) }));
+      vectors.push(...await deps.embeddings.embed({ texts: batch.map((chunk) => [chunk.headingPath.join(" / "), chunk.content].filter(Boolean).join("\n")) }));
     }
     const snapshot = await deps.sources.stageSnapshot({ sourceId: source.id, revision: document.revision, contentHash, title: document.title, blocks: document.blocks, indexVersion: 2, sections, chunks: chunks.map((chunk, index) => ({ ...chunk, embedding: vectors[index]! })) });
     await deps.sources.activateSnapshot({ sourceId: source.id, snapshotId: snapshot.id, now: deps.now() });

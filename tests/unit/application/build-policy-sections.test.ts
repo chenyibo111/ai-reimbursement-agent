@@ -32,3 +32,27 @@ it("marks a section larger than the answer budget incomplete instead of hiding i
   expect(sections[0]?.content.endsWith(tail)).toBe(true);
   expect(sections[0]?.complete).toBe(false);
 });
+
+it("preserves nested city-tier paths so retrieval can expand their parent chapter", () => {
+  const sections = buildPolicySections([
+    { kind: "heading", text: "差旅制度", level: 1 },
+    { kind: "heading", text: "交通费", level: 2 },
+    { kind: "paragraph", text: "经济舱" },
+    { kind: "heading", text: "住宿费", level: 2, sourceBlockId: "lodging" },
+    { kind: "heading", text: "北京上海", level: 3 },
+    { kind: "paragraph", text: "每晚 600 元" },
+    { kind: "heading", text: "重点城市", level: 3 },
+    { kind: "paragraph", text: "每晚 500 元" },
+    { kind: "heading", text: "其他城市", level: 3 },
+    { kind: "paragraph", text: "每晚 400 元" },
+    { kind: "heading", text: "例外", level: 3 },
+    { kind: "paragraph", text: "统一安排住宿不报销" },
+  ]);
+  expect(sections.map(({ headingPath, content }) => ({ headingPath, content }))).toEqual([
+    { headingPath: ["差旅制度", "交通费"], content: "经济舱" },
+    { headingPath: ["差旅制度", "住宿费", "北京上海"], content: "每晚 600 元" },
+    { headingPath: ["差旅制度", "住宿费", "重点城市"], content: "每晚 500 元" },
+    { headingPath: ["差旅制度", "住宿费", "其他城市"], content: "每晚 400 元" },
+    { headingPath: ["差旅制度", "住宿费", "例外"], content: "统一安排住宿不报销" },
+  ]);
+});

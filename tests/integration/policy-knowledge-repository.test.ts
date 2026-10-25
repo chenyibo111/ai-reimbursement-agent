@@ -55,3 +55,56 @@ it("stores v2 sections alongside a v1 snapshot with the same source revision", a
   await prisma.policySource.update({ where: { id: source.id }, data: { enabled: false } });
   expect(await repository.loadSections([hit.sectionId!])).toEqual([]);
 });
+
+it("replaces a stranded staged v2 snapshot so a failed activation can be retried", async () => {
+  const repository = new PrismaPolicyKnowledgeRepository(prisma);
+  const source = await repository.createSource({ type: "FEISHU_DOCX", token: "retryDoc123456789", canonicalUrl: "https://acme.feishu.cn/docx/retryDoc123456789", title: "差旅制度", actorId: "employee-finance" });
+  const input = { sourceId: source.id, revision: "same-revision", contentHash: "same-hash", title: source.title, blocks: [], indexVersion: 2,
+    sections: [{ sequence: 0, headingPath: ["住宿"], content: "600 元", sourceAnchor: null, complete: true }],
+    chunks: [{ sequence: 0, sectionSequence: 0, content: "600 元", headingPath: ["住宿"], embedding: vector }],
+  };
+  const stranded = await repository.stageSnapshot(input);
+  const retried = await repository.stageSnapshot(input);
+  expect(retried.id).not.toBe(stranded.id);
+  expect(await prisma.policyDocumentSnapshot.findUnique({ where: { id: stranded.id } })).toBeNull();
+  await repository.activateSnapshot({ sourceId: source.id, snapshotId: retried.id, now: new Date() });
+  expect(await repository.searchChunks({ vector, limit: 3 })).toEqual([expect.objectContaining({ content: "600 元" })]);
+});
+
+it("loads only enabled active sibling sections in document order", async () => {
+  const repository = new PrismaPolicyKnowledgeRepository(prisma);
+  const source = await repository.createSource({ type: "FEISHU_DOCX", token: "familyDoc123456789", canonicalUrl: "https://acme.feishu.cn/docx/familyDoc123456789", title: "差旅制度", actorId: "employee-finance" });
+  const snapshot = await repository.stageSnapshot({ sourceId: source.id, revision: "family", contentHash: "family-hash", title: source.title, blocks: [], indexVersion: 2,
+    sections: [
+      { sequence: 0, headingPath: ["差旅费", "交通费"], content: "飞机经济舱", sourceAnchor: null, complete: true },
+      { sequence: 1, headingPath: ["差旅费", "住宿费", "北京上海"], content: "600 元", sourceAnchor: null, complete: true },
+      { sequence: 2, headingPath: ["差旅费", "住宿费", "其他城市"], content: "400 元", sourceAnchor: null, complete: true },
+    ],
+    chunks: [{ sectionSequence: 1, content: "600 元", headingPath: ["差旅费", "住宿费", "北京上海"], embedding: vector }],
+  });
+  await repository.activateSnapshot({ sourceId: source.id, snapshotId: snapshot.id, now: new Date() });
+  const [hit] = await repository.searchChunks({ vector, limit: 3 });
+  expect((await repository.loadSectionFamily(hit.sectionId!, ["差旅费", "住宿费"])).map((section) => section.content)).toEqual(["600 元", "400 元"]);
+  await prisma.policySource.update({ where: { id: source.id }, data: { enabled: false } });
+  expect(await repository.loadSectionFamily(hit.sectionId!, ["差旅费", "住宿费"])).toEqual([]);
+});
+
+it("does not delete a staged snapshot that becomes active during a concurrent retry", async () => {
+  const repository = new PrismaPolicyKnowledgeRepository(prisma);
+  const source = await repository.createSource({ type: "FEISHU_DOCX", token: "raceDoc123456789", canonicalUrl: "https://acme.feishu.cn/docx/raceDoc123456789", title: "差旅制度", actorId: "employee-finance" });
+  const input = { sourceId: source.id, revision: "race", contentHash: "race-hash", title: source.title, blocks: [], indexVersion: 2,
+    sections: [{ sequence: 0, headingPath: ["住宿"], content: "600 元", sourceAnchor: null, complete: true }],
+    chunks: [{ sectionSequence: 0, content: "600 元", headingPath: ["住宿"], embedding: vector }],
+  };
+  const staged = await repository.stageSnapshot(input);
+  let retry!: ReturnType<typeof repository.stageSnapshot>;
+  await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "PolicyDocumentSnapshot" WHERE "id" = ${staged.id} FOR UPDATE`;
+    retry = repository.stageSnapshot(input);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await tx.policyDocumentSnapshot.update({ where: { id: staged.id }, data: { status: "ACTIVE", activatedAt: new Date() } });
+  });
+  await expect(retry).rejects.toThrow(/changed during staging|already active/);
+  expect(await prisma.policyDocumentSnapshot.findUnique({ where: { id: staged.id } })).toMatchObject({ status: "ACTIVE" });
+  expect(await repository.searchChunks({ vector, limit: 3 })).toHaveLength(1);
+});

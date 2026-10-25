@@ -9,7 +9,7 @@ export type ReadPolicyDocument = { title: string; revision: string; canonicalUrl
 export type FeishuPolicyDocumentClient = { read(locator: PolicySourceLocator): Promise<ReadPolicyDocument> };
 
 export class FeishuPolicyDocumentClientError extends Error {
-  constructor(readonly code: "UNAVAILABLE" | "UNAUTHORIZED" | "RESOURCE_NOT_FOUND" | "INVALID_RESPONSE") {
+  constructor(readonly code: "UNAVAILABLE" | "UNAUTHORIZED" | "RESOURCE_NOT_FOUND" | "INVALID_RESPONSE" | "UNSUPPORTED_SHEET") {
     super(`feishu policy document client ${code}`);
   }
 }
@@ -76,6 +76,8 @@ export function createFeishuPolicyDocumentClient(config: { appId: string; appSec
       const structured = await structuredDocument(documentToken);
       const document = structured === null ? await rawDocument(documentToken) : null;
       const extracted = structured ?? blocks(document!.content);
+      if (!extracted.some((block) => block.kind !== "heading") || (structured === null && !extracted.some((block) => block.kind === "heading"))) throw new FeishuPolicyDocumentClientError("INVALID_RESPONSE");
+      if (structured !== null && !extracted.some((block) => block.kind === "heading") && extracted.reduce((length, block) => length + block.text.length, 0) > 8_000) throw new FeishuPolicyDocumentClientError("INVALID_RESPONSE");
       return {
         title: locator.title?.trim() || "未命名政策来源",
         revision: createHash("sha256").update(structured === null ? document!.content : JSON.stringify(extracted)).digest("hex"),
@@ -91,7 +93,9 @@ export function createFeishuPolicyDocumentClient(config: { appId: string; appSec
 }
 
 function blocks(content: string): PolicyDocumentBlock[] {
-  return content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(0, 20_000).map((line) => {
+  const lines = content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length > 20_000) throw new FeishuPolicyDocumentClientError("INVALID_RESPONSE");
+  return lines.map((line) => {
     const heading = /^(#{1,6})\s+(.+)$/.exec(line);
     return heading ? { kind: "heading" as const, text: heading[2]!.trim(), level: heading[1]!.length } : { kind: "paragraph" as const, text: line };
   });
@@ -99,27 +103,44 @@ function blocks(content: string): PolicyDocumentBlock[] {
 
 function structuredBlocks(items: Array<Record<string, unknown>>): PolicyDocumentBlock[] {
   const byId = new Map(items.map((item) => [String(item.block_id ?? ""), item]));
-  const root = items.find((item) => item.page && Array.isArray(item.children));
+  if (byId.size !== items.length || byId.has("")) throw new FeishuPolicyDocumentClientError("INVALID_RESPONSE");
+  const roots = items.filter((item) => item.page && Array.isArray(item.children));
+  if (roots.length !== 1) throw new FeishuPolicyDocumentClientError("INVALID_RESPONSE");
+  const root = roots[0]!;
   const ordered: Array<Record<string, unknown>> = [];
   const seen = new Set<string>();
+  const visiting = new Set<string>();
   function visit(item: Record<string, unknown>) {
     const id = String(item.block_id ?? "");
-    if (!id || seen.has(id)) return;
+    if (visiting.has(id)) throw new FeishuPolicyDocumentClientError("INVALID_RESPONSE");
+    if (seen.has(id)) return;
+    visiting.add(id);
     seen.add(id);
     ordered.push(item);
     for (const childId of Array.isArray(item.children) ? item.children : []) {
       const child = byId.get(String(childId));
-      if (child) visit(child);
+      if (!child) throw new FeishuPolicyDocumentClientError("INVALID_RESPONSE");
+      visit(child);
     }
+    visiting.delete(id);
   }
-  if (root) visit(root);
-  for (const item of items) visit(item);
+  visit(root);
+  if (seen.size !== items.length) throw new FeishuPolicyDocumentClientError("INVALID_RESPONSE");
   const result: PolicyDocumentBlock[] = [];
   const consumed = new Set<string>();
+  function readElements(body: unknown): string {
+    if (!body || typeof body !== "object" || !Array.isArray((body as { elements?: unknown }).elements)) throw new FeishuPolicyDocumentClientError("INVALID_RESPONSE");
+    return ((body as { elements: Array<{ text_run?: { content?: string }; mention_doc?: { title?: string } }> }).elements).map((element) => {
+      if (!element || typeof element !== "object") throw new FeishuPolicyDocumentClientError("INVALID_RESPONSE");
+      if (typeof element.text_run?.content === "string") return element.text_run.content;
+      if (typeof element.mention_doc?.title === "string") return element.mention_doc.title;
+      throw new FeishuPolicyDocumentClientError("INVALID_RESPONSE");
+    }).join("");
+  }
   function descendantText(item: Record<string, unknown>): string {
-    const own = ["text", "bullet", "ordered", ...Array.from({ length: 9 }, (_, index) => `heading${index + 1}`)]
-      .map((key) => item[key] as { elements?: Array<{ text_run?: { content?: string } }> } | undefined)
-      .flatMap((body) => body?.elements?.map((element) => element.text_run?.content ?? "") ?? []).join("");
+    const keys = ["text", "bullet", "ordered", ...Array.from({ length: 9 }, (_, index) => `heading${index + 1}`)].filter((key) => item[key]);
+    if (keys.length > 1 || (!keys.length && !item.table_cell && !item.divider)) throw new FeishuPolicyDocumentClientError("INVALID_RESPONSE");
+    const own = keys.length ? readElements(item[keys[0]!]) : "";
     const nested = (Array.isArray(item.children) ? item.children : [])
       .map((id) => byId.get(String(id))).filter((child): child is Record<string, unknown> => Boolean(child));
     return [own, ...nested.map(descendantText)].filter(Boolean).join(" ").trim();
@@ -151,12 +172,11 @@ function structuredBlocks(items: Array<Record<string, unknown>>): PolicyDocument
     const heading = Array.from({ length: 9 }, (_, index) => `heading${index + 1}`).find((key) => item[key]);
     const key = heading ?? (["text", "bullet", "ordered"].find((candidate) => item[candidate]));
     if (!key) {
+      if (item.sheet) throw new FeishuPolicyDocumentClientError("UNSUPPORTED_SHEET");
       if (item.page || item.table_cell || item.divider) continue;
       throw new FeishuPolicyDocumentClientError("INVALID_RESPONSE");
     }
-    const body = item[key] as { elements?: Array<{ text_run?: { content?: string }; mention_doc?: { title?: string } }> };
-    if (!Array.isArray(body.elements) || body.elements.some((element) => !element.text_run && !element.mention_doc)) throw new FeishuPolicyDocumentClientError("INVALID_RESPONSE");
-    const text = body.elements?.map((element) => element.text_run?.content ?? element.mention_doc?.title ?? "").join("").trim() ?? "";
+    const text = readElements(item[key]).trim();
     if (!text) continue;
     result.push({ kind: heading ? "heading" : key === "bullet" || key === "ordered" ? "list_item" : "paragraph", text, ...(heading ? { level: Number(heading.slice(7)) } : {}), sourceBlockId: id });
   }

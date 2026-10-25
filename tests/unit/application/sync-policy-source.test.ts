@@ -52,6 +52,25 @@ it("embeds a long policy document in batches of at most 32 chunks", async () => 
   expect(stageSnapshot).toHaveBeenCalledWith(expect.objectContaining({ chunks: expect.arrayContaining([expect.objectContaining({ embedding: expect.any(Array) })]) }));
 });
 
+it("includes heading paths in embedding input while preserving exact source text in stored chunks", async () => {
+  const embed = vi.fn(async ({ texts }: { texts: string[] }) => texts.map(() => Array(1024).fill(0)));
+  const stageSnapshot = vi.fn().mockResolvedValue({ id: "snapshot-2" });
+  const blocks = [
+    { kind: "heading" as const, text: "报销政策", level: 1 },
+    { kind: "heading" as const, text: "住宿费", level: 2 },
+    { kind: "heading" as const, text: "北京上海", level: 3 },
+    { kind: "paragraph" as const, text: "每晚 600 元" },
+  ];
+  await syncPolicySource({ actorId: "admin-1", sourceId: source.id }, {
+    sources: { getEnabledSourceForSync: async () => source, getLatestContentHash: async () => null, stageSnapshot, activateSnapshot: vi.fn(), markSyncFailure: vi.fn() },
+    documents: { read: async () => ({ title: source.title, revision: "r2", canonicalUrl: source.canonicalUrl, blocks }) },
+    embeddings: { embed }, now: () => new Date(),
+  });
+  expect(embed.mock.calls[0]![0].texts[0]).toContain("报销政策 / 住宿费 / 北京上海");
+  expect(embed.mock.calls[0]![0].texts[0]).toContain("每晚 600 元");
+  expect(stageSnapshot.mock.calls[0]![0].chunks[0].content).toBe("每晚 600 元");
+});
+
 it("retains the active snapshot when embedding fails", async () => {
   const activateSnapshot = vi.fn();
   const markSyncFailure = vi.fn();

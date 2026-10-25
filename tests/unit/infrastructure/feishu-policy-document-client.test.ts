@@ -34,7 +34,7 @@ it("keeps a Docx rate table as ordered complete rows", async () => {
     { block_id: "root", page: {}, children: ["h", "t"] },
     { block_id: "h", heading2: { elements: [{ text_run: { content: "住宿费" } }] } },
     { block_id: "t", table: { property: { row_size: 2, column_size: 2 } }, children: ["c1", "c2", "c3", "c4"] },
-    ...["城市", "上限", "北京上海", "600 元"].map((text, index) => ({ block_id: `c${index + 1}`, table_cell: {}, children: [`v${index + 1}`], parent_id: "t", text })),
+    ...["城市", "上限", "北京上海", "600 元"].map((_, index) => ({ block_id: `c${index + 1}`, table_cell: {}, children: [`v${index + 1}`], parent_id: "t" })),
     ...["城市", "上限", "北京上海", "600 元"].map((text, index) => ({ block_id: `v${index + 1}`, text: { elements: [{ text_run: { content: text } }] }, parent_id: `c${index + 1}` })),
   ];
   const fetchImpl = vi.fn(async (url: string) => url.endsWith("/tenant_access_token/internal")
@@ -84,4 +84,52 @@ it("rejects unsupported material policy blocks instead of silently dropping rule
     ], has_more: false } }), { status: 200 }));
   const client = createFeishuPolicyDocumentClient({ appId: "app-id", appSecret: "app-secret", fetch: fetchImpl as typeof fetch });
   await expect(client.read({ type: "FEISHU_DOCX", token: "ABCdef0123456789", canonicalUrl: "https://acme.feishu.cn/docx/ABCdef0123456789" })).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+});
+
+it("rejects unstructured raw text without an explicit heading", async () => {
+  const fetchImpl = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ tenant_access_token: "t-secret", expire: 7200 }), { status: 200 }))
+    .mockResolvedValueOnce(new Response("not supported", { status: 404 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ code: 0, data: { content: "北京上海 600 元\n其他城市 400 元" } }), { status: 200 }));
+  const client = createFeishuPolicyDocumentClient({ appId: "app-id", appSecret: "app-secret", fetch: fetchImpl });
+  await expect(client.read({ type: "FEISHU_DOCX", token: "ABCdef0123456789", canonicalUrl: "https://acme.feishu.cn/docx/ABCdef0123456789" })).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+});
+
+it("rejects a missing root child instead of treating a paginated document as complete", async () => {
+  const fetchImpl = vi.fn(async (url: string) => url.endsWith("/tenant_access_token/internal")
+    ? new Response(JSON.stringify({ tenant_access_token: "t-secret", expire: 7200 }), { status: 200 })
+    : new Response(JSON.stringify({ code: 0, data: { items: [
+      { block_id: "root", page: {}, children: ["h", "p", "missing"] },
+      { block_id: "h", heading2: { elements: [{ text_run: { content: "住宿费" } }] } },
+      { block_id: "p", text: { elements: [{ text_run: { content: "北京上海 600 元" } }] } },
+    ], has_more: false } }), { status: 200 }));
+  const client = createFeishuPolicyDocumentClient({ appId: "app-id", appSecret: "app-secret", fetch: fetchImpl as typeof fetch });
+  await expect(client.read({ type: "FEISHU_DOCX", token: "ABCdef0123456789", canonicalUrl: "https://acme.feishu.cn/docx/ABCdef0123456789" })).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+});
+
+it("rejects unsupported material nested inside a table cell", async () => {
+  const fetchImpl = vi.fn(async (url: string) => url.endsWith("/tenant_access_token/internal")
+    ? new Response(JSON.stringify({ tenant_access_token: "t-secret", expire: 7200 }), { status: 200 })
+    : new Response(JSON.stringify({ code: 0, data: { items: [
+      { block_id: "root", page: {}, children: ["h", "t"] },
+      { block_id: "h", heading2: { elements: [{ text_run: { content: "住宿费" } }] } },
+      { block_id: "t", table: { property: { column_size: 1 } }, children: ["cell"] },
+      { block_id: "cell", table_cell: {}, children: ["quote"] },
+      { block_id: "quote", quote: { elements: [{ text_run: { content: "其他城市 400 元" } }] } },
+    ], has_more: false } }), { status: 200 }));
+  const client = createFeishuPolicyDocumentClient({ appId: "app-id", appSecret: "app-secret", fetch: fetchImpl as typeof fetch });
+  await expect(client.read({ type: "FEISHU_DOCX", token: "ABCdef0123456789", canonicalUrl: "https://acme.feishu.cn/docx/ABCdef0123456789" })).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+});
+
+it("identifies an embedded spreadsheet as an unsupported source instead of silently omitting it", async () => {
+  const fetchImpl = vi.fn(async (url: string) => url.endsWith("/tenant_access_token/internal")
+    ? new Response(JSON.stringify({ tenant_access_token: "t-secret", expire: 7200 }), { status: 200 })
+    : new Response(JSON.stringify({ code: 0, data: { items: [
+      { block_id: "root", page: {}, children: ["h", "p", "sheet"] },
+      { block_id: "h", heading2: { elements: [{ text_run: { content: "住宿费" } }] } },
+      { block_id: "p", text: { elements: [{ text_run: { content: "每晚 600 元" } }] } },
+      { block_id: "sheet", sheet: { token: "embedded-token" } },
+    ], has_more: false } }), { status: 200 }));
+  const client = createFeishuPolicyDocumentClient({ appId: "app-id", appSecret: "app-secret", fetch: fetchImpl as typeof fetch });
+  await expect(client.read({ type: "FEISHU_DOCX", token: "ABCdef0123456789", canonicalUrl: "https://acme.feishu.cn/docx/ABCdef0123456789" })).rejects.toMatchObject({ code: "UNSUPPORTED_SHEET" });
 });

@@ -32,6 +32,12 @@ export class PrismaPolicyKnowledgeRepository {
   async stageSnapshot(input: { sourceId: string; revision: string; contentHash: string; title: string; blocks: Prisma.InputJsonValue; indexVersion?: number; sections?: Array<{ sequence: number; headingPath: string[]; content: string; sourceAnchor: string | null; complete: boolean }>; chunks: Array<{ sequence?: number; sectionSequence?: number; content: string; headingPath: string[]; sourceAnchor?: string | null; embedding: number[] }> }) {
     input.chunks.forEach((chunk) => assertVector(chunk.embedding));
     return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.policyDocumentSnapshot.findUnique({ where: { sourceId_sourceRevision_indexVersion: { sourceId: input.sourceId, sourceRevision: input.revision, indexVersion: input.indexVersion ?? 1 } }, select: { id: true, status: true } });
+      if (existing) {
+        if (existing.status !== "STAGED") throw new Error("policy snapshot revision is already active");
+        const removed = await tx.policyDocumentSnapshot.deleteMany({ where: { id: existing.id, status: "STAGED" } });
+        if (removed.count !== 1) throw new Error("policy snapshot changed during staging");
+      }
       const snapshot = await tx.policyDocumentSnapshot.create({ data: { sourceId: input.sourceId, sourceRevision: input.revision, contentHash: input.contentHash, title: input.title, blocks: input.blocks, indexVersion: input.indexVersion ?? 1 } });
       const sectionIds = new Map<number, string>();
       for (const section of input.sections ?? []) {
@@ -80,6 +86,15 @@ export class PrismaPolicyKnowledgeRepository {
       include: { snapshot: { select: { title: true, source: { select: { canonicalUrl: true } } } } },
     });
     return rows.map((row) => ({ id: row.id, title: row.snapshot.title, headingPath: row.headingPath, content: row.content, sourceAnchor: row.sourceAnchor, canonicalUrl: row.snapshot.source.canonicalUrl, complete: row.complete }));
+  }
+
+  async loadSectionFamily(sectionId: string, headingPrefix: string[]) {
+    if (!headingPrefix.length) return [];
+    const selected = await this.prisma.policySection.findFirst({ where: { id: sectionId, snapshot: { status: "ACTIVE", source: { enabled: true } } }, select: { snapshotId: true, headingPath: true } });
+    if (!selected || headingPrefix.some((part, index) => selected.headingPath[index] !== part)) return [];
+    const rows = await this.prisma.policySection.findMany({ where: { snapshotId: selected.snapshotId, snapshot: { status: "ACTIVE", source: { enabled: true } } }, orderBy: { sequence: "asc" }, include: { snapshot: { select: { title: true, source: { select: { canonicalUrl: true } } } } } });
+    return rows.filter((row) => headingPrefix.every((part, index) => row.headingPath[index] === part))
+      .map((row) => ({ id: row.id, title: row.snapshot.title, headingPath: row.headingPath, content: row.content, sourceAnchor: row.sourceAnchor, canonicalUrl: row.snapshot.source.canonicalUrl, complete: row.complete }));
   }
 }
 

@@ -4,18 +4,20 @@
 
 **Goal:** Policy questions retrieve complete, relevant policy sections instead of silently losing adjacent rules or text after a 500-character cut.
 
-**Architecture:** Read structured Feishu Docx blocks, build ordered sections and smaller embedding chunks, persist them as immutable versioned snapshots, then expand vector hits to complete sections for model evidence. Display citations remain short and separate from model evidence; oversized evidence is marked incomplete.
+**Architecture:** Read structured Feishu Docx blocks, build ordered heading-path sections and smaller embedding chunks, persist them as immutable versioned snapshots, then expand vector hits to complete parent-topic families when subordinate headings split city tiers. Display citations remain short and separate from model evidence; oversized evidence is marked incomplete.
 
 **Tech Stack:** TypeScript, Next.js 15, Vitest, Prisma 7, PostgreSQL/pgvector, Feishu Docx API, existing Embedding Provider and chat model.
 
 **Spec:** `docs/superpowers/specs/2026-10-25-section-aware-policy-retrieval-design.md`
+
+**执行状态（2026-10-25）：** Task 1–4 与 Task 5 的代码、测试、构建已完成。本机开发库已应用迁移，Web、任务 Worker 和飞书 Worker 已重建启动。对已授权的「YB企业费用报销管理制度」执行真实重索引时发现原文含嵌入电子表格，解析器按完整性约束拒绝遗漏该块，返回 `DOCUMENT_UNSUPPORTED_SHEET`；旧 v1 活动快照仍保留。因此真实文档的 v2 同步及飞书/Web 人工问答验收待原文改为正文/文档表格，或另行实现嵌入表格读取并确认权限后完成。
 
 ## Global Constraints
 
 - Use the current checkout; do not create a worktree. Preserve unrelated changes.
 - Keep document content read-only and untrusted; no model-generated executable policy rules.
 - Only enabled sources and active snapshots are searchable; a failed sync must not replace the active snapshot.
-- Embedding vectors remain 1024-dimensional. Initial retrieval: at most 12 chunk hits, three sections, and 8,000 characters of model evidence.
+- Embedding vectors remain 1024-dimensional. Initial retrieval: at most 12 chunk hits, three selected topic families, and 8,000 characters of model evidence.
 - `indexVersion = 2` forces rebuilding unchanged source content; old snapshots remain readable until replacement succeeds.
 - Sync API returns an enqueued job, not completed counts. Display counts from the active snapshot in the existing admin source list.
 
@@ -39,10 +41,10 @@
 - Produce `PolicyDocumentBlock = { kind: "heading" | "paragraph" | "list_item" | "table_row"; text: string; level?: number; sourceBlockId?: string }`.
 - Keep `FeishuPolicyDocumentClient.read(locator): Promise<ReadPolicyDocument>`; Wiki resolves to Docx first.
 
-- [ ] **Step 1: Write failing tests** for paginated block retrieval, heading level, nested document order, list/table text, and authorization/unsupported-content failures. Assert the long-text block tail survives extraction.
-- [ ] **Step 2: Run tests** with `npx vitest run tests/unit/infrastructure/feishu-policy-document-client.test.ts`; expect the new tests to fail.
-- [ ] **Step 3: Implement the reader** using the official paginated Docx block endpoint; preserve heading and textual block structure, classify errors safely, and reject material text that cannot be represented. Keep raw-content-only fixtures as a conservative compatibility path only when headings are explicit.
-- [ ] **Step 4: Run the focused tests**; expect PASS, then commit the reader and tests.
+- [x] **Step 1: Write failing tests** for paginated block retrieval, heading level, nested document order, list/table text, and authorization/unsupported-content failures. Assert the long-text block tail survives extraction.
+- [x] **Step 2: Run tests** with `npx vitest run tests/unit/infrastructure/feishu-policy-document-client.test.ts`; expect the new tests to fail.
+- [x] **Step 3: Implement the reader** using the official paginated Docx block endpoint; preserve heading and textual block structure, classify errors safely, and reject material text that cannot be represented. Keep raw-content-only fixtures as a conservative compatibility path only when headings are explicit.
+- [x] **Step 4: Run the focused tests**; expect PASS, then commit the reader and tests.
 
 ### Task 2: Section builder and atomic search chunks
 
@@ -56,10 +58,10 @@
 - Produce `buildPolicySections(blocks: PolicyDocumentBlock[]): PolicySectionDraft[]`, where `PolicySectionDraft = { sequence: number; headingPath: string[]; content: string; sourceAnchor: string | null; complete: boolean }`.
 - Produce `splitPolicyDocument(sections: PolicySectionDraft[], options: { targetLength: number; maxLength: number }): PolicyChunkDraft[]`, with each chunk carrying `sectionSequence`, ordered `sequence`, `content`, and `sourceAnchor`.
 
-- [ ] **Step 1: Write failing tests** for the lodging section: 600/500/400 and exception lines form one section; traffic stays separate; one long paragraph is never reduced to its first 500 characters; oversized sections retain explicit incompleteness.
-- [ ] **Step 2: Run the focused tests**; expect FAIL.
-- [ ] **Step 3: Implement title-level boundaries and 400–800-character search chunks** without splitting a single rule, list item or table row; use the source block identifier when available.
-- [ ] **Step 4: Run both focused test files**; expect PASS, then commit the builder, splitter and tests.
+- [x] **Step 1: Write failing tests** for lodging rules: 600/500/400 and exception lines remain ordered in their heading-path sections so retrieval can reconstruct the topic family; traffic stays separate; one long paragraph is never reduced to its first 500 characters; oversized sections retain explicit incompleteness.
+- [x] **Step 2: Run the focused tests**; expect FAIL.
+- [x] **Step 3: Implement title-level boundaries and 400–800-character search chunks** without splitting a single rule, list item or table row; use the source block identifier when available.
+- [x] **Step 4: Run both focused test files**; expect PASS, then commit the builder, splitter and tests.
 
 ### Task 3: Versioned section snapshots and safe resync
 
@@ -76,10 +78,10 @@
 - Add `PolicyDocumentSnapshot.indexVersion` default `1`; unique key becomes `(sourceId, sourceRevision, indexVersion)`.
 - Repository `getLatestIndexState(sourceId): Promise<{ contentHash: string; indexVersion: number } | null>` and `stageSnapshot({ ..., indexVersion: 2, sections, chunks })` transactionally link chunks to their section.
 
-- [ ] **Step 1: Write failing tests** for v1-to-v2 reindex with unchanged content, v2 unchanged skip, section/chunk persistence, active-only search, and failed embedding retaining the old active snapshot.
-- [ ] **Step 2: Run focused unit tests**; expect FAIL. Apply the additive migration to the test database using `npm run db:test:migrate`; verify old rows survive.
-- [ ] **Step 3: Implement schema/repository/sync changes**; hash canonical extracted content, batch embeddings at the existing limit, stage everything before activation, and return `{ status, sectionCount, chunkCount }` from the worker operation.
-- [ ] **Step 4: Run focused unit and integration tests**; expect PASS, then commit migration, repository, sync and tests.
+- [x] **Step 1: Write failing tests** for v1-to-v2 reindex with unchanged content, v2 unchanged skip, section/chunk persistence, active-only search, and failed embedding retaining the old active snapshot.
+- [x] **Step 2: Run focused unit tests**; expect FAIL. Apply the additive migration to the test database using `npm run db:test:migrate`; verify old rows survive.
+- [x] **Step 3: Implement schema/repository/sync changes**; hash canonical extracted content, batch embeddings at the existing limit, stage everything before activation, and return `{ status, sectionCount, chunkCount }` from the worker operation.
+- [x] **Step 4: Run focused unit and integration tests**; expect PASS, then commit migration, repository, sync and tests.
 
 ### Task 4: Section expansion and separated answer evidence
 
@@ -98,13 +100,13 @@
 
 **Interfaces:**
 - `searchPolicyKnowledge(...)` returns `PolicySearchResult = { evidence: Array<{ sectionId: string; title: string; headingPath: string[]; text: string; complete: boolean }>; citations: PolicyCitation[]; incomplete: boolean }`.
-- Repository `searchChunks({ vector, limit })` returns active candidate chunks with `sectionId`; `loadSections(sectionIds: string[])` returns ordered full section text, title and URL. Legacy chunks have an explicit fallback without a false completeness claim.
+- Repository `searchChunks({ vector, limit })` returns active candidate chunks with `sectionId`; `loadSections(sectionIds: string[])` returns full matched sections and `loadSectionFamily(sectionId, headingPrefix)` returns related active sections in source order. Legacy chunks have an explicit fallback without a false completeness claim.
 - All policy-answer call sites pass `evidence` to the model and persist/display only `citations`.
 
-- [ ] **Step 1: Write failing tests** for broad lodging question yielding all three rates, two matching chunks expanding only once, unrelated traffic exclusion, >500-character tail available to the model, three-section/8,000-character budget, and incomplete or no-hit safe reply.
-- [ ] **Step 2: Run focused tests**; expect FAIL.
-- [ ] **Step 3: Implement vector-hit grouping and complete-section expansion** (12 candidate chunks, at most three sections), plus short exact citations; update both conversation paths and model prompt so a partial evidence set never sounds exhaustive.
-- [ ] **Step 4: Run focused tests and related conversation tests**; expect PASS, then commit retrieval and answer changes.
+- [x] **Step 1: Write failing tests** for broad lodging question yielding all three rates across subordinate headings, two matching chunks expanding only once, unrelated traffic exclusion, >500-character tail available to the model, three-family/8,000-character budget, and incomplete or no-hit safe reply.
+- [x] **Step 2: Run focused tests**; expect FAIL.
+- [x] **Step 3: Implement vector-hit grouping and complete-topic-family expansion** (12 candidate chunks, at most three selected families), plus short exact citations; update both conversation paths and model prompt so a partial evidence set never sounds exhaustive.
+- [x] **Step 4: Run focused tests and related conversation tests**; expect PASS, then commit retrieval and answer changes.
 
 ### Task 5: Admin status, full regression and local acceptance
 
@@ -120,8 +122,9 @@
 **Interfaces:**
 - GET policy source response includes nullable `sectionCount` and `chunkCount` from its active snapshot; the async sync POST remains HTTP 202 with job identity only.
 
-- [ ] **Step 1: Write failing API/UI tests** for counts becoming visible only after active snapshot switch and safe parse-failure status; test stale counts remain the last successful counts after a failed job.
-- [ ] **Step 2: Run focused tests**; expect FAIL.
-- [ ] **Step 3: Implement the existing admin source-row display** without a new page or a premature “sync complete” message.
-- [ ] **Step 4: Run `npm test`, `npm run lint`, `npx tsc --noEmit`, and `npm run build`**; expect all PASS. Run a real authorized-source resync only after local services and credentials are available, then manually ask broad and specific lodging questions in Feishu/Web.
-- [ ] **Step 5: Review the full diff for secrets, policy-answer regressions and migration safety; commit final tests/UI/docs.**
+- [x] **Step 1: Write failing API/UI tests** for counts becoming visible only after active snapshot switch and safe parse-failure status; test stale counts remain the last successful counts after a failed job.
+- [x] **Step 2: Run focused tests**; expect FAIL.
+- [x] **Step 3: Implement the existing admin source-row display** without a new page or a premature “sync complete” message.
+- [x] **Step 4a: Run `npm test`, `npm run lint`, `npx tsc --noEmit`, and `npm run build`**; 411 tests passed, lint had 0 errors and 2 unrelated existing warnings, types and build passed. The additive migration is applied to the local development database.
+- [ ] **Step 4b: Complete live acceptance.** Authorized-source resync was attempted but safely rejected the embedded spreadsheet; after resolving it, resync and manually ask broad and specific lodging questions in Feishu/Web.
+- [x] **Step 5: Review the full diff for secrets, policy-answer regressions and migration safety; commit final tests/UI/docs.**

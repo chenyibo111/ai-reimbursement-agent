@@ -13,6 +13,7 @@ it("shows a chunk count only for a completed policy sync response", () => {
 it("turns a source failure code into an actionable policy sync message", () => {
   expect(policyFailureLabel("EMBEDDING_UNAVAILABLE")).toBe("向量化服务不可用，请检查知识库服务是否已启动");
   expect(policyFailureLabel("DOCUMENT_UNAUTHORIZED")).toBe("飞书应用无权读取此文档，请将文档授权给应用");
+  expect(policyFailureLabel("DOCUMENT_UNSUPPORTED_SHEET")).toContain("嵌入电子表格");
 });
 
 it("labels active section and chunk counts without claiming a queued sync is complete", () => {

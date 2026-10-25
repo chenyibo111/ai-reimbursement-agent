@@ -67,6 +67,7 @@ export function policyFailureLabel(code: string): string {
   if (code === "EMBEDDING_UNAVAILABLE") return "向量化服务不可用，请检查知识库服务是否已启动";
   if (code === "DOCUMENT_UNAUTHORIZED") return "飞书应用无权读取此文档，请将文档授权给应用";
   if (code === "DOCUMENT_RESOURCE_NOT_FOUND") return "未找到飞书文档，请检查链接是否正确";
-  if (code === "DOCUMENT_INVALID_RESPONSE") return "飞书文档访问被拒绝或返回异常，请检查应用权限和文档授权";
+  if (code === "DOCUMENT_UNSUPPORTED_SHEET") return "文档含嵌入电子表格，当前无法完整读取其中条款；请将相关内容转为文档正文或表格后重试";
+  if (code === "DOCUMENT_INVALID_RESPONSE") return "飞书文档结构无法完整读取，请检查复杂内容、应用权限和文档授权";
   return code;
 }
