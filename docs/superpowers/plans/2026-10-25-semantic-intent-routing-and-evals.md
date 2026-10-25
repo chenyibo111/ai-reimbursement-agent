@@ -73,10 +73,10 @@
 
 **Interfaces:** Produce `evaluateIntent(cases, decide): Promise<IntentEvalReport>` including per-action precision/recall/F1, macro F1, confusion matrix, out-of-scope recall, dangerous `PREPARE_SUBMISSION` false positives, clarification rate, latency and typed failures. Each JSONL case contains `id`, `message`, bounded `history`, `intakeStatus`, `channel`, `expectedAction`, optional `acceptedActions` and risk tags. `npm run eval:intent` only invokes `decideConversation`, not Go/policy/repository; outputs model/prompt/dataset versions without secrets or personal text.
 
-- [ ] **Step 1: Write failing metrics/schema/CLI tests.** Use a small synthetic confusion matrix with exact expected metrics. Verify malformed cases fail, provider `fixture` is refused for real-model run, and runner has no Go/policy/write dependency.
-- [ ] **Step 2: Run** both new test files; expect RED for missing evaluator/CLI.
-- [ ] **Step 3: Implement** pure evaluator, CLI and ~120 diverse synthetic/anonymized dev/locked-holdout cases covering all actions, synonyms, negation, policy/current-claim boundary, absent Intake, group, mixed intent and prompt injection. Real-model invocation is opt-in; never claim fixture results demonstrate semantic quality.
-- [ ] **Step 4: Run** metric tests, dataset validation, `npx tsc --noEmit`, `npm test`; expect PASS. Run real-model baseline only if provider is configured, otherwise record `not run`. Commit data, script and tests.
+- [x] **Step 1: Write failing metrics/schema/CLI tests.** Use a small synthetic confusion matrix with exact expected metrics. Verify malformed cases fail, provider `fixture` is refused for real-model run, and runner has no Go/policy/write dependency.
+- [x] **Step 2: Run** both new test files; expect RED for missing evaluator/CLI.
+- [x] **Step 3: Implement** pure evaluator, CLI and ~120 diverse synthetic/anonymized dev/locked-holdout cases covering all actions, synonyms, negation, policy/current-claim boundary, absent Intake, group, mixed intent and prompt injection. Real-model invocation is opt-in; never claim fixture results demonstrate semantic quality.
+- [x] **Step 4: Run** metric tests, dataset validation, `npx tsc --noEmit`, `npm test`; expect PASS. Run real-model baseline only if provider is configured, otherwise record `not run`. Commit data, script and tests.
 
 ### Task 5: 跨渠道验收与维护说明
 
