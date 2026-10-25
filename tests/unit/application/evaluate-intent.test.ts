@@ -52,6 +52,19 @@ describe("intent evaluation", () => {
     expect(allowedFields).toEqual(["projectCode"]);
   });
 
+  it("preserves assistant and cross-channel history roles in the classifier context", async () => {
+    const cases = parseIntentEvalDataset(JSON.stringify({ id: "restart-context", message: "另起一单", history: [{ role: "ASSISTANT", channel: "FEISHU", text: "是否另起一单？" }], intakeStatus: "COLLECTING", restartPending: true, channel: "WEB", expectedAction: "START_INTAKE" }));
+    let seen: Array<{ role: string; channel: string; text: string }> = [];
+    await evaluateIntent(cases, async (context) => {
+      seen = context.messages.map(({ role, channel, text }) => ({ role, channel, text }));
+      return { action: "START_INTAKE", reply: "只分类" };
+    });
+    expect(seen).toEqual([
+      { role: "USER", channel: "WEB", text: "另起一单" },
+      { role: "ASSISTANT", channel: "FEISHU", text: "是否另起一单？" },
+    ]);
+  });
+
   it("rejects malformed or duplicate anonymous JSONL cases", () => {
     const valid = JSON.stringify(dataset[0]);
     expect(() => parseIntentEvalDataset(`${valid}\n${valid}`)).toThrow("duplicate intent case id");

@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 
-import { runConversationTurn } from "@/src/application/run-conversation-turn";
+import { runConversationTurn, type ConversationStore } from "@/src/application/run-conversation-turn";
 import { ReimbursementApiHttpError } from "@/services/agent/src/adapters/reimbursement-api-client";
 
 type Intake = {
@@ -91,6 +91,42 @@ it("answers a policy question without creating an Intake or a claim", async () =
   expect(getIntake()).toBeNull();
   expect(searchPolicy).toHaveBeenCalledTimes(1);
   expect(classifyIntent).not.toHaveBeenCalled();
+});
+
+it("does not treat an in-flight redelivery of a start request as restart confirmation", async () => {
+  const setup = createDeps({ model: { decideConversation: async () => ({ action: "START_INTAKE" as const, reply: "只分类" }) } });
+  await setup.deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1" });
+  let inboundCount = 0;
+  let enterFirstReply!: () => void;
+  let releaseFirstReply!: () => void;
+  const firstReplyEntered = new Promise<void>((resolve) => { enterFirstReply = resolve; });
+  const firstReplyBlocked = new Promise<void>((resolve) => { releaseFirstReply = resolve; });
+  let assistantCount = 0;
+  const deps = {
+    ...setup.deps,
+    conversations: {
+      ...setup.deps.conversations,
+      appendUserMessageIfAbsent: async () => ({ message: { sequence: 1 }, created: ++inboundCount === 1 }),
+      findAssistantReplyByInboundMessageId: async () => null,
+      appendMessage: async (input: Parameters<ConversationStore["appendMessage"]>[0]) => {
+        if (input.role === "ASSISTANT" && ++assistantCount === 1) {
+          enterFirstReply();
+          await firstReplyBlocked;
+        }
+        return setup.appendMessage(input);
+      },
+    },
+  };
+  const input = { actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU" as const, chatType: "p2p" as const, channelMessageId: "om-replayed-start", message: "另起一单" };
+  const first = runConversationTurn(input, deps);
+  await firstReplyEntered;
+  try {
+    await expect(runConversationTurn(input, deps)).rejects.toThrow("inbound turn is already processing");
+    expect(setup.restartIntake).not.toHaveBeenCalled();
+  } finally {
+    releaseFirstReply();
+    await first;
+  }
 });
 
 it("uses Go rather than policy retrieval for a current-claim standards question", async () => {

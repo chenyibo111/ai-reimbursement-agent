@@ -67,6 +67,7 @@ export async function runConversationTurn(
     if (!appended.created) {
       const persisted = await deps.conversations.findAssistantReplyByInboundMessageId?.(input.channelMessageId);
       if (persisted) return replayPersistedTurn(persisted);
+      throw new Error("inbound turn is already processing");
     }
   } else {
     await deps.conversations.appendMessage({ conversationId: conversation.id, role: "USER", channel: input.channel, channelMessageId: input.channelMessageId, text: message });

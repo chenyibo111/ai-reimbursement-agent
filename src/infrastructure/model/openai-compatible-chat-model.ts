@@ -109,7 +109,7 @@ export class OpenAiCompatibleChatModel implements ChatModel {
         }),
       });
     } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
+      if (error instanceof DOMException && (error.name === "AbortError" || error.name === "TimeoutError")) {
         throw new ChatModelError("AI 服务响应超时，请稍后重试。", "TIMEOUT");
       }
       throw new ChatModelError("AI 服务暂不可用，请稍后重试。", "UNAVAILABLE");

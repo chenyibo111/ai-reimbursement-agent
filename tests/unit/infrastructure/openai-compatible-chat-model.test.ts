@@ -191,4 +191,10 @@ describe("OpenAiCompatibleChatModel", () => {
 
     await expect(model.decide(input)).rejects.toMatchObject({ message: "AI 服务响应超时，请稍后重试。", code: "TIMEOUT" });
   });
+
+  it("classifies the Node AbortSignal timeout reason as TIMEOUT", async () => {
+    const fetchImpl = vi.fn().mockRejectedValue(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+    const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "top-secret", fetchImpl });
+    await expect(model.decide(input)).rejects.toMatchObject({ code: "TIMEOUT" });
+  });
 });

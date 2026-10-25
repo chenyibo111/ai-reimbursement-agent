@@ -11,7 +11,11 @@ export const intentActions = ["POLICY_QUERY", "START_INTAKE", "COLLECT_FIELDS", 
 const intentCaseSchema = z.object({
   id: z.string().trim().min(1).max(100),
   message: z.string().trim().min(1).max(1_000),
-  history: z.array(z.string().trim().min(1).max(1_000)).max(8),
+  history: z.array(z.object({
+    role: z.enum(["USER", "ASSISTANT"]),
+    channel: z.enum(["WEB", "FEISHU"]).optional(),
+    text: z.string().trim().min(1).max(1_000),
+  }).strict()).max(8),
   intakeStatus: z.enum(["COLLECTING", "READY_TO_SUBMIT", "SUBMITTED", "ABANDONED"]).nullable(),
   pendingFields: z.array(z.enum(conversationCollectedFieldNames)).max(conversationCollectedFieldNames.length).optional(),
   channel: z.enum(["WEB", "FEISHU"]),
@@ -66,7 +70,10 @@ export async function evaluateIntent(
   for (const item of cases) {
     const context = buildConversationContext({
       conversation: { summary: "", summaryThroughSequence: 0 },
-      messages: [...item.history, item.message].map((text, index) => ({ sequence: index + 1, role: "USER" as const, channel: item.channel, text })),
+      messages: [
+        ...item.history.map((entry, index) => ({ sequence: index + 1, role: entry.role, channel: entry.channel ?? item.channel, text: entry.text })),
+        { sequence: item.history.length + 1, role: "USER" as const, channel: item.channel, text: item.message },
+      ],
       intake: item.intakeStatus ? { status: item.intakeStatus, claimId: null, collectedFields: {}, pendingFields: item.pendingFields ?? ["purpose"], restartRequestedAt: item.restartPending ? new Date() : null } : null,
       policyCitations: [],
     });
