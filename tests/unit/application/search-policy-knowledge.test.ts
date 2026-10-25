@@ -25,3 +25,19 @@ it("treats legacy chunk-only indexes as incomplete evidence", async () => {
   const result = await searchPolicyKnowledge({ query: "住宿", limit: 3 }, { embeddings: embed, chunks: { searchChunks: async () => [hit("old", null, "住宿上限 500 元")], loadSections: async () => [] } });
   expect(result).toMatchObject({ evidence: [], incomplete: true });
 });
+
+it("uses at most three ranked sections and never truncates a section to fit the shared budget", async () => {
+  const hits = ["s1", "s2", "s3", "s4"].map((id) => hit(`c-${id}`, id, `命中 ${id}`));
+  const result = await searchPolicyKnowledge({ query: "报销规则", limit: 5 }, { embeddings: embed, chunks: {
+    searchChunks: async () => hits,
+    loadSections: async (ids) => ids.map((id) => ({ id, title: "制度", headingPath: [id], content: id === "s1" ? "甲".repeat(5000) : "乙".repeat(4000), sourceAnchor: null, canonicalUrl: "https://x", complete: true })),
+  } });
+  expect(result.citations).toHaveLength(3);
+  expect(result.evidence.map((item) => item.sectionId)).toEqual(["s1"]);
+  expect(result.incomplete).toBe(true);
+});
+
+it("returns no fabricated evidence or citations when similarity is below threshold", async () => {
+  const result = await searchPolicyKnowledge({ query: "不相关", limit: 3 }, { embeddings: embed, chunks: { searchChunks: async () => [hit("c1", "s1", "住宿", 0.1)], loadSections: async () => { throw new Error("must not load"); } } });
+  expect(result).toEqual({ evidence: [], citations: [], incomplete: false });
+});

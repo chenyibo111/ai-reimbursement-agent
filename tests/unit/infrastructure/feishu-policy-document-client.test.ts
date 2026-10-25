@@ -73,3 +73,15 @@ it("maps provider errors to safe categories without exposing response content", 
 
   await expect(client.read({ type: "FEISHU_DOCX", token: "ABCdef0123456789", canonicalUrl: "https://acme.feishu.cn/docx/ABCdef0123456789" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
 });
+
+it("rejects unsupported material policy blocks instead of silently dropping rules", async () => {
+  const fetchImpl = vi.fn(async (url: string) => url.endsWith("/tenant_access_token/internal")
+    ? new Response(JSON.stringify({ tenant_access_token: "t-secret", expire: 7200 }), { status: 200 })
+    : new Response(JSON.stringify({ code: 0, data: { items: [
+      { block_id: "root", page: {}, children: ["h", "q"] },
+      { block_id: "h", heading2: { elements: [{ text_run: { content: "住宿费" } }] } },
+      { block_id: "q", quote: { elements: [{ text_run: { content: "北京上海 600 元" } }] } },
+    ], has_more: false } }), { status: 200 }));
+  const client = createFeishuPolicyDocumentClient({ appId: "app-id", appSecret: "app-secret", fetch: fetchImpl as typeof fetch });
+  await expect(client.read({ type: "FEISHU_DOCX", token: "ABCdef0123456789", canonicalUrl: "https://acme.feishu.cn/docx/ABCdef0123456789" })).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+});

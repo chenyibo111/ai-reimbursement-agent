@@ -150,8 +150,12 @@ function structuredBlocks(items: Array<Record<string, unknown>>): PolicyDocument
     }
     const heading = Array.from({ length: 9 }, (_, index) => `heading${index + 1}`).find((key) => item[key]);
     const key = heading ?? (["text", "bullet", "ordered"].find((candidate) => item[candidate]));
-    if (!key) continue;
+    if (!key) {
+      if (item.page || item.table_cell || item.divider) continue;
+      throw new FeishuPolicyDocumentClientError("INVALID_RESPONSE");
+    }
     const body = item[key] as { elements?: Array<{ text_run?: { content?: string }; mention_doc?: { title?: string } }> };
+    if (!Array.isArray(body.elements) || body.elements.some((element) => !element.text_run && !element.mention_doc)) throw new FeishuPolicyDocumentClientError("INVALID_RESPONSE");
     const text = body.elements?.map((element) => element.text_run?.content ?? element.mention_doc?.title ?? "").join("").trim() ?? "";
     if (!text) continue;
     result.push({ kind: heading ? "heading" : key === "bullet" || key === "ordered" ? "list_item" : "paragraph", text, ...(heading ? { level: Number(heading.slice(7)) } : {}), sourceBlockId: id });

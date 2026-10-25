@@ -11,7 +11,7 @@ import { getSessionActorId } from "@/src/server/session";
 export async function GET(request: Request) {
   try {
     const { prisma } = await admin(request);
-    const sources = await prisma.policySource.findMany({ orderBy: { updatedAt: "desc" } });
+    const sources = await prisma.policySource.findMany({ orderBy: { updatedAt: "desc" }, include: { snapshots: { where: { status: "ACTIVE" }, take: 1, orderBy: { activatedAt: "desc" }, select: { _count: { select: { sections: true, chunks: true } } } } } });
     return NextResponse.json({ sources: sources.map(toPolicySourceResponse) });
   } catch (error) { return failure(error); }
 }
