@@ -37,7 +37,15 @@ export type UpdateReimbursementIntakeInput = {
   pendingFields?: string[];
   submissionToken?: string | null;
   submissionPreview?: Prisma.InputJsonValue | null;
+  restartRequestedAt?: Date | null;
   lastUserConfirmationAt?: Date | null;
+};
+
+export type RestartReimbursementIntakeInput = {
+  employeeId: string;
+  conversationId: string;
+  intakeId: string;
+  requestedAfter: Date;
 };
 
 export class AgentConversationRepository {
@@ -186,8 +194,28 @@ export class AgentConversationRepository {
     if (input.pendingFields !== undefined) data.pendingFields = input.pendingFields;
     if ("submissionToken" in input) data.submissionToken = input.submissionToken ?? null;
     if ("submissionPreview" in input) data.submissionPreview = input.submissionPreview === null ? Prisma.JsonNull : normalizeSnapshot(input.submissionPreview);
+    if ("restartRequestedAt" in input) data.restartRequestedAt = input.restartRequestedAt ?? null;
     if ("lastUserConfirmationAt" in input) data.lastUserConfirmationAt = input.lastUserConfirmationAt ?? null;
     return this.prisma.reimbursementIntake.update({ where: { id: input.id }, data });
+  }
+
+  async restartIntake(input: RestartReimbursementIntakeInput): Promise<ReimbursementIntake> {
+    return this.prisma.$transaction(async (tx) => {
+      const consumed = await tx.reimbursementIntake.updateMany({
+        where: {
+          id: input.intakeId,
+          employeeId: input.employeeId,
+          conversationId: input.conversationId,
+          status: { in: ["COLLECTING", "READY_TO_SUBMIT"] },
+          restartRequestedAt: { gte: input.requestedAfter },
+        },
+        data: { status: "ABANDONED", restartRequestedAt: null, submissionToken: null, submissionPreview: Prisma.JsonNull },
+      });
+      if (consumed.count !== 1) throw new Error("restart request unavailable");
+      return tx.reimbursementIntake.create({
+        data: { employeeId: input.employeeId, conversationId: input.conversationId, pendingFields: ["purpose"] },
+      });
+    });
   }
 
   async compareAndSetSummary(input: { conversationId: string; expectedThroughSequence: number; summary: string; throughSequence: number }): Promise<boolean> {

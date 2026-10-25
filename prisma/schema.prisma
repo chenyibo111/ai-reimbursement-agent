@@ -394,6 +394,7 @@ model ReimbursementIntake {
   pendingFields          String[]                  @default([])
   submissionToken        String?
   submissionPreview      Json?
+  restartRequestedAt     DateTime?
   lastUserConfirmationAt DateTime?
   createdAt              DateTime                  @default(now())
   updatedAt              DateTime                  @updatedAt

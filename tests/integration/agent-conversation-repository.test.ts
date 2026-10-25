@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { AgentConversationRepository } from "@/src/infrastructure/prisma/agent-conversation-repository";
 import { createPrismaClient } from "@/src/infrastructure/prisma/client";
+import type { PrismaClient } from "@/generated/prisma/client";
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? "postgresql://reimbursement:reimbursement@127.0.0.1:5433/reimbursement_test";
 const prisma = createPrismaClient(databaseUrl);
@@ -98,6 +99,59 @@ describe("AgentConversationRepository", () => {
     await expect(repository.createIntake({ employeeId: employee.id, conversationId: conversation.id })).resolves.toMatchObject({
       status: "COLLECTING",
     });
+  });
+
+  it("persists a restart request and atomically creates a replacement Intake", async () => {
+    const employee = await createEmployee();
+    const conversation = await repository.getOrCreatePrivate(employee.id);
+    const original = await repository.createIntake({ employeeId: employee.id, conversationId: conversation.id, submissionToken: "old-token" });
+    const requestedAt = new Date("2026-10-25T01:00:00.000Z");
+
+    await repository.updateIntake({ id: original.id, restartRequestedAt: requestedAt });
+    await expect(prisma.reimbursementIntake.findUniqueOrThrow({ where: { id: original.id } })).resolves.toMatchObject({ restartRequestedAt: requestedAt });
+
+    const replacement = await repository.restartIntake({ employeeId: employee.id, conversationId: conversation.id, intakeId: original.id, requestedAfter: new Date("2026-10-25T00:50:00.000Z") });
+    expect(replacement).toMatchObject({ employeeId: employee.id, conversationId: conversation.id, status: "COLLECTING", pendingFields: ["purpose"] });
+    expect(replacement.id).not.toBe(original.id);
+    await expect(prisma.reimbursementIntake.findUniqueOrThrow({ where: { id: original.id } })).resolves.toMatchObject({ status: "ABANDONED", submissionToken: null, restartRequestedAt: null });
+    await expect(repository.getCurrentIntake(employee.id)).resolves.toMatchObject({ id: replacement.id });
+  });
+
+  it("rejects stale or foreign restart requests without abandoning the active Intake", async () => {
+    const employee = await createEmployee();
+    const ownConversation = await repository.getOrCreatePrivate(employee.id);
+    const otherConversation = await repository.getOrCreateGroup(employee.id, "oc-other");
+    const intake = await repository.createIntake({ employeeId: employee.id, conversationId: ownConversation.id });
+    await repository.updateIntake({ id: intake.id, restartRequestedAt: new Date("2026-10-25T00:00:00.000Z") });
+
+    await expect(repository.restartIntake({ employeeId: employee.id, conversationId: ownConversation.id, intakeId: intake.id, requestedAfter: new Date("2026-10-25T00:50:00.000Z") })).rejects.toThrow("restart request unavailable");
+    await expect(repository.restartIntake({ employeeId: employee.id, conversationId: otherConversation.id, intakeId: intake.id, requestedAfter: new Date("2026-10-24T23:50:00.000Z") })).rejects.toThrow("restart request unavailable");
+    await expect(repository.getCurrentIntake(employee.id)).resolves.toMatchObject({ id: intake.id, status: "COLLECTING" });
+  });
+
+  it("consumes a restart request once even when submitted concurrently", async () => {
+    const employee = await createEmployee();
+    const conversation = await repository.getOrCreatePrivate(employee.id);
+    const intake = await repository.createIntake({ employeeId: employee.id, conversationId: conversation.id });
+    await repository.updateIntake({ id: intake.id, restartRequestedAt: new Date("2026-10-25T01:00:00.000Z") });
+    const input = { employeeId: employee.id, conversationId: conversation.id, intakeId: intake.id, requestedAfter: new Date("2026-10-25T00:50:00.000Z") };
+
+    const attempts = await Promise.allSettled([repository.restartIntake(input), repository.restartIntake(input)]);
+    expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1);
+    await expect(prisma.reimbursementIntake.count({ where: { employeeId: employee.id, status: "COLLECTING" } })).resolves.toBe(1);
+  });
+
+  it("rolls back abandonment if creating the replacement fails", async () => {
+    const employee = await createEmployee();
+    const conversation = await repository.getOrCreatePrivate(employee.id);
+    const intake = await repository.createIntake({ employeeId: employee.id, conversationId: conversation.id });
+    const requestedAt = new Date("2026-10-25T01:00:00.000Z");
+    await repository.updateIntake({ id: intake.id, restartRequestedAt: requestedAt });
+    const faultingPrisma = prisma.$extends({ query: { reimbursementIntake: { create: async () => { throw new Error("replacement create failed"); } } } });
+    const faultingRepository = new AgentConversationRepository(faultingPrisma as unknown as PrismaClient);
+
+    await expect(faultingRepository.restartIntake({ employeeId: employee.id, conversationId: conversation.id, intakeId: intake.id, requestedAfter: new Date("2026-10-25T00:50:00.000Z") })).rejects.toThrow("replacement create failed");
+    await expect(prisma.reimbursementIntake.findUniqueOrThrow({ where: { id: intake.id } })).resolves.toMatchObject({ status: "COLLECTING", restartRequestedAt: requestedAt });
   });
 
   it("cascades conversations, messages, and Intakes when the employee is deleted", async () => {

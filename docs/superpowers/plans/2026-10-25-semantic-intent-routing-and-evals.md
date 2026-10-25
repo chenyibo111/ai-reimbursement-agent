@@ -51,10 +51,10 @@
 
 **Interfaces:** Produce nullable `restartRequestedAt: Date | null`, `updateIntake({ id, restartRequestedAt })`, and `restartIntake({ employeeId, conversationId, intakeId, requestedAfter: Date }): Promise<ReimbursementIntake>`. The repository transaction checks a matching active Intake and non-expired request, marks it `ABANDONED`, clears submission token/preview, then creates a fresh `COLLECTING` Intake with `pendingFields: ["purpose"]`. Failure rolls back the abandon.
 
-- [ ] **Step 1: Write failing integration tests** for persisted request, successful restart, expired/foreign request rejection, duplicate replay and rollback if replacement creation fails.
-- [ ] **Step 2: Run** `npx vitest run tests/integration/agent-conversation-repository.test.ts`; expect RED because fields/method do not exist.
-- [ ] **Step 3: Implement** schema, migration and one Prisma transaction, retaining the existing partial unique active-Intake index. Regenerate Prisma client with the repository's Prisma 7 config.
-- [ ] **Step 4: Apply test migration; run** the integration file and `npx tsc --noEmit`; expect PASS. Commit this task without manually changing production data.
+- [x] **Step 1: Write failing integration tests** for persisted request, successful restart, expired/foreign request rejection, duplicate replay and rollback if replacement creation fails.
+- [x] **Step 2: Run** `npx vitest run tests/integration/agent-conversation-repository.test.ts`; expect RED because fields/method do not exist.
+- [x] **Step 3: Implement** schema, migration and one Prisma transaction, retaining the existing partial unique active-Intake index. Regenerate Prisma client with the repository's Prisma 7 config.
+- [x] **Step 4: Apply test migration; run** the integration file and `npx tsc --noEmit`; expect PASS. Commit this task without manually changing production data.
 
 ### Task 3: 主会话单一路由与安全派发
 
