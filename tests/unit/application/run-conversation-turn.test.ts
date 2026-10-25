@@ -78,7 +78,7 @@ function createDeps(overrides: Partial<Record<string, unknown>> = {}) {
 
 it("answers a policy question without creating an Intake or a claim", async () => {
   const classifyIntent = vi.fn(async () => "POLICY_QUERY" as const);
-  const searchPolicy = vi.fn(async () => [{ id: "citation-1", title: "制度", url: "https://example", headingPath: [], excerpt: "住宿上限 500 元", score: 0.9 }]);
+  const searchPolicy = vi.fn(async () => ({ citations: [{ id: "citation-1", title: "制度", url: "https://example", headingPath: [], excerpt: "住宿上限 500 元", score: 0.9 }], evidence: [{ sectionId: "section-1", title: "制度", headingPath: [], text: "住宿上限 500 元", complete: true }], incomplete: false }));
   const { deps, createClaim, getIntake } = createDeps({
     searchPolicy,
     model: { classifyIntent, answerPolicy: async () => "住宿上限为 500 元。", decideConversation: async () => ({ action: "POLICY_QUERY" as const, reply: "模型伪造金额999元" }) },
@@ -91,6 +91,18 @@ it("answers a policy question without creating an Intake or a claim", async () =
   expect(getIntake()).toBeNull();
   expect(searchPolicy).toHaveBeenCalledTimes(1);
   expect(classifyIntent).not.toHaveBeenCalled();
+});
+
+it("does not give a definitive policy answer when chapter evidence is incomplete", async () => {
+  const answerPolicy = vi.fn(async () => "北京上海上限 600 元");
+  const { deps } = createDeps({
+    searchPolicy: async () => ({ citations: [{ id: "c1", title: "差旅", url: "https://example", excerpt: "北京上海 600 元", headingPath: ["住宿"], score: 0.9 }], evidence: [], incomplete: true }),
+    model: { decideConversation: async () => ({ action: "POLICY_QUERY" as const, reply: "" }), answerPolicy },
+  });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "住宿费规则" }, deps);
+  expect(result.reply).toContain("无法读取完整章节");
+  expect(result.citations).toHaveLength(1);
+  expect(answerPolicy).not.toHaveBeenCalled();
 });
 
 it("does not treat an in-flight redelivery of a start request as restart confirmation", async () => {

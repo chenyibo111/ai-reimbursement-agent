@@ -50,4 +50,8 @@ it("stores v2 sections alongside a v1 snapshot with the same source revision", a
   expect(await repository.getLatestIndexState(source.id)).toEqual({ contentHash: "same-content", indexVersion: 2 });
   expect(await prisma.policySection.findMany({ where: { snapshotId: v2.id } })).toEqual([expect.objectContaining({ headingPath: ["住宿费"], content: "北京上海 600 元\n其他城市 400 元" })]);
   expect(await repository.searchChunks({ vector, limit: 5 })).toEqual([expect.objectContaining({ sectionId: expect.any(String), content: "北京上海 600 元" })]);
+  const [hit] = await repository.searchChunks({ vector, limit: 5 });
+  expect(await repository.loadSections([hit.sectionId!])).toEqual([expect.objectContaining({ id: hit.sectionId, content: "北京上海 600 元\n其他城市 400 元", title: "差旅制度", canonicalUrl: source.canonicalUrl })]);
+  await prisma.policySource.update({ where: { id: source.id }, data: { enabled: false } });
+  expect(await repository.loadSections([hit.sectionId!])).toEqual([]);
 });

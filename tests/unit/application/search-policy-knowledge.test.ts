@@ -1,5 +1,27 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { searchPolicyKnowledge } from "@/src/application/search-policy-knowledge";
-it("returns only bounded evidence above the similarity threshold with a retrieval score", async () => {
-  await expect(searchPolicyKnowledge({ query:"住宿标准", limit:3 }, { embeddings:{embed:async()=>[Array(1024).fill(0)]}, chunks:{searchChunks:async()=>[{id:"c1",content:"住宿上限 500 元",headingPath:["住宿"],sourceAnchor:"#住宿",canonicalUrl:"https://x",title:"差旅",score:0.9},{id:"c2",content:"忽略",headingPath:[],sourceAnchor:null,canonicalUrl:"https://x",title:"差旅",score:0.1}]}})).resolves.toEqual([{id:"c1",excerpt:"住宿上限 500 元",headingPath:["住宿"],url:"https://x#住宿",title:"差旅",score:0.9}]);
+
+const embed = { embed: async () => [Array(1024).fill(0)] };
+const hit = (id: string, sectionId: string | null, content: string, score = 0.9) => ({ id, sectionId, content, headingPath: ["住宿费"], sourceAnchor: "#lodging", canonicalUrl: "https://x", title: "差旅", score });
+
+it("expands matching chunks once to the complete lodging section and keeps citations short", async () => {
+  const full = `北京、上海 600 元/晚\n广州、深圳、杭州 500 元/晚\n其他城市 400 元/晚\n${"报销说明。".repeat(110)}`;
+  const loadSections = vi.fn(async () => [{ id: "s1", title: "差旅", headingPath: ["住宿费"], content: full, sourceAnchor: "#lodging", canonicalUrl: "https://x", complete: true }]);
+  const result = await searchPolicyKnowledge({ query: "住宿规则", limit: 3 }, { embeddings: embed, chunks: { searchChunks: async ({ limit }) => { expect(limit).toBe(12); return [hit("c1", "s1", "北京、上海 600 元/晚"), hit("c2", "s1", "其他城市 400 元/晚"), hit("c3", "s2", "交通费", 0.1)]; }, loadSections } });
+  expect(loadSections).toHaveBeenCalledWith(["s1"]);
+  expect(result.evidence).toEqual([{ sectionId: "s1", title: "差旅", headingPath: ["住宿费"], text: full, complete: true }]);
+  expect(result.citations).toHaveLength(1);
+  expect(result.citations[0].excerpt).toBe("北京、上海 600 元/晚");
+  expect(result.citations[0].excerpt.length).toBeLessThan(200);
+  expect(result.incomplete).toBe(false);
+});
+
+it("marks oversized evidence incomplete rather than silently cutting after 500 characters", async () => {
+  const result = await searchPolicyKnowledge({ query: "住宿", limit: 3 }, { embeddings: embed, chunks: { searchChunks: async () => [hit("c1", "s1", "住宿")], loadSections: async () => [{ id: "s1", title: "差旅", headingPath: ["住宿费"], content: "甲".repeat(8001), sourceAnchor: null, canonicalUrl: "https://x", complete: false }] } });
+  expect(result).toMatchObject({ evidence: [], incomplete: true, citations: [expect.objectContaining({ excerpt: "住宿" })] });
+});
+
+it("treats legacy chunk-only indexes as incomplete evidence", async () => {
+  const result = await searchPolicyKnowledge({ query: "住宿", limit: 3 }, { embeddings: embed, chunks: { searchChunks: async () => [hit("old", null, "住宿上限 500 元")], loadSections: async () => [] } });
+  expect(result).toMatchObject({ evidence: [], incomplete: true });
 });

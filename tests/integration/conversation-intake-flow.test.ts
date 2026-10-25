@@ -46,7 +46,7 @@ it("keeps policy-only turns out of Intake and creates one persisted agent claim 
       answerPolicy: async () => "住宿上限请以制度片段为准。",
       decideConversation: async () => ({ action: "POLICY_QUERY" as const, reply: "只分类" }),
     },
-    searchPolicy: async () => [{ id: "citation-1", title: "差旅制度", url: "https://example.test/doc", headingPath: ["住宿"], excerpt: "住宿上限", score: 0.9 }],
+    searchPolicy: async () => ({ citations: [{ id: "citation-1", title: "差旅制度", url: "https://example.test/doc", headingPath: ["住宿"], excerpt: "住宿上限", score: 0.9 }], evidence: [{ sectionId: "s1", title: "差旅制度", headingPath: ["住宿"], text: "住宿上限", complete: true }], incomplete: false }),
     createClaim: async ({ actorId }: { actorId: string }) => createClaim({ actorId }),
     preflightAttachment: async () => undefined,
     uploadReceipt,

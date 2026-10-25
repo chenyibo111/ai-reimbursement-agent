@@ -72,6 +72,15 @@ export class PrismaPolicyKnowledgeRepository {
       LIMIT ${limit}
     `);
   }
+
+  async loadSections(sectionIds: string[]) {
+    if (!sectionIds.length) return [];
+    const rows = await this.prisma.policySection.findMany({
+      where: { id: { in: sectionIds }, snapshot: { status: "ACTIVE", source: { enabled: true } } },
+      include: { snapshot: { select: { title: true, source: { select: { canonicalUrl: true } } } } },
+    });
+    return rows.map((row) => ({ id: row.id, title: row.snapshot.title, headingPath: row.headingPath, content: row.content, sourceAnchor: row.sourceAnchor, canonicalUrl: row.snapshot.source.canonicalUrl, complete: row.complete }));
+  }
 }
 
 function assertVector(vector: number[]) {

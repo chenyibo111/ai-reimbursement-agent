@@ -56,6 +56,7 @@ describe("OpenAiCompatibleChatModel", () => {
     const body = JSON.parse(String(request.body));
     expect(body.messages[1].content).toContain("一线城市住宿费用上限为每晚 500 元。");
     expect(body.messages[1].content).not.toContain("https://");
+    expect(body.messages[0].content).toContain("不同城市档位和例外");
   });
 
   it("accepts only constrained conversation decisions and sends no internal identifiers", async () => {

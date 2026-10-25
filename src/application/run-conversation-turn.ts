@@ -1,7 +1,7 @@
 import { buildConversationContext, type ConversationContext } from "@/src/application/build-conversation-context";
 import type { AgentMessageChannel, AgentMessageRole, ReimbursementIntakeStatus } from "@/src/domain/agent-conversation";
 import type { ConversationDecision, ChatModel } from "@/src/infrastructure/model/chat-model";
-import type { PolicyCitation } from "@/src/application/search-policy-knowledge";
+import type { PolicyCitation, PolicySearchResult } from "@/src/application/search-policy-knowledge";
 import { formatClaimFacts, type ClaimFactKind } from "@/src/application/format-claim-facts";
 import type { ClaimSnapshot, ReceiptSnapshot, ValidationSnapshot } from "@/services/agent/src/ports/reimbursement-port";
 import { ReimbursementApiHttpError } from "@/services/agent/src/adapters/reimbursement-api-client";
@@ -37,7 +37,7 @@ export type ConversationStore = {
 export type RunConversationTurnDeps = {
   conversations: ConversationStore;
   model: Pick<ChatModel, "classifyIntent" | "answerPolicy" | "decideConversation">;
-  searchPolicy?: (query: string) => Promise<PolicyCitation[]>;
+  searchPolicy?: (query: string) => Promise<PolicySearchResult>;
   createClaim?: (input: { actorId: string; purpose?: string }) => Promise<{ id: string; version: number }>;
   preflightAttachment?: (input: { filename: string; mimeType: string; bytes: Uint8Array }) => Promise<void>;
   uploadReceipt?: (input: { actorId: string; claimId: string; filename: string; mimeType: string; bytes: Uint8Array; notificationTarget?: { conversationId: string; chatId: string } }) => Promise<{ id: string; jobId?: string }>;
@@ -178,10 +178,13 @@ async function answerPolicyQuestion(
   deps: RunConversationTurnDeps,
 ): Promise<ConversationTurnResult> {
   try {
-    const citations = await deps.searchPolicy?.(message) ?? [];
+    const result = await deps.searchPolicy?.(message) ?? { evidence: [], citations: [], incomplete: false };
+    const { citations } = result;
     const reply = !citations.length
       ? "当前没有可供引用的已同步报销政策，请以公司财务制度为准。"
-      : await answerFromCitations(message, citations, deps.model);
+      : result.incomplete || !result.evidence.length
+        ? "检索到相关制度，但无法读取完整章节，请查看引用原文；我暂不能据此给出完整规则。"
+        : await answerFromEvidence(message, result.evidence, deps.model);
     return persistReply(input, intake, reply, citations, deps.conversations);
   } catch {
     return persistReply(input, intake, "政策检索暂不可用，请稍后重试或查阅公司财务制度。", [], deps.conversations);
@@ -363,9 +366,9 @@ function clarificationReply(reason: ConversationDecision["clarificationReason"])
   return "请明确说明你希望我帮你处理的报销事项。";
 }
 
-async function answerFromCitations(message: string, citations: PolicyCitation[], model: RunConversationTurnDeps["model"]): Promise<string> {
+async function answerFromEvidence(message: string, evidence: PolicySearchResult["evidence"], model: RunConversationTurnDeps["model"]): Promise<string> {
   try {
-    const reply = await model.answerPolicy?.({ question: message, sources: citations.map(({ title, excerpt, headingPath }) => ({ title, excerpt, headingPath })) });
+    const reply = await model.answerPolicy?.({ question: message, sources: evidence.map(({ title, text, headingPath }) => ({ title, excerpt: text, headingPath })) });
     if (reply?.trim()) return reply.trim().slice(0, 1_000);
   } catch {
     // The evidence remains useful even when the answer model is unavailable.
