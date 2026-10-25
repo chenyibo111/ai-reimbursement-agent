@@ -18,6 +18,7 @@ type IntakeRecord = {
   pendingFields: string[];
   submissionToken: string | null;
   submissionPreview?: Record<string, unknown> | null;
+  restartRequestedAt?: Date | null;
 };
 
 export type ConversationStore = {
@@ -29,7 +30,8 @@ export type ConversationStore = {
   compareAndSetSummary?(input: { conversationId: string; expectedThroughSequence: number; summary: string; throughSequence: number }): Promise<boolean>;
   getCurrentIntake(employeeId: string): Promise<IntakeRecord | null>;
   createIntake(input: { employeeId: string; conversationId: string; claimId?: string | null; collectedFields?: Record<string, unknown>; pendingFields?: string[]; submissionToken?: string | null; submissionPreview?: Record<string, unknown> | null }): Promise<IntakeRecord>;
-  updateIntake(input: { id: string; status?: ReimbursementIntakeStatus; claimId?: string | null; collectedFields?: Record<string, unknown>; pendingFields?: string[]; submissionToken?: string | null; submissionPreview?: Record<string, unknown> | null; lastUserConfirmationAt?: Date | null }): Promise<IntakeRecord>;
+  updateIntake(input: { id: string; status?: ReimbursementIntakeStatus; claimId?: string | null; collectedFields?: Record<string, unknown>; pendingFields?: string[]; submissionToken?: string | null; submissionPreview?: Record<string, unknown> | null; restartRequestedAt?: Date | null; lastUserConfirmationAt?: Date | null }): Promise<IntakeRecord>;
+  restartIntake(input: { employeeId: string; conversationId: string; intakeId: string; requestedAfter: Date }): Promise<IntakeRecord>;
 };
 
 export type RunConversationTurnDeps = {
@@ -69,24 +71,29 @@ export async function runConversationTurn(
   } else {
     await deps.conversations.appendMessage({ conversationId: conversation.id, role: "USER", channel: input.channel, channelMessageId: input.channelMessageId, text: message });
   }
-  const active = await getConversationIntake(input.actorId, conversation.id, deps.conversations);
+  let active = await getConversationIntake(input.actorId, conversation.id, deps.conversations);
 
   const attachment = input.attachment;
+  if (attachment && input.channel === "FEISHU" && input.chatType !== "p2p") {
+    return persistReply(input, null, "为保护报销信息，请私聊机器人或在 Web 工作台上传票据。", [], deps.conversations);
+  }
   if (attachment) return handleAttachment({ ...input, attachment }, active, deps);
   if (message === "确认提交" && input.channel === "FEISHU" && input.chatType !== "p2p") {
     return persistReply(input, null, "为保护报销信息，请私聊机器人或在 Web 工作台发起并确认提交。", [], deps.conversations);
   }
   if (message === "确认提交") return confirmSubmission(input, active, deps);
-  if (message === "开始报销") return startIntake(input, active, deps);
-
-  if (await isPolicyQuestion(message, deps)) {
-    return answerPolicyQuestion(input, active, message, deps);
+  const context = await getContext(conversation, active, deps.conversations);
+  let decision: ConversationDecision;
+  try {
+    if (!deps.model.decideConversation) throw new Error("intent model unavailable");
+    decision = await deps.model.decideConversation(context);
+  } catch {
+    return persistReply(input, active, "暂时无法判断你的办理需求，请明确说明，或在 Web 工作台继续办理。", [], deps.conversations);
   }
-
-  const context = await getContext(conversation, active, deps.conversations, deps.searchPolicy, message);
-  const decision: ConversationDecision = deps.model.decideConversation
-    ? await deps.model.decideConversation(context)
-    : { action: "HELP", reply: "我暂时无法处理这条报销办理请求，请在工作台继续填写。" };
+  if (active?.restartRequestedAt && decision.action !== "START_INTAKE") {
+    active = await deps.conversations.updateIntake({ id: active.id, restartRequestedAt: null });
+  }
+  if (decision.action === "POLICY_QUERY") return answerPolicyQuestion(input, active, message, deps);
   return applyDecision(input, active, decision, deps);
 }
 
@@ -131,7 +138,21 @@ async function startIntake(
   deps: RunConversationTurnDeps,
 ): Promise<ConversationTurnResult> {
   if (active) {
-    await deps.conversations.updateIntake({ id: active.id, status: "ABANDONED", submissionToken: null, submissionPreview: null });
+    if (hasPendingRestart(active)) {
+      try {
+        const restarted = await deps.conversations.restartIntake({
+          employeeId: input.actorId,
+          conversationId: input.conversationId,
+          intakeId: active.id,
+          requestedAfter: new Date(Date.now() - 10 * 60_000),
+        });
+        return persistReply(input, restarted, "已开始新的报销办理。请上传票据，或先告诉我本次报销事由。", [], deps.conversations);
+      } catch {
+        return persistReply(input, active, "暂时无法新建报销，请在工作台核对当前单据后重试。", [], deps.conversations);
+      }
+    }
+    const awaiting = await deps.conversations.updateIntake({ id: active.id, restartRequestedAt: new Date() });
+    return persistReply(input, awaiting, "你已有一项正在办理的报销。若确定放弃当前办理并另起一单，请再明确告诉我；否则可继续上传票据或补充信息。", [], deps.conversations);
   }
   let intake: IntakeRecord;
   try {
@@ -172,9 +193,13 @@ async function applyDecision(
   decision: ConversationDecision,
   deps: RunConversationTurnDeps,
 ): Promise<ConversationTurnResult> {
-  if (input.channel === "FEISHU" && input.chatType !== "p2p" && ["READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPARE_SUBMISSION"].includes(decision.action)) {
-    return persistReply(input, null, "为保护报销信息，请私聊机器人或在 Web 工作台查询金额、查看摘要与提交。", [], deps.conversations);
+  if (input.channel === "FEISHU" && input.chatType !== "p2p" && ["START_INTAKE", "COLLECT_FIELDS", "READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPARE_SUBMISSION"].includes(decision.action)) {
+    return persistReply(input, null, "为保护报销信息，请私聊机器人或在 Web 工作台办理、查询与提交。", [], deps.conversations);
   }
+  if (decision.action === "START_INTAKE") return startIntake(input, intake, deps);
+  if (decision.action === "CLARIFY") return persistReply(input, intake, clarificationReply(decision.clarificationReason), [], deps.conversations);
+  if (decision.action === "OUT_OF_SCOPE") return persistReply(input, intake, "我目前只能协助报销政策问答、票据和报销单办理；其他事项请使用相应服务。", [], deps.conversations);
+  if (decision.action === "HELP") return persistReply(input, intake, "我可以帮你查询报销政策或当前单据，上传票据并引导办理；也可以在 Web 工作台查看和填写。", [], deps.conversations);
   if (decision.action === "READ_CLAIM" || decision.action === "READ_RECEIPT_AMOUNT" || decision.action === "READ_SUBMISSION_SUMMARY") {
     if (!intake?.claimId) return persistReply(input, intake, "当前会话没有绑定报销单。请先输入“开始报销”并上传票据，或在 Web 工作台查看已有单据。", [], deps.conversations);
     if (!deps.readWorkbench || (decision.action === "READ_SUBMISSION_SUMMARY" && !deps.readValidation)) return persistReply(input, intake, "报销数据暂时无法查询，请稍后重试。", [], deps.conversations);
@@ -287,19 +312,14 @@ async function getContext(
   conversation: ConversationRecord,
   intake: IntakeRecord | null,
   conversations: ConversationStore,
-  searchPolicy: RunConversationTurnDeps["searchPolicy"],
-  message: string,
 ): Promise<ConversationContext> {
-  const [messages, citations] = await Promise.all([
-    conversations.listMessages({ conversationId: conversation.id, limit: 200 }),
-    searchPolicy ? searchPolicy(message).catch(() => []) : Promise.resolve([]),
-  ]);
+  const messages = await conversations.listMessages({ conversationId: conversation.id, limit: 200 });
   const summarizedConversation = await summarizeOlderMessages(conversation, messages, conversations);
   return buildConversationContext({
     conversation: summarizedConversation,
     messages,
     intake,
-    policyCitations: citations,
+    policyCitations: [],
   });
 }
 
@@ -329,13 +349,17 @@ async function getConversationIntake(employeeId: string, conversationId: string,
   return intake?.conversationId === conversationId ? intake : null;
 }
 
-async function isPolicyQuestion(message: string, deps: RunConversationTurnDeps): Promise<boolean> {
-  if (/政策|制度|标准|报销规定|报销规则/.test(message)) return true;
-  try {
-    return await deps.model.classifyIntent?.(message) === "POLICY_QUERY";
-  } catch {
-    return false;
-  }
+function hasPendingRestart(intake: IntakeRecord): boolean {
+  const requestedAt = intake.restartRequestedAt?.getTime();
+  return requestedAt !== undefined && requestedAt <= Date.now() && requestedAt >= Date.now() - 10 * 60_000;
+}
+
+function clarificationReply(reason: ConversationDecision["clarificationReason"]): string {
+  if (reason === "POLICY_OR_CLAIM") return "请明确你想了解公司报销政策，还是查询当前这张报销单的校验结果。";
+  if (reason === "START_OR_HELP") return "请明确你要新建一笔报销，还是只想了解办理流程。";
+  if (reason === "MULTIPLE_ACTIONS") return "你提出了多个操作，请先明确这次要查询、补充信息，还是准备提交。";
+  if (reason === "UNCLEAR_REFERENCE") return "请明确你指的是哪张票据或报销单，以及希望我查询什么。";
+  return "请明确说明你希望我帮你处理的报销事项。";
 }
 
 async function answerFromCitations(message: string, citations: PolicyCitation[], model: RunConversationTurnDeps["model"]): Promise<string> {

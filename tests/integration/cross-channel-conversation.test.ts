@@ -30,7 +30,7 @@ it("continues an Intake from Feishu in the employee private Web history while ke
   let submitCalls = 0;
   const model = {
     classifyIntent: async () => "OTHER" as const,
-    decideConversation: async () => ({ action: "PREPARE_SUBMISSION" as const, reply: "请确认提交。" }),
+    decideConversation: async (context: { messages: Array<{ text: string }> }) => ({ action: context.messages[0]?.text === "开始报销" ? "START_INTAKE" as const : context.messages[0]?.text === "报销政策是什么" ? "POLICY_QUERY" as const : "PREPARE_SUBMISSION" as const, reply: "只分类" }),
   };
   const deps = {
     conversations,

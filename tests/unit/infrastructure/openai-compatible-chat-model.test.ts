@@ -67,7 +67,7 @@ describe("OpenAiCompatibleChatModel", () => {
     await expect(model.decideConversation({
       summary: { text: "此前问答", throughSequence: 2 },
       messages: [{ sequence: 3, role: "USER", channel: "WEB", text: "还有张三同行" }],
-      intake: { status: "COLLECTING", collectedFields: { purpose: "客户拜访" }, pendingFields: ["participants"] },
+      intake: { status: "COLLECTING", collectedFields: { purpose: "客户拜访" }, pendingFields: ["participants"], restartPending: false },
       policyCitations: [{ title: "制度", headingPath: ["差旅"], excerpt: "需填写同行人。", score: 0.9 }],
       allowedFields: ["participants"],
     })).resolves.toEqual({ action: "COLLECT_FIELDS", reply: "请补充同行人。", fields: { participants: "张三" } });
@@ -147,6 +147,18 @@ describe("OpenAiCompatibleChatModel", () => {
     expect(body).toContain("本单住宿超标了吗");
     expect(body).toContain("不要提交");
     expect(body).toContain("多个");
+  });
+
+  it("tells the model how to interpret an affirmative reply to a pending restart", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: '{"action":"START_INTAKE","reply":"ok"}' } }] }), { status: 200 }));
+    const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "secret", fetchImpl });
+    await model.decideConversation({
+      summary: { text: "", throughSequence: 0 }, messages: [{ sequence: 2, role: "USER", channel: "WEB", text: "是的，另起一单" }],
+      intake: { status: "COLLECTING", collectedFields: {}, pendingFields: ["purpose"], restartPending: true }, policyCitations: [], allowedFields: ["purpose"],
+    });
+    const request = JSON.parse(String(fetchImpl.mock.calls[0][1].body));
+    expect(request.messages[0].content).toContain("restartPending");
+    expect(request.messages[1].content).toContain('"restartPending":true');
   });
 
   it("rejects fields attached to a read action", async () => {

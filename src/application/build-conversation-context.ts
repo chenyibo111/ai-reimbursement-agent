@@ -9,7 +9,7 @@ import {
 export type ConversationContext = {
   summary: { text: string; throughSequence: number };
   messages: Array<{ sequence: number; role: AgentMessageRole; channel: AgentMessageChannel; text: string }>;
-  intake: { status: ReimbursementIntakeStatus; collectedFields: Record<string, unknown>; pendingFields: string[] } | null;
+  intake: { status: ReimbursementIntakeStatus; collectedFields: Record<string, unknown>; pendingFields: string[]; restartPending: boolean } | null;
   policyCitations: Array<{ title: string; headingPath: string[]; excerpt: string; score: number }>;
   allowedFields: ConversationCollectedFieldName[];
 };
@@ -17,7 +17,7 @@ export type ConversationContext = {
 type ConversationContextInput = {
   conversation: { summary: string; summaryThroughSequence: number };
   messages: Array<{ sequence: number; role: AgentMessageRole; channel: AgentMessageChannel; text: string }>;
-  intake: { status: ReimbursementIntakeStatus; claimId: string | null; collectedFields: unknown; pendingFields: string[] } | null;
+  intake: { status: ReimbursementIntakeStatus; claimId: string | null; collectedFields: unknown; pendingFields: string[]; restartRequestedAt?: Date | null } | null;
   policyCitations: Array<{ title: string; headingPath: string[]; excerpt: string; score: number; url?: string }>;
   budgets?: Partial<ConversationContextBudgets>;
 };
@@ -70,7 +70,9 @@ function selectNewestMessages(
 function toSafeIntake(input: ConversationContextInput["intake"], budget: number): ConversationContext["intake"] {
   if (!input) return null;
   const collectedFields = toBoundedObject(input.collectedFields, budget);
-  return { status: input.status, collectedFields, pendingFields: input.pendingFields.map((field) => clamp(field, 80)).filter(Boolean) };
+  const requestedAt = input.restartRequestedAt?.getTime();
+  const restartPending = requestedAt !== undefined && requestedAt <= Date.now() && requestedAt >= Date.now() - 10 * 60_000;
+  return { status: input.status, collectedFields, pendingFields: input.pendingFields.map((field) => clamp(field, 80)).filter(Boolean), restartPending };
 }
 
 function selectPolicyCitations(
