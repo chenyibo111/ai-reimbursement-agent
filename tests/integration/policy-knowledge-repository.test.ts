@@ -37,3 +37,17 @@ it("rejects a non-1024-dimension vector before persistence", async () => {
   const source = await repository.createSource({ type: "FEISHU_WIKI", token: "XYZabc0123456789", canonicalUrl: "https://acme.feishu.cn/wiki/XYZabc0123456789", title: "费用制度", actorId: "employee-finance" });
   await expect(repository.stageSnapshot({ sourceId: source.id, revision: "1", contentHash: "hash", title: "费用制度", blocks: [], chunks: [{ content: "正文", headingPath: [], embedding: [1] }] })).rejects.toThrow("embedding vector must contain 1024 finite values");
 });
+
+it("stores v2 sections alongside a v1 snapshot with the same source revision", async () => {
+  const repository = new PrismaPolicyKnowledgeRepository(prisma);
+  const source = await repository.createSource({ type: "FEISHU_DOCX", token: "rateTableDoc12345", canonicalUrl: "https://acme.feishu.cn/docx/rateTableDoc12345", title: "差旅制度", actorId: "employee-finance" });
+  await repository.stageSnapshot({ sourceId: source.id, revision: "same", contentHash: "same-content", title: source.title, blocks: [], indexVersion: 1, chunks: [{ content: "北京上海 600 元", headingPath: [], embedding: vector }] });
+  const v2 = await repository.stageSnapshot({ sourceId: source.id, revision: "same", contentHash: "same-content", title: source.title, blocks: [], indexVersion: 2,
+    sections: [{ sequence: 0, headingPath: ["住宿费"], content: "北京上海 600 元\n其他城市 400 元", sourceAnchor: "#lodging", complete: true }],
+    chunks: [{ sequence: 0, sectionSequence: 0, content: "北京上海 600 元", headingPath: ["住宿费"], sourceAnchor: "#lodging", embedding: vector }],
+  });
+  await repository.activateSnapshot({ sourceId: source.id, snapshotId: v2.id, now: new Date("2026-10-25T00:00:00Z") });
+  expect(await repository.getLatestIndexState(source.id)).toEqual({ contentHash: "same-content", indexVersion: 2 });
+  expect(await prisma.policySection.findMany({ where: { snapshotId: v2.id } })).toEqual([expect.objectContaining({ headingPath: ["住宿费"], content: "北京上海 600 元\n其他城市 400 元" })]);
+  expect(await repository.searchChunks({ vector, limit: 5 })).toEqual([expect.objectContaining({ sectionId: expect.any(String), content: "北京上海 600 元" })]);
+});
