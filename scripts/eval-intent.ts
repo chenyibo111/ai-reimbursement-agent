@@ -7,7 +7,7 @@ import type { ConversationContext } from "@/src/application/build-conversation-c
 import type { ConversationDecision } from "@/src/infrastructure/model/chat-model";
 import { OpenAiCompatibleChatModel } from "@/src/infrastructure/model/openai-compatible-chat-model";
 
-export const INTENT_PROMPT_VERSION = "semantic-intent-v1";
+export const INTENT_PROMPT_VERSION = "semantic-intent-v2";
 
 export function resolveIntentEvalModelConfig(env: Record<string, string | undefined>) {
   if (env.MODEL_PROVIDER !== "openai-compatible") throw new Error("intent evaluation requires MODEL_PROVIDER=openai-compatible");

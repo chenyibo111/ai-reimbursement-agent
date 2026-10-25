@@ -147,6 +147,9 @@ describe("OpenAiCompatibleChatModel", () => {
     expect(body).toContain("本单住宿超标了吗");
     expect(body).toContain("不要提交");
     expect(body).toContain("多个");
+    expect(body).toContain("当前单据状态");
+    expect(body).toContain("提交前还缺什么");
+    expect(body).toContain("明确请求发起提交准备");
   });
 
   it("tells the model how to interpret an affirmative reply to a pending restart", async () => {

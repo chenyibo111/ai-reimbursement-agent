@@ -42,6 +42,16 @@ describe("intent evaluation", () => {
     expect(JSON.stringify(report)).not.toContain("住宿上限？");
   });
 
+  it("passes the case's pending field allowlist to the classifier", async () => {
+    const cases = parseIntentEvalDataset(JSON.stringify({ id: "project-code", message: "项目编号为测试项目", history: [], intakeStatus: "COLLECTING", pendingFields: ["projectCode"], channel: "WEB", expectedAction: "COLLECT_FIELDS" }));
+    let allowedFields: string[] = [];
+    await evaluateIntent(cases, async (context) => {
+      allowedFields = context.allowedFields;
+      return { action: "COLLECT_FIELDS", reply: "只分类", fields: { projectCode: "测试项目" } };
+    });
+    expect(allowedFields).toEqual(["projectCode"]);
+  });
+
   it("rejects malformed or duplicate anonymous JSONL cases", () => {
     const valid = JSON.stringify(dataset[0]);
     expect(() => parseIntentEvalDataset(`${valid}\n${valid}`)).toThrow("duplicate intent case id");

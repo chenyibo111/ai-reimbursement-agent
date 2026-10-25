@@ -68,3 +68,59 @@ it("continues an Intake from Feishu in the employee private Web history while ke
     await prisma.employee.delete({ where: { id: employeeId } });
   }
 });
+
+it("keeps policy and claim reads consistent across private Web and Feishu while blocking group reads and near-confirmations", async () => {
+  const employeeId = `cross-channel-${randomUUID()}`;
+  await prisma.employee.create({ data: { id: employeeId, displayName: "跨渠道测试员工" } });
+  const repository = new AgentConversationRepository(prisma);
+  const privateConversation = await repository.getOrCreatePrivate(employeeId);
+  const groupConversation = await repository.getOrCreateGroup(employeeId, "oc-private-facts-test");
+  await repository.createIntake({ employeeId, conversationId: privateConversation.id, claimId: "go-claim-parity", pendingFields: [] });
+  let policySearches = 0;
+  let claimReads = 0;
+  let submissions = 0;
+  const deps = {
+    conversations: repository as unknown as ConversationStore,
+    model: {
+      decideConversation: async (context: { messages: Array<{ text: string }> }) => ({
+        action: context.messages[0]?.text === "住宿报销规则是什么" ? "POLICY_QUERY" as const
+          : context.messages[0]?.text === "这笔报销单目前怎样" ? "READ_CLAIM" as const
+            : "HELP" as const,
+        reply: "只分类",
+      }),
+      answerPolicy: async () => "住宿上限为 500 元。",
+    },
+    searchPolicy: async () => {
+      policySearches += 1;
+      return [{ id: "policy-parity", title: "差旅制度", url: "https://example.test/policy", excerpt: "住宿上限 500 元。", headingPath: ["住宿"], score: 0.9 }];
+    },
+    readWorkbench: async () => {
+      claimReads += 1;
+      return { claim: { id: "go-claim-parity", claimNumber: "BX-PARITY", version: 1, status: "DRAFT", purpose: "客户拜访", requestedAmountCent: 12345, totalAmountCent: 12345, currency: "CNY" as const, receiptCount: 0 }, receipts: [] };
+    },
+    submitClaim: async () => { submissions += 1; return { submissionNumber: "SHOULD-NOT-SUBMIT" }; },
+  };
+
+  try {
+    const webPolicy = await runConversationTurn({ actorId: employeeId, conversationId: privateConversation.id, channel: "WEB", message: "住宿报销规则是什么" }, deps);
+    const feishuPolicy = await runConversationTurn({ actorId: employeeId, conversationId: privateConversation.id, channel: "FEISHU", chatType: "p2p", message: "住宿报销规则是什么" }, deps);
+    expect(webPolicy.reply).toBe(feishuPolicy.reply);
+    expect(webPolicy.citations).toEqual(feishuPolicy.citations);
+    expect(policySearches).toBe(2);
+
+    const webClaim = await runConversationTurn({ actorId: employeeId, conversationId: privateConversation.id, channel: "WEB", message: "这笔报销单目前怎样" }, deps);
+    const feishuClaim = await runConversationTurn({ actorId: employeeId, conversationId: privateConversation.id, channel: "FEISHU", chatType: "p2p", message: "这笔报销单目前怎样" }, deps);
+    expect(webClaim.reply).toBe(feishuClaim.reply);
+    expect(webClaim.reply).toContain("BX-PARITY");
+    expect(claimReads).toBe(2);
+
+    const groupClaim = await runConversationTurn({ actorId: employeeId, conversationId: groupConversation.id, channel: "FEISHU", chatType: "group", message: "这笔报销单目前怎样" }, deps);
+    expect(groupClaim.reply).toContain("私聊机器人");
+    expect(claimReads).toBe(2);
+    const nearConfirmation = await runConversationTurn({ actorId: employeeId, conversationId: privateConversation.id, channel: "FEISHU", chatType: "p2p", message: "请确认提交" }, deps);
+    expect(nearConfirmation.reply).not.toContain("SHOULD-NOT-SUBMIT");
+    expect(submissions).toBe(0);
+  } finally {
+    await prisma.employee.delete({ where: { id: employeeId } });
+  }
+});

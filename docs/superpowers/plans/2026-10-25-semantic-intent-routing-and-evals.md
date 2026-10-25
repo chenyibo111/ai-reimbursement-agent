@@ -84,10 +84,12 @@
 
 **Interfaces:** Consume Tasks 1–4; no new runtime API.
 
-- [ ] **Step 1: Write failing cross-channel regression test** for matching private Web/Feishu policy and claim-read actions, group read rejection, and exact-only final submission.
-- [ ] **Step 2: Run** affected file; expect RED if channel behavior differs.
-- [ ] **Step 3: Make only the necessary wiring fix,** if any. Document evaluation command, real-model versus fixture semantics, proposed gates (macro F1 ≥ 0.90, out-of-scope recall ≥ 0.90, zero unsafe submit negatives) and manual acceptance in `README.md`.
-- [ ] **Step 4: Run** `npm test`, `npx tsc --noEmit`, `npm run lint`, `npm run build`, and relevant Go tests if Go changed; report exact outcomes, then commit. Do not push or merge without user direction.
+- [x] **Step 1: Write cross-channel regression test** for matching private Web/Feishu policy and claim-read actions, group read rejection, and exact-only final submission.
+- [x] **Step 2: Run** affected file; expect RED if channel behavior differs. Existing routing was already consistent, so the new regression passed without a wiring change.
+- [x] **Step 3: Make only the necessary wiring fix,** if any. Document evaluation command, real-model versus fixture semantics, proposed gates (macro F1 ≥ 0.90, out-of-scope recall ≥ 0.90, zero unsafe submit negatives) and manual acceptance in `README.md`.
+- [x] **Step 4: Run** `npm test`, `npx tsc --noEmit`, `npm run lint`, `npm run build`, and relevant Go tests if Go changed; report exact outcomes, then commit. Do not push or merge without user direction.
+
+Task 5 验证记录：`npm test` 为 108 个文件、380 个测试通过；`npx tsc --noEmit` 通过；`npm run lint` 无错误、两个既有 React Hook 依赖警告；`npm run build` 通过。未改 Go 代码。真实模型对修订后匿名数据的 dev 宏 F1 为 0.906（1 次模型失败），holdout 宏 F1 为 0.929（2 次模型失败），holdout 范围外召回 1.0、危险准备提交误判 0。该离线合成集结果不能替代真实业务样本验收。
 
 ## Self-Review
 

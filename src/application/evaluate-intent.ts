@@ -3,6 +3,7 @@ import { performance } from "node:perf_hooks";
 import { z } from "zod";
 
 import { buildConversationContext, type ConversationContext } from "@/src/application/build-conversation-context";
+import { conversationCollectedFieldNames } from "@/src/domain/agent-conversation";
 import type { ConversationAction, ConversationDecision } from "@/src/infrastructure/model/chat-model";
 
 export const intentActions = ["POLICY_QUERY", "START_INTAKE", "COLLECT_FIELDS", "READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPARE_SUBMISSION", "HELP", "CLARIFY", "OUT_OF_SCOPE"] as const satisfies readonly ConversationAction[];
@@ -12,13 +13,14 @@ const intentCaseSchema = z.object({
   message: z.string().trim().min(1).max(1_000),
   history: z.array(z.string().trim().min(1).max(1_000)).max(8),
   intakeStatus: z.enum(["COLLECTING", "READY_TO_SUBMIT", "SUBMITTED", "ABANDONED"]).nullable(),
+  pendingFields: z.array(z.enum(conversationCollectedFieldNames)).max(conversationCollectedFieldNames.length).optional(),
   channel: z.enum(["WEB", "FEISHU"]),
   chatType: z.enum(["p2p", "group"]).optional(),
   expectedAction: z.enum(intentActions),
   acceptedActions: z.array(z.enum(intentActions)).max(4).optional(),
   riskTags: z.array(z.string().trim().min(1).max(60)).max(8).optional(),
   restartPending: z.boolean().optional(),
-}).strict();
+}).strict().refine((value) => value.intakeStatus !== null || value.pendingFields === undefined, { message: "pendingFields requires an intake" });
 
 export type IntentEvalCase = z.infer<typeof intentCaseSchema>;
 export type IntentEvalResult = {
@@ -65,7 +67,7 @@ export async function evaluateIntent(
     const context = buildConversationContext({
       conversation: { summary: "", summaryThroughSequence: 0 },
       messages: [...item.history, item.message].map((text, index) => ({ sequence: index + 1, role: "USER" as const, channel: item.channel, text })),
-      intake: item.intakeStatus ? { status: item.intakeStatus, claimId: null, collectedFields: {}, pendingFields: ["purpose"], restartRequestedAt: item.restartPending ? new Date() : null } : null,
+      intake: item.intakeStatus ? { status: item.intakeStatus, claimId: null, collectedFields: {}, pendingFields: item.pendingFields ?? ["purpose"], restartRequestedAt: item.restartPending ? new Date() : null } : null,
       policyCitations: [],
     });
     const started = performance.now();

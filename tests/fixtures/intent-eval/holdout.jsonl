@@ -14,8 +14,8 @@
 {"id":"h-f02","message":"把事由改成供应商现场沟通","history":[],"intakeStatus":"COLLECTING","channel":"WEB","expectedAction":"COLLECT_FIELDS"}
 {"id":"h-f03","message":"出差原因写项目验收","history":[],"intakeStatus":"COLLECTING","channel":"FEISHU","expectedAction":"COLLECT_FIELDS"}
 {"id":"h-f04","message":"本次为客户售后拜访","history":["请说明本次报销事由"],"intakeStatus":"COLLECTING","channel":"WEB","expectedAction":"COLLECT_FIELDS"}
-{"id":"h-f05","message":"同行的是测试同事甲","history":["请补充参与人员"],"intakeStatus":"COLLECTING","channel":"FEISHU","expectedAction":"COLLECT_FIELDS"}
-{"id":"h-f06","message":"费用类别写差旅费","history":["请补充费用类别"],"intakeStatus":"COLLECTING","channel":"WEB","expectedAction":"COLLECT_FIELDS"}
+{"id":"h-f05","message":"同行的是测试同事甲","history":["请补充参与人员"],"intakeStatus":"COLLECTING","pendingFields":["participants"],"channel":"FEISHU","expectedAction":"COLLECT_FIELDS"}
+{"id":"h-f06","message":"费用类别写差旅费","history":["请补充费用类别"],"intakeStatus":"COLLECTING","pendingFields":["expenseCategory"],"channel":"WEB","expectedAction":"COLLECT_FIELDS"}
 {"id":"h-c01","message":"这笔单子总共申请多少钱","history":[],"intakeStatus":"COLLECTING","channel":"FEISHU","expectedAction":"READ_CLAIM"}
 {"id":"h-c02","message":"申请报销总额给我看一下","history":[],"intakeStatus":"COLLECTING","channel":"WEB","expectedAction":"READ_CLAIM"}
 {"id":"h-c03","message":"我的报销草稿目前是什么状态","history":[],"intakeStatus":"COLLECTING","channel":"FEISHU","expectedAction":"READ_CLAIM"}

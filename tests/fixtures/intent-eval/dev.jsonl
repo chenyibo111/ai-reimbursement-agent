@@ -14,8 +14,8 @@
 {"id":"d-f02","message":"这次是团队会议差旅","history":["请补充本次报销事由"],"intakeStatus":"COLLECTING","channel":"FEISHU","expectedAction":"COLLECT_FIELDS"}
 {"id":"d-f03","message":"用途写成拜访供应商","history":[],"intakeStatus":"COLLECTING","channel":"WEB","expectedAction":"COLLECT_FIELDS"}
 {"id":"d-f04","message":"事由补充为项目现场调研","history":[],"intakeStatus":"COLLECTING","channel":"FEISHU","expectedAction":"COLLECT_FIELDS"}
-{"id":"d-f05","message":"还有同事一起参加会议","history":["请补充参与人员"],"intakeStatus":"COLLECTING","channel":"WEB","expectedAction":"COLLECT_FIELDS"}
-{"id":"d-f06","message":"项目编号为内部测试项目A","history":["请补充项目编号"],"intakeStatus":"COLLECTING","channel":"FEISHU","expectedAction":"COLLECT_FIELDS"}
+{"id":"d-f05","message":"还有同事一起参加会议","history":["请补充参与人员"],"intakeStatus":"COLLECTING","pendingFields":["participants"],"channel":"WEB","expectedAction":"COLLECT_FIELDS"}
+{"id":"d-f06","message":"项目编号为内部测试项目A","history":["请补充项目编号"],"intakeStatus":"COLLECTING","pendingFields":["projectCode"],"channel":"FEISHU","expectedAction":"COLLECT_FIELDS"}
 {"id":"d-c01","message":"我的申请报销金额是多少","history":[],"intakeStatus":"COLLECTING","channel":"WEB","expectedAction":"READ_CLAIM"}
 {"id":"d-c02","message":"看看当前报销单信息","history":[],"intakeStatus":"COLLECTING","channel":"FEISHU","expectedAction":"READ_CLAIM"}
 {"id":"d-c03","message":"这张单现在申请了多少钱","history":[],"intakeStatus":"COLLECTING","channel":"WEB","expectedAction":"READ_CLAIM"}
