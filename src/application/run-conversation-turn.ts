@@ -86,7 +86,7 @@ export async function runConversationTurn(
   const context = await getContext(conversation, active, deps.conversations, deps.searchPolicy, message);
   const decision: ConversationDecision = deps.model.decideConversation
     ? await deps.model.decideConversation(context)
-    : { action: "ANSWER", reply: "我暂时无法处理这条报销办理请求，请在工作台继续填写。" };
+    : { action: "HELP", reply: "我暂时无法处理这条报销办理请求，请在工作台继续填写。" };
   return applyDecision(input, active, decision, deps);
 }
 

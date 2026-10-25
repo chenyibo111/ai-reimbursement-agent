@@ -46,7 +46,7 @@ function createDeps(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     deps: {
       conversations,
-      model: { decideConversation: async () => ({ action: "ANSWER" as const, reply: "好的" }) },
+      model: { decideConversation: async () => ({ action: "HELP" as const, reply: "好的" }) },
       createClaim,
       preflightAttachment: async () => undefined,
       uploadReceipt,
@@ -179,7 +179,7 @@ it("writes only allowlisted Intake fields through the claim field use case", asy
 });
 
 it.each(["这张发票金额是 999 元", "你没有读取报销单的权限"])("does not repeat ungrounded model facts: %s", async (reply) => {
-  const { deps } = createDeps({ model: { decideConversation: async () => ({ action: "ANSWER" as const, reply }) } });
+  const { deps } = createDeps({ model: { decideConversation: async () => ({ action: "HELP" as const, reply }) } });
   const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "当前单据怎么样" }, deps);
   expect(result.reply).not.toContain("999");
   expect(result.reply).not.toContain("没有读取报销单的权限");
@@ -368,7 +368,7 @@ it("invalidates a prepared submission when another attachment changes the claim"
 it("rolls older conversation messages into a bounded summary before model routing", async () => {
   let receivedSummary = "";
   const { deps, compareAndSetSummary } = createDeps({
-    model: { decideConversation: async (context: { summary: { text: string } }) => { receivedSummary = context.summary.text; return { action: "ANSWER" as const, reply: "好的" }; } },
+    model: { decideConversation: async (context: { summary: { text: string } }) => { receivedSummary = context.summary.text; return { action: "HELP" as const, reply: "好的" }; } },
   });
   deps.conversations.listMessages = async () => Array.from({ length: 16 }, (_, index) => ({ sequence: index + 1, role: "USER" as const, channel: "WEB" as const, text: `历史消息 ${index + 1}` }));
   await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "继续办理" }, deps);

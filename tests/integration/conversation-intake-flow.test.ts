@@ -44,7 +44,7 @@ it("keeps policy-only turns out of Intake and creates one persisted agent claim 
     model: {
       classifyIntent: async () => "POLICY_QUERY" as const,
       answerPolicy: async () => "住宿上限请以制度片段为准。",
-      decideConversation: async () => ({ action: "ANSWER" as const, reply: "好的" }),
+      decideConversation: async () => ({ action: "HELP" as const, reply: "好的" }),
     },
     searchPolicy: async () => [{ id: "citation-1", title: "差旅制度", url: "https://example.test/doc", headingPath: ["住宿"], excerpt: "住宿上限", score: 0.9 }],
     createClaim: async ({ actorId }: { actorId: string }) => createClaim({ actorId }),

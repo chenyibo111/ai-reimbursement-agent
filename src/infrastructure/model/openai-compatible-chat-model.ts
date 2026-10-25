@@ -85,9 +85,9 @@ export class OpenAiCompatibleChatModel implements ChatModel {
     const result = await this.complete([
       {
         role: "system",
-        content: "你是受控的报销会话意图分类器。只返回 JSON：{action: \"ANSWER\" | \"START_INTAKE\" | \"COLLECT_FIELDS\" | \"READ_CLAIM\" | \"READ_RECEIPT_AMOUNT\" | \"READ_SUBMISSION_SUMMARY\" | \"PREPARE_SUBMISSION\", reply: string, fields?: Record<string,string>}。询问申请报销总额或当前单据用 READ_CLAIM；询问发票/票据价税合计用 READ_RECEIPT_AMOUNT；索要提交摘要或询问是否满足条件用 READ_SUBMISSION_SUMMARY；明确要求发起提交用 PREPARE_SUBMISSION。你只分类意图，不生成金额、权限或状态结论，不声称已写入或已提交。只有服务端提供的 allowedFields 能出现在 COLLECT_FIELDS 的 fields；其他动作不能返回 fields。政策结论只能依据 policyCitations。",
+        content: "你是受控的报销会话意图分类器，只分类，不直接办理。只返回 JSON：{action: \"POLICY_QUERY\" | \"START_INTAKE\" | \"COLLECT_FIELDS\" | \"READ_CLAIM\" | \"READ_RECEIPT_AMOUNT\" | \"READ_SUBMISSION_SUMMARY\" | \"PREPARE_SUBMISSION\" | \"HELP\" | \"CLARIFY\" | \"OUT_OF_SCOPE\", reply: string, fields?: Record<string,string>, clarificationReason?: \"POLICY_OR_CLAIM\" | \"START_OR_HELP\" | \"MULTIPLE_ACTIONS\" | \"UNCLEAR_REFERENCE\" | \"OTHER\"}。询问公司制度上限用 POLICY_QUERY；询问本单能否报销或本单是否超标准用 READ_SUBMISSION_SUMMARY；申请报销总额用 READ_CLAIM；票据价税合计用 READ_RECEIPT_AMOUNT。我要提交/可以交了用 PREPARE_SUBMISSION，但不要提交、只是问提交条件不能进入准备提交。新建一笔报销用 START_INTAKE；如何新建用 HELP。多个动作或指代不明时用 CLARIFY，不擅自挑一个动作。超出报销范围用 OUT_OF_SCOPE。你不生成金额、权限或状态结论，也不声称已写入或提交。只有 allowedFields 能出现在 COLLECT_FIELDS 的 fields；其他动作不得带 fields。clarificationReason 仅用于 CLARIFY。",
       },
-      { role: "user", content: JSON.stringify(input) },
+      { role: "user", content: JSON.stringify({ summary: input.summary, messages: input.messages, intake: input.intake, allowedFields: input.allowedFields }) },
     ]);
     return parseConversationDecision(result, input.allowedFields);
   }
@@ -135,9 +135,10 @@ export class OpenAiCompatibleChatModel implements ChatModel {
 }
 
 const conversationDecisionSchema = z.object({
-  action: z.enum(["ANSWER", "START_INTAKE", "COLLECT_FIELDS", "READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPARE_SUBMISSION"]),
+  action: z.enum(["POLICY_QUERY", "START_INTAKE", "COLLECT_FIELDS", "READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPARE_SUBMISSION", "HELP", "CLARIFY", "OUT_OF_SCOPE"]),
   reply: z.string().trim().min(1).max(1_000),
   fields: z.record(z.string(), z.string().trim().min(1).max(1_000)).optional(),
+  clarificationReason: z.enum(["POLICY_OR_CLAIM", "START_OR_HELP", "MULTIPLE_ACTIONS", "UNCLEAR_REFERENCE", "OTHER"]).optional(),
 }).strict();
 
 function parseConversationDecision(
@@ -150,9 +151,10 @@ function parseConversationDecision(
   if (fields && (parsed.data.action !== "COLLECT_FIELDS" || Object.keys(fields).some((field) => !allowedFields.includes(field) || !isConversationCollectedFieldName(field)))) {
     throw new ChatModelError("AI 返回内容无法识别，请稍后重试。", "INVALID_RESPONSE");
   }
-  return fields
-    ? { action: parsed.data.action, reply: parsed.data.reply, fields }
-    : { action: parsed.data.action, reply: parsed.data.reply };
+  if (parsed.data.clarificationReason && parsed.data.action !== "CLARIFY") {
+    throw new ChatModelError("AI 返回内容无法识别，请稍后重试。", "INVALID_RESPONSE");
+  }
+  return { action: parsed.data.action, reply: parsed.data.reply, ...(fields ? { fields } : {}), ...(parsed.data.clarificationReason ? { clarificationReason: parsed.data.clarificationReason } : {}) };
 }
 
 function isChatCompletionEnvelope(payload: unknown): payload is { choices?: Array<{ message?: { content?: unknown } }> } {

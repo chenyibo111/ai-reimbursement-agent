@@ -16,10 +16,13 @@ export type PolicyAnswerInput = {
   }>;
 };
 
+export type ConversationAction = "POLICY_QUERY" | "START_INTAKE" | "COLLECT_FIELDS" | "READ_CLAIM" | "READ_RECEIPT_AMOUNT" | "READ_SUBMISSION_SUMMARY" | "PREPARE_SUBMISSION" | "HELP" | "CLARIFY" | "OUT_OF_SCOPE";
+
 export type ConversationDecision = {
-  action: "ANSWER" | "START_INTAKE" | "COLLECT_FIELDS" | "READ_CLAIM" | "READ_RECEIPT_AMOUNT" | "READ_SUBMISSION_SUMMARY" | "PREPARE_SUBMISSION";
+  action: ConversationAction;
   reply: string;
   fields?: Partial<Record<ConversationCollectedFieldName, string>>;
+  clarificationReason?: "POLICY_OR_CLAIM" | "START_OR_HELP" | "MULTIPLE_ACTIONS" | "UNCLEAR_REFERENCE" | "OTHER";
 };
 
 export type ChatModel = {
