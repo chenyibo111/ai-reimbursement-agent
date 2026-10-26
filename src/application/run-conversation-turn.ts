@@ -7,8 +7,9 @@ import type { ClaimFieldPatch, ClaimSnapshot, ReceiptSnapshot, ValidationSnapsho
 import { ReimbursementApiHttpError } from "@/services/agent/src/adapters/reimbursement-api-client";
 import { formatClaimSearchPage, normalizeClaimSearch, readClaimSearchState } from "@/src/application/claim-search";
 import type { OwnedClaimSearchPage, OwnedClaimSearchQuery } from "@/services/agent/src/ports/reimbursement-port";
+import { selectOwnedEditClaim, writeTargetIsAmbiguous } from "@/src/application/claim-target";
 
-type ConversationRecord = { id: string; summary: string; summaryThroughSequence: number; selectedReadClaimId?: string | null; searchState?: unknown };
+type ConversationRecord = { id: string; summary: string; summaryThroughSequence: number; selectedReadClaimId?: string | null; selectedEditClaimId?: string | null; searchState?: unknown };
 type ConversationMessage = { id?: string; sequence: number; role: AgentMessageRole; channel: AgentMessageChannel; text: string; citations?: unknown; result?: unknown };
 type IntakeRecord = {
   id: string;
@@ -35,6 +36,7 @@ export type ConversationStore = {
   updateIntake(input: { id: string; status?: ReimbursementIntakeStatus; claimId?: string | null; collectedFields?: Record<string, unknown>; pendingFields?: string[]; submissionToken?: string | null; submissionPreview?: Record<string, unknown> | null; restartRequestedAt?: Date | null; lastUserConfirmationAt?: Date | null }): Promise<IntakeRecord>;
   restartIntake(input: { employeeId: string; conversationId: string; intakeId: string; requestedAfter: Date }): Promise<IntakeRecord>;
   setSelectedReadClaimId?(input: { conversationId: string; claimId: string | null }): Promise<void>;
+  setSelectedEditClaimId?(input: { conversationId: string; claimId: string | null }): Promise<void>;
   setSearchState?(input: { conversationId: string; state: import("@/src/application/claim-search").ClaimSearchState | null }): Promise<void>;
 };
 
@@ -109,7 +111,7 @@ export async function runConversationTurn(
     active = await deps.conversations.updateIntake({ id: active.id, restartRequestedAt: null });
   }
   if (decision.action === "POLICY_QUERY") return answerPolicyQuestion(input, active, message, deps);
-  return applyDecision(input, active, decision, deps, conversation.selectedReadClaimId ?? null, conversation.searchState);
+  return applyDecision(input, active, decision, deps, conversation.selectedReadClaimId ?? null, conversation.selectedEditClaimId ?? null, conversation.searchState);
 }
 
 async function reconcileIntakeFields(
@@ -159,6 +161,7 @@ async function handleAttachment(
     try {
       intake = await deps.conversations.createIntake({ employeeId: input.actorId, conversationId: input.conversationId, pendingFields: ["purpose"] });
       await deps.conversations.setSelectedReadClaimId?.({ conversationId: input.conversationId, claimId: null });
+      await deps.conversations.setSelectedEditClaimId?.({ conversationId: input.conversationId, claimId: null });
     } catch (error) {
       if (error instanceof Error && error.message === "active intake exists") {
         return persistReply(input, null, "你在另一会话已有一项进行中的报销办理，请回到原会话继续。", [], deps.conversations);
@@ -198,6 +201,7 @@ async function startIntake(
           requestedAfter: new Date(Date.now() - 10 * 60_000),
         });
         await deps.conversations.setSelectedReadClaimId?.({ conversationId: input.conversationId, claimId: null });
+        await deps.conversations.setSelectedEditClaimId?.({ conversationId: input.conversationId, claimId: null });
         return persistReply(input, restarted, "已开始新的报销办理。请上传票据，或先告诉我本次报销事由。", [], deps.conversations);
       } catch {
         return persistReply(input, active, "暂时无法新建报销，请在工作台核对当前单据后重试。", [], deps.conversations);
@@ -214,6 +218,7 @@ async function startIntake(
       pendingFields: ["purpose"],
     });
     await deps.conversations.setSelectedReadClaimId?.({ conversationId: input.conversationId, claimId: null });
+    await deps.conversations.setSelectedEditClaimId?.({ conversationId: input.conversationId, claimId: null });
   } catch (error) {
     if (error instanceof Error && error.message === "active intake exists") {
       return persistReply(input, null, "你在另一会话已有一项进行中的报销办理，请回到原会话继续。", [], deps.conversations);
@@ -249,9 +254,10 @@ async function applyDecision(
   decision: ConversationDecision,
   deps: RunConversationTurnDeps,
   selectedReadClaimId: string | null,
+  selectedEditClaimId: string | null,
   rawSearchState: unknown,
 ): Promise<ConversationTurnResult> {
-  if (input.channel === "FEISHU" && input.chatType !== "p2p" && ["START_INTAKE", "COLLECT_FIELDS", "LIST_CLAIMS", "SEARCH_CLAIMS", "NEXT_CLAIMS_PAGE", "READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPARE_SUBMISSION"].includes(decision.action)) {
+  if (input.channel === "FEISHU" && input.chatType !== "p2p" && ["START_INTAKE", "COLLECT_FIELDS", "LIST_CLAIMS", "SEARCH_CLAIMS", "NEXT_CLAIMS_PAGE", "SELECT_EDIT_CLAIM", "READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPARE_SUBMISSION"].includes(decision.action)) {
     return persistReply(input, null, "为保护报销信息，请私聊机器人或在 Web 工作台办理、查询与提交。", [], deps.conversations);
   }
   if (decision.action === "START_INTAKE") return startIntake(input, intake, deps);
@@ -279,6 +285,18 @@ async function applyDecision(
       await deps.conversations.setSearchState({ conversationId: input.conversationId, state: formatted.state });
       return persistReply(input, intake, formatted.reply, [], deps.conversations);
     } catch { await deps.conversations.setSearchState({ conversationId: input.conversationId, state: null }); return persistReply(input, intake, "查询页已失效，请重新查询。", [], deps.conversations); }
+  }
+  if (decision.action === "SELECT_EDIT_CLAIM") {
+    if (!deps.conversations.setSelectedEditClaimId || !deps.readWorkbench) return persistReply(input, intake, "暂时无法选中报销草稿，请稍后重试。", [], deps.conversations);
+    const safeIntake = intake ? await clearSubmissionPreparation(intake, deps.conversations) : null;
+    await deps.conversations.setSelectedEditClaimId({ conversationId: input.conversationId, claimId: null });
+    if (!decision.claimNumber && !decision.claimOrdinal) return persistReply(input, safeIntake, "请提供完整报销单号，或有效查询页中的序号。", [], deps.conversations);
+    try {
+      const claim = await selectOwnedEditClaim({ actorId: input.actorId, reference: { claimNumber: decision.claimNumber, claimOrdinal: decision.claimOrdinal }, searchState: rawSearchState, findOwnedClaimByNumber: deps.findOwnedClaimByNumber, readWorkbench: deps.readWorkbench });
+      if (!claim) return persistReply(input, safeIntake, "未找到可办理的本人草稿；已提交的单据只能查看。请核对单号或重新查询。", [], deps.conversations);
+      await deps.conversations.setSelectedEditClaimId({ conversationId: input.conversationId, claimId: claim.id });
+      return persistReply(input, safeIntake, `已选中正在办理的草稿：${claim.claimNumber}｜${claim.purpose || "未填写事由"}。`, [], deps.conversations);
+    } catch { return persistReply(input, safeIntake, "未找到可办理的本人草稿；已提交的单据只能查看。请核对单号或重新查询。", [], deps.conversations); }
   }
   if (decision.action === "LIST_CLAIMS") {
     if (!deps.listOwnedClaims) return persistReply(input, intake, "报销数据暂时无法查询，请稍后重试。", [], deps.conversations);
@@ -330,6 +348,7 @@ async function applyDecision(
     }
   }
   if (decision.action === "COLLECT_FIELDS") {
+    if (writeTargetIsAmbiguous({ intakeClaimId: intake?.claimId, selectedReadClaimId, selectedEditClaimId, targetReference: decision.targetReference })) return persistReply(input, intake, "当前查询的单据与正在办理的草稿不同。请明确要办理的报销单号，或说明“修改当前草稿”。", [], deps.conversations);
     if (!intake) return persistReply(input, null, "请先输入“开始报销”或上传票据，再补充报销信息。", [], deps.conversations);
     const fields = validFieldPatch(decision.fields);
     if (!fields) return persistReply(input, intake, "这项信息不能在对话中保存；金额、币种和备注请到 Web 工作台填写。", [], deps.conversations);
@@ -365,6 +384,7 @@ async function applyDecision(
   }
 
   if (decision.action === "PREPARE_SUBMISSION") {
+    if (writeTargetIsAmbiguous({ intakeClaimId: intake?.claimId, selectedReadClaimId, selectedEditClaimId, targetReference: decision.targetReference })) return persistReply(input, intake, "当前查询的单据与正在办理的草稿不同。请明确要提交的报销单号，或说明“提交当前草稿”。", [], deps.conversations);
     if (!intake?.claimId) return persistReply(input, intake, "当前会话没有绑定报销单，请先输入“开始报销”并上传票据。", [], deps.conversations);
     if (!deps.readValidation || !deps.prepareSubmission) return persistReply(input, intake, "报销服务暂时无法准备提交，请稍后重试。", [], deps.conversations);
     let validation: ValidationSnapshot;

@@ -16,7 +16,7 @@ export type PolicyAnswerInput = {
   }>;
 };
 
-export type ConversationAction = "POLICY_QUERY" | "START_INTAKE" | "COLLECT_FIELDS" | "LIST_CLAIMS" | "SEARCH_CLAIMS" | "NEXT_CLAIMS_PAGE" | "READ_CLAIM" | "READ_RECEIPT_AMOUNT" | "READ_SUBMISSION_SUMMARY" | "PREPARE_SUBMISSION" | "HELP" | "CLARIFY" | "OUT_OF_SCOPE";
+export type ConversationAction = "POLICY_QUERY" | "START_INTAKE" | "COLLECT_FIELDS" | "LIST_CLAIMS" | "SEARCH_CLAIMS" | "NEXT_CLAIMS_PAGE" | "SELECT_EDIT_CLAIM" | "READ_CLAIM" | "READ_RECEIPT_AMOUNT" | "READ_SUBMISSION_SUMMARY" | "PREPARE_SUBMISSION" | "HELP" | "CLARIFY" | "OUT_OF_SCOPE";
 
 export type ConversationDecision = {
   action: ConversationAction;
@@ -25,6 +25,7 @@ export type ConversationDecision = {
   claimNumber?: string;
   claimOrdinal?: number;
   search?: import("@/src/application/claim-search").ClaimSearchRequest;
+  targetReference?: "CURRENT_INTAKE";
   clarificationReason?: "POLICY_OR_CLAIM" | "START_OR_HELP" | "MULTIPLE_ACTIONS" | "UNCLEAR_REFERENCE" | "OTHER";
 };
 

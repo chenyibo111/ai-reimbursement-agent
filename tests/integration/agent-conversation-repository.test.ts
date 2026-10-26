@@ -26,6 +26,15 @@ async function createEmployee() {
 }
 
 describe("AgentConversationRepository", () => {
+  it("persists an edit target independently of read selection and active Intake", async () => {
+    const employee = await createEmployee();
+    const conversation = await repository.getOrCreatePrivate(employee.id);
+    const intake = await repository.createIntake({ employeeId: employee.id, conversationId: conversation.id, claimId: "active-go-claim" });
+    await repository.setSelectedReadClaimId({ conversationId: conversation.id, claimId: "read-go-claim" });
+    await repository.setSelectedEditClaimId({ conversationId: conversation.id, claimId: "edit-go-claim" });
+    await expect(repository.getConversationByIdOrThrow(conversation.id)).resolves.toMatchObject({ selectedReadClaimId: "read-go-claim", selectedEditClaimId: "edit-go-claim" });
+    await expect(repository.getCurrentIntake(employee.id)).resolves.toMatchObject({ id: intake.id, claimId: "active-go-claim" });
+  });
   it("persists a bounded search page independently of the active intake", async () => {
     const employee = await createEmployee();
     const conversation = await repository.getOrCreatePrivate(employee.id);

@@ -385,7 +385,7 @@ it("lists at most five owner claims without creating an Intake", async () => {
   expect(setup.createClaim).not.toHaveBeenCalled();
 });
 
-it("selects an older owned claim for reads while writes stay bound to the Intake", async () => {
+it("keeps a read-only claim separate and refuses an ambiguous write or submission", async () => {
   let selectedReadClaimId: string | null = null;
   let turns = 0;
   const readWorkbench = vi.fn(async ({ claimId }: { claimId: string }) => ({ claim: { id: claimId, claimNumber: "BX20261009-0026", version: 2, status: claimId === "old-claim" ? "SUBMITTED" : "DRAFT", purpose: claimId === "old-claim" ? "旧事由" : "新事由", requestedAmountCent: 10000, totalAmountCent: 10000, currency: "CNY" as const }, receipts: [] }));
@@ -414,11 +414,51 @@ it("selects an older owned claim for reads while writes stay bound to the Intake
   expect(readWorkbench).toHaveBeenCalledTimes(2);
   expect(readWorkbench).toHaveBeenLastCalledWith({ actorId: "employee-1", claimId: "old-claim" });
   await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "改事由" }, setup.deps);
-  expect(setup.updateFields).toHaveBeenCalledWith({ actorId: "employee-1", claimId: "active-claim", fields: { purpose: "新事由" } });
+  expect(setup.updateFields).not.toHaveBeenCalled();
   await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "准备提交" }, setup.deps);
-  expect(setup.prepareSubmission).toHaveBeenCalledWith({ actorId: "employee-1", claimId: "active-claim" });
+  expect(setup.prepareSubmission).not.toHaveBeenCalled();
   await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "确认提交" }, setup.deps);
-  expect(setup.submitClaim).toHaveBeenCalledWith({ actorId: "employee-1", claimId: "active-claim", confirmationToken: "confirmation-token" });
+  expect(setup.submitClaim).not.toHaveBeenCalled();
+});
+
+it("selects an explicit owned draft as an edit target without replacing an active Intake", async () => {
+  const setup = createDeps({
+    model: { decideConversation: async () => ({ action: "SELECT_EDIT_CLAIM" as const, reply: "ignored", claimNumber: "BX20261026-0007" }) },
+    findOwnedClaimByNumber: async () => ({ id: "older-draft", claimNumber: "BX20261026-0007", status: "DRAFT", purpose: "旧差旅", version: 3, currency: "CNY", totalAmountCent: null }),
+    readWorkbench: async () => ({ claim: { id: "older-draft", claimNumber: "BX20261026-0007", status: "DRAFT", purpose: "旧差旅", version: 3, currency: "CNY", totalAmountCent: null }, receipts: [] }),
+  });
+  const setSelectedEditClaimId = vi.fn(async () => undefined);
+  setup.deps.conversations = { ...setup.deps.conversations, setSelectedEditClaimId } as never;
+  await setup.deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "current-draft" });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "编辑 BX20261026-0007" }, setup.deps);
+  expect(result.reply).toContain("BX20261026-0007");
+  expect(setSelectedEditClaimId).toHaveBeenCalledWith({ conversationId: "conversation-1", claimId: "older-draft" });
+  expect(setup.getIntake()?.claimId).toBe("current-draft");
+});
+
+it("invalidates an old Intake submission confirmation when edit target changes", async () => {
+  const setup = createDeps({
+    model: { decideConversation: async () => ({ action: "SELECT_EDIT_CLAIM" as const, reply: "ignored", claimNumber: "BX20261026-0007" }) },
+    findOwnedClaimByNumber: async () => ({ id: "older-draft", claimNumber: "BX20261026-0007", status: "DRAFT", purpose: "旧差旅", version: 3, currency: "CNY", totalAmountCent: null }),
+    readWorkbench: async () => ({ claim: { id: "older-draft", claimNumber: "BX20261026-0007", status: "DRAFT", purpose: "旧差旅", version: 3, currency: "CNY", totalAmountCent: null }, receipts: [] }),
+  });
+  setup.deps.conversations = { ...setup.deps.conversations, setSelectedEditClaimId: vi.fn(async () => undefined) } as never;
+  await setup.deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "current-draft", status: "READY_TO_SUBMIT", submissionToken: "old-token" });
+  await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "编辑 BX20261026-0007" }, setup.deps);
+  expect(setup.getIntake()?.submissionToken).toBeNull();
+  await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "确认提交" }, setup.deps);
+  expect(setup.submitClaim).not.toHaveBeenCalled();
+});
+
+it("cannot select a submitted or inaccessible claim for editing", async () => {
+  for (const found of [null, { id: "submitted", claimNumber: "BX20261026-0007", status: "SUBMITTED", purpose: "旧单", version: 2, currency: "CNY", totalAmountCent: null }]) {
+    const setup = createDeps({ model: { decideConversation: async () => ({ action: "SELECT_EDIT_CLAIM" as const, reply: "ignored", claimNumber: "BX20261026-0007" }) }, findOwnedClaimByNumber: async () => found });
+    const setSelectedEditClaimId = vi.fn(async () => undefined);
+    setup.deps.conversations = { ...setup.deps.conversations, setSelectedEditClaimId } as never;
+    const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "编辑 BX20261026-0007" }, setup.deps);
+    expect(result.reply).not.toContain("已选中");
+    expect(setSelectedEditClaimId).not.toHaveBeenCalledWith(expect.objectContaining({ claimId: "submitted" }));
+  }
 });
 
 it("gives the same safe reply for a missing or foreign business number", async () => {

@@ -164,6 +164,13 @@ export class AgentConversationRepository {
     });
   }
 
+  async setSelectedEditClaimId(input: { conversationId: string; claimId: string | null }): Promise<void> {
+    await this.prisma.agentConversation.update({
+      where: { id: input.conversationId },
+      data: { selectedEditClaimId: input.claimId },
+    });
+  }
+
   async setSearchState(input: { conversationId: string; state: import("@/src/application/claim-search").ClaimSearchState | null }): Promise<void> {
     await this.prisma.agentConversation.update({
       where: { id: input.conversationId },
