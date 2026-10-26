@@ -32,6 +32,16 @@ export function writeTargetIsAmbiguous(input: {
   targetReference?: "CURRENT_INTAKE";
 }): boolean {
   if (input.targetReference === "CURRENT_INTAKE") return false;
-  if (input.selectedEditClaimId && input.selectedEditClaimId !== input.intakeClaimId) return true;
+  if (input.selectedEditClaimId) return false;
   return Boolean(input.selectedReadClaimId && input.intakeClaimId && input.selectedReadClaimId !== input.intakeClaimId);
+}
+
+export async function resolveSelectedDraft(input: {
+  actorId: string;
+  claimId: string;
+  readWorkbench?: (input: { actorId: string; claimId: string }) => Promise<{ claim: ClaimSnapshot; receipts: ReceiptSnapshot[] }>;
+}): Promise<ClaimSnapshot | null> {
+  if (!input.readWorkbench) return null;
+  const workbench = await input.readWorkbench({ actorId: input.actorId, claimId: input.claimId });
+  return workbench.claim.id === input.claimId && workbench.claim.status === "DRAFT" ? workbench.claim : null;
 }

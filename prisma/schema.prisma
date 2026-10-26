@@ -329,6 +329,7 @@ model AgentConversation {
   latestFeishuChatId     String?
   selectedReadClaimId    String?
   selectedEditClaimId    String?
+  pendingAction          Json?
   searchState            Json?
   summary                String                @default("")
   summaryThroughSequence Int                   @default(0)

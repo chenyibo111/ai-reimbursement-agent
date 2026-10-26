@@ -2,6 +2,15 @@ import { expect, it, vi } from "vitest";
 
 import { ReimbursementApiClient, ReimbursementApiHttpError } from "./reimbursement-api-client";
 
+it("sends a versioned receipt deletion and accepts a 204 response", async () => {
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+  const client = new ReimbursementApiClient({ baseUrl: "http://go.test", serviceKey: "key", signingSecret: "secret", fetcher });
+  const context = { actorEmployeeId: "employee-1", actorRole: "EMPLOYEE" as const, channel: "FEISHU" as const, conversationId: "conversation-1", toolCallId: "delete-1", idempotencyKey: "delete-1" };
+  await expect(client.deleteOwnedReceipt({ ...context, claimId: "claim-1", receiptId: "receipt-2", expectedClaimVersion: 3 })).resolves.toBeUndefined();
+  expect(fetcher.mock.calls[0][0]).toBe("http://go.test/api/v1/claims/claim-1/receipts/receipt-2?expectedClaimVersion=3");
+  expect(fetcher.mock.calls[0][1]?.method).toBe("DELETE");
+});
+
 it("preserves Go's safe error code and HTTP status for state-machine decisions", async () => {
   const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ code: "VERSION_CONFLICT", message: "claim changed", requestId: "req-1" }, { status: 409 }));
   const client = new ReimbursementApiClient({ baseUrl: "http://go.test", serviceKey: "key", signingSecret: "secret", fetcher });

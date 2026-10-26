@@ -116,6 +116,18 @@ it("routes private policy questions into the shared private conversation without
   expect(result.replyText).toContain("/claims");
 });
 
+it("links the selected older draft instead of the unrelated active Intake", async () => {
+  const base = fixture();
+  const result = await processFeishuEvent({ eventId: "event-1" }, {
+    ...base.deps,
+    runConversationTurn: async () => ({ reply: "已保存到旧单。", citations: [], intake: { id: "intake-1", employeeId: "employee-1", conversationId: "private-employee-1", status: "COLLECTING", claimId: "new-intake", collectedFields: {}, pendingFields: [], submissionToken: null }, targetClaimId: "older-draft" }),
+  });
+  if (result.kind !== "AGENT_REPLIED") throw new Error("agent reply expected");
+  expect(result.claimId).toBe("older-draft");
+  expect(result.replyText).toContain("/claims/older-draft");
+  expect(result.replyText).not.toContain("/claims/new-intake");
+});
+
 it("uses a per-employee group conversation only for mentioned group messages", async () => {
   const { deps, calls } = fixture({
     events: {

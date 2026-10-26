@@ -32,6 +32,7 @@ export async function POST(request: Request) {
       preflightAttachment: async () => {},
       createClaim: ({ purpose }) => tools.createClaim(context, purpose),
       uploadReceipt: async (input) => { const receipt = await tools.uploadReceipt(context, input.claimId, { filename: input.filename, mimeType: input.mimeType, bytes: input.bytes }); return { id: receipt.receiptId }; },
+      readWorkbench: ({ claimId }) => tools.readWorkbench(context, claimId),
     });
     return NextResponse.json(result, { status: 201 });
   } catch (error) {

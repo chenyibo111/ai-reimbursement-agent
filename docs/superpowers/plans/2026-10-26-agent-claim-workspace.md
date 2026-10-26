@@ -91,11 +91,11 @@
 
 **Interfaces:** `COLLECT_FIELDS`、附件上传先调用 `resolveWriteTarget`；`delete_owned_receipt(context,{claimId,receiptId,expectedClaimVersion})` 调扩展后的 Go 删除接口；一次性 `pendingAction{kind:'DELETE_RECEIPT',claimId,claimVersion,receiptId,expiresAt}`。
 
-- [ ] **Step 1: 写失败测试。** 选中 A 后补四字段/上传只影响 A，Intake B 保留；无明确目标不上传；两张同名票据中“删除第二张”只预览第二个 `receiptId`，确认后删一次；并发 Web 改动使确认失效；对象删除失败留下可重试清理而不是含文件的失效票据；新文件上传失败不删除旧文件。
-- [ ] **Step 2: 验证红灯。** 定向运行 Agent 网关、`run-conversation-turn` 与飞书附件测试，新增测试失败。
-- [ ] **Step 3: 实现最小代码。** 写入继续用 Go 版本 PATCH 与回读确认；票据删除需单号/文件/稳定 ID 预览和限时确认。Go 以 claim 版本/草稿状态的事务检查先删除或标记票据并持久化对象清理任务，再异步幂等删对象，不再先删对象后写库；所有变更清除旧提交准备，金额等不可聊改字段给目标 Web 链接。
-- [ ] **Step 4: 验证绿灯。** 定向 Node/Agent 测试与 Go 票据测试通过。
-- [ ] **Step 5: 提交。** `feat(agent): manage receipts and fields on selected draft`。
+- [x] **Step 1: 写失败测试。** 选中 A 后补四字段/上传只影响 A，Intake B 保留；无明确目标不上传；两张同名票据中“删除第二张”只预览第二个 `receiptId`，确认后删一次；并发 Web 改动使确认失效；对象删除失败留下可重试清理而不是含文件的失效票据；新文件上传失败不删除旧文件。
+- [x] **Step 2: 验证红灯。** 定向运行 Agent 网关、`run-conversation-turn` 与飞书附件测试，新增测试失败。
+- [x] **Step 3: 实现最小代码。** 写入继续用 Go 版本 PATCH 与回读确认；票据删除需单号/文件/稳定 ID 预览和限时确认。Go 以 claim 版本/草稿状态的事务检查先删除或标记票据并持久化对象清理任务，再异步幂等删对象，不再先删对象后写库；所有变更清除旧提交准备，金额等不可聊改字段给目标 Web 链接。
+- [x] **Step 4: 验证绿灯。** 定向 Node/Agent 测试与 Go 票据测试通过。
+- [x] **Step 5: 提交。** `feat(agent): manage receipts and fields on selected draft`。
 
 ### Task 6: 删除本人草稿
 

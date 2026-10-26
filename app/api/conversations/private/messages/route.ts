@@ -42,6 +42,7 @@ export async function POST(request: Request) {
         createClaim: ({ purpose }) => tools.createClaim(context, purpose),
         updateFields: ({ claimId, fields }) => tools.updateFields(context, claimId, fields),
         readWorkbench: ({ claimId }) => tools.readWorkbench(context, claimId),
+        deleteReceipt: ({ claimId, receiptId, expectedClaimVersion }) => tools.deleteReceipt(context, claimId, receiptId, expectedClaimVersion),
         listOwnedClaims: ({ limit }) => tools.listOwnedClaims(context, limit),
         searchOwnedClaims: ({ query }) => tools.searchOwnedClaims(context, query),
         findOwnedClaimByNumber: ({ claimNumber }) => tools.findOwnedClaimByNumber(context, claimNumber),

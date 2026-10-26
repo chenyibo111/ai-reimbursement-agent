@@ -52,6 +52,15 @@ describe("createConversationReimbursementTools", () => {
     expect(execute.mock.calls[0][0]).toMatchObject({ name: "get_claim_workbench", actorEmployeeId: "employee-1", arguments: { claimId: "claim-1" } });
   });
 
+  it("keeps an existing same-name receipt when a replacement upload fails", async () => {
+    const execute = vi.fn().mockResolvedValueOnce({ upload: { receiptId: "new-receipt", uploadUrl: "http://storage.test/new" } });
+    const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
+    const tools = createConversationReimbursementTools({ execute } as never, fetcher);
+    await expect(tools.uploadReceipt(context, "claim-1", { filename: "invoice.pdf", mimeType: "application/pdf", bytes: new Uint8Array([1]) })).rejects.toThrow("receipt upload failed");
+    expect(execute.mock.calls.map(([call]) => call.name)).toEqual(["create_upload_session"]);
+    expect(execute.mock.calls.some(([call]) => call.name === "delete_owned_receipt")).toBe(false);
+  });
+
   it("does not reuse a cached workbench for another claim in the same turn", async () => {
     const execute = vi.fn().mockResolvedValue({ workbench: { claim: { id: "claim-1" }, receipts: [] } });
     const tools = createConversationReimbursementTools({ execute } as never);

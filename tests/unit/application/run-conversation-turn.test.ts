@@ -215,6 +215,90 @@ it("creates one agent-owned claim on the first attachment and reuses it for late
   expect(getIntake()).toMatchObject({ claimId: "agent-claim-1" });
 });
 
+it("writes fields and uploads attachments to the selected older draft without changing the active Intake", async () => {
+  const setup = createDeps();
+  await setup.deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "new-intake", collectedFields: { purpose: "新单事由" } });
+  const oldClaim = { id: "older-draft", claimNumber: "BX20261026-0007", version: 3, status: "DRAFT", purpose: "旧事由", totalAmountCent: null, currency: "CNY" as const };
+  const readWorkbench = vi.fn(async ({ claimId }: { claimId: string }) => ({ claim: claimId === "new-intake" ? { ...oldClaim, id: "new-intake", purpose: "新单事由" } : oldClaim, receipts: [] }));
+  const updateFields = vi.fn(async ({ claimId, fields }: { claimId: string; fields: ClaimFieldPatch }) => ({ ...oldClaim, id: claimId, ...fields }));
+  const deps = { ...setup.deps, readWorkbench, updateFields,
+    conversations: { ...setup.deps.conversations, getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0, selectedEditClaimId: "older-draft" }) },
+    model: { decideConversation: async () => ({ action: "COLLECT_FIELDS" as const, reply: "", fields: { purpose: "旧单更新", expenseCategory: "交通", participants: ["张三"], projectCode: "P-001" } }) },
+  };
+  await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "修改事由" }, deps);
+  await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "上传", attachment: { filename: "a.png", mimeType: "image/png", bytes: new Uint8Array([1]) } }, deps);
+  expect(updateFields).toHaveBeenCalledWith(expect.objectContaining({ claimId: "older-draft" }));
+  expect(setup.uploadReceipt).toHaveBeenCalledWith(expect.objectContaining({ claimId: "older-draft" }));
+  expect(setup.getIntake()?.claimId).toBe("new-intake");
+  expect(setup.getIntake()?.collectedFields.purpose).toBe("新单事由");
+});
+
+it("previews the exact second same-name receipt and deletes it once after confirmation", async () => {
+  const setup = createDeps();
+  let pendingAction: unknown = null;
+  const receipts = ["receipt-1", "receipt-2"].map((id) => ({ id, claimId: "older-draft", filename: "invoice.pdf", status: "EXTRACTED", invoiceNumber: id, ocrConfidence: 0.9, totalAmountCent: 1000 }));
+  const claim = { id: "older-draft", claimNumber: "BX20261026-0007", version: 3, status: "DRAFT", purpose: "旧事由", totalAmountCent: 2000, currency: "CNY" as const };
+  const deleteReceipt = vi.fn(async () => undefined);
+  const deps = { ...setup.deps,
+    conversations: { ...setup.deps.conversations,
+      getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0, selectedEditClaimId: "older-draft", pendingAction }),
+      setPendingAction: vi.fn(async ({ action }: { action: unknown }) => { pendingAction = action; }),
+    },
+    model: { decideConversation: async () => ({ action: "DELETE_RECEIPT" as const, reply: "", receiptOrdinal: 2 }) },
+    readWorkbench: vi.fn(async () => ({ claim, receipts })),
+    deleteReceipt,
+  };
+  const preview = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "删除第二张票据" }, deps);
+  expect(preview.reply).toContain("receipt-2");
+  expect(deleteReceipt).not.toHaveBeenCalled();
+  await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "确认删除票据" }, deps);
+  expect(deleteReceipt).toHaveBeenCalledTimes(1);
+  expect(deleteReceipt).toHaveBeenCalledWith({ actorId: "employee-1", claimId: "older-draft", receiptId: "receipt-2", expectedClaimVersion: 3 });
+  await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "确认删除票据" }, deps);
+  expect(deleteReceipt).toHaveBeenCalledTimes(1);
+});
+
+it("edits a selected old draft even without a current Intake", async () => {
+  const setup = createDeps();
+  const updateFields = vi.fn(async ({ claimId, fields }: { claimId: string; fields: ClaimFieldPatch }) => ({ id: claimId, claimNumber: "BX20261026-0007", version: 4, status: "DRAFT", purpose: fields.purpose ?? null, totalAmountCent: null, currency: "CNY" as const }));
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "补事由" }, {
+    ...setup.deps, updateFields,
+    conversations: { ...setup.deps.conversations, getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0, selectedEditClaimId: "older-draft" }) },
+    readWorkbench: async () => ({ claim: { id: "older-draft", claimNumber: "BX20261026-0007", version: 3, status: "DRAFT", purpose: "", totalAmountCent: null, currency: "CNY" }, receipts: [] }),
+    model: { decideConversation: async () => ({ action: "COLLECT_FIELDS" as const, reply: "", fields: { purpose: "已补" } }) },
+  });
+  expect(result.reply).toContain("BX20261026-0007");
+  expect(updateFields).toHaveBeenCalledTimes(1);
+  expect(setup.createIntake).not.toHaveBeenCalled();
+});
+
+it("does not upload to the Intake when only a different claim was read", async () => {
+  const setup = createDeps();
+  await setup.deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "new-intake" });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "上传发票", attachment: { filename: "a.png", mimeType: "image/png", bytes: new Uint8Array([1]) } }, {
+    ...setup.deps,
+    conversations: { ...setup.deps.conversations, getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0, selectedReadClaimId: "older-draft" }) },
+  });
+  expect(result.reply).toContain("请先明确选择");
+  expect(setup.uploadReceipt).not.toHaveBeenCalled();
+  expect(setup.getIntake()?.claimId).toBe("new-intake");
+});
+
+it("rejects a receipt deletion confirmation after the claim version changes", async () => {
+  const setup = createDeps();
+  const deleteReceipt = vi.fn(async () => undefined);
+  const action = { kind: "DELETE_RECEIPT", claimId: "older-draft", claimVersion: 3, receiptId: "receipt-2", expiresAt: new Date(Date.now() + 60_000).toISOString() };
+  const setPendingAction = vi.fn(async () => undefined);
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "确认删除票据" }, {
+    ...setup.deps, deleteReceipt,
+    conversations: { ...setup.deps.conversations, getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0, pendingAction: action }), setPendingAction },
+    readWorkbench: async () => ({ claim: { id: "older-draft", claimNumber: "BX20261026-0007", version: 4, status: "DRAFT", purpose: "", totalAmountCent: null, currency: "CNY" }, receipts: [{ id: "receipt-2", claimId: "older-draft", filename: "invoice.pdf", status: "EXTRACTED", invoiceNumber: "2", ocrConfidence: 0.9, totalAmountCent: 1000 }] }),
+  });
+  expect(result.reply).toContain("已失效");
+  expect(deleteReceipt).not.toHaveBeenCalled();
+  expect(setPendingAction).toHaveBeenCalledWith({ conversationId: "conversation-1", action: null });
+});
+
 it("passes an OCR notification target only for a Feishu attachment with a verified chat target", async () => {
   const { deps, uploadReceipt } = createDeps();
   const attachment = { filename: "invoice.png", mimeType: "image/png", bytes: new Uint8Array([1, 2, 3]) };

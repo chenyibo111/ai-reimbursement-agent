@@ -7,9 +7,10 @@ import type { ClaimFieldPatch, ClaimSnapshot, ReceiptSnapshot, ValidationSnapsho
 import { ReimbursementApiHttpError } from "@/services/agent/src/adapters/reimbursement-api-client";
 import { formatClaimSearchPage, normalizeClaimSearch, readClaimSearchState } from "@/src/application/claim-search";
 import type { OwnedClaimSearchPage, OwnedClaimSearchQuery } from "@/services/agent/src/ports/reimbursement-port";
-import { selectOwnedEditClaim, writeTargetIsAmbiguous } from "@/src/application/claim-target";
+import { resolveSelectedDraft, selectOwnedEditClaim, writeTargetIsAmbiguous } from "@/src/application/claim-target";
+import { readPendingAction, type PendingAction } from "@/src/application/pending-action";
 
-type ConversationRecord = { id: string; summary: string; summaryThroughSequence: number; selectedReadClaimId?: string | null; selectedEditClaimId?: string | null; searchState?: unknown };
+type ConversationRecord = { id: string; summary: string; summaryThroughSequence: number; selectedReadClaimId?: string | null; selectedEditClaimId?: string | null; searchState?: unknown; pendingAction?: unknown };
 type ConversationMessage = { id?: string; sequence: number; role: AgentMessageRole; channel: AgentMessageChannel; text: string; citations?: unknown; result?: unknown };
 type IntakeRecord = {
   id: string;
@@ -38,6 +39,8 @@ export type ConversationStore = {
   setSelectedReadClaimId?(input: { conversationId: string; claimId: string | null }): Promise<void>;
   setSelectedEditClaimId?(input: { conversationId: string; claimId: string | null }): Promise<void>;
   setSearchState?(input: { conversationId: string; state: import("@/src/application/claim-search").ClaimSearchState | null }): Promise<void>;
+  setPendingAction?(input: { conversationId: string; action: PendingAction | null }): Promise<void>;
+  consumePendingAction?(input: { conversationId: string; action: PendingAction }): Promise<boolean>;
 };
 
 export type RunConversationTurnDeps = {
@@ -51,6 +54,7 @@ export type RunConversationTurnDeps = {
   updatePurpose?: (input: { actorId: string; claimId: string; value: string }) => Promise<{ version: number }>;
   updateFields?: (input: { actorId: string; claimId: string; fields: ClaimFieldPatch }) => Promise<ClaimSnapshot>;
   readWorkbench?: (input: { actorId: string; claimId: string }) => Promise<{ claim: ClaimSnapshot; receipts: ReceiptSnapshot[] }>;
+  deleteReceipt?: (input: { actorId: string; claimId: string; receiptId: string; expectedClaimVersion: number }) => Promise<void>;
   listOwnedClaims?: (input: { actorId: string; limit: number }) => Promise<ClaimSnapshot[]>;
   searchOwnedClaims?: (input: { actorId: string; query: OwnedClaimSearchQuery }) => Promise<OwnedClaimSearchPage>;
   findOwnedClaimByNumber?: (input: { actorId: string; claimNumber: string }) => Promise<ClaimSnapshot | null>;
@@ -64,6 +68,7 @@ export type ConversationTurnResult = {
   citations: PolicyCitation[];
   intake: IntakeRecord | null;
   submissionNumber?: string;
+  targetClaimId?: string;
 };
 
 export async function runConversationTurn(
@@ -94,7 +99,12 @@ export async function runConversationTurn(
   if (attachment && input.channel === "FEISHU" && input.chatType !== "p2p") {
     return persistReply(input, null, "为保护报销信息，请私聊机器人或在 Web 工作台上传票据。", [], deps.conversations);
   }
-  if (attachment) return handleAttachment({ ...input, attachment }, active, deps);
+  if (message === "确认删除票据") {
+    if (input.channel === "FEISHU" && input.chatType !== "p2p") return persistReply(input, null, "请私聊机器人办理票据删除。", [], deps.conversations);
+    return confirmReceiptDeletion(input, active, conversation.pendingAction, deps);
+  }
+  if (conversation.pendingAction) await deps.conversations.setPendingAction?.({ conversationId: input.conversationId, action: null });
+  if (attachment) return handleAttachment({ ...input, attachment }, active, deps, conversation.selectedReadClaimId ?? null, conversation.selectedEditClaimId ?? null);
   if (message === "确认提交" && input.channel === "FEISHU" && input.chatType !== "p2p") {
     return persistReply(input, null, "为保护报销信息，请私聊机器人或在 Web 工作台发起并确认提交。", [], deps.conversations);
   }
@@ -153,9 +163,22 @@ async function handleAttachment(
   input: { actorId: string; conversationId: string; channel: AgentMessageChannel; chatId?: string; channelMessageId?: string; attachment: { filename: string; mimeType: string; bytes: Uint8Array } },
   active: IntakeRecord | null,
   deps: RunConversationTurnDeps,
+  selectedReadClaimId: string | null,
+  selectedEditClaimId: string | null,
 ): Promise<ConversationTurnResult> {
   if (!deps.createClaim || !deps.preflightAttachment || !deps.uploadReceipt) throw new Error("attachment handling is unavailable");
   await deps.preflightAttachment(input.attachment);
+  if (selectedEditClaimId) {
+    try {
+      const selected = await resolveSelectedDraft({ actorId: input.actorId, claimId: selectedEditClaimId, readWorkbench: deps.readWorkbench });
+      if (!selected) return persistReply(input, active, "选中的草稿已变化或不可办理，请重新选择报销单后上传。", [], deps.conversations);
+      const safe = active ? await clearSubmissionPreparation(active, deps.conversations) : null;
+      await deps.uploadReceipt({ actorId: input.actorId, claimId: selected.id, ...input.attachment,
+        ...(input.channel === "FEISHU" && input.chatId ? { notificationTarget: { conversationId: input.conversationId, chatId: input.chatId } } : {}) });
+      return persistReply(input, safe, `票据已上传到 ${selected.claimNumber}，进入识别流程。`, [], deps.conversations, undefined, selected.id);
+    } catch { return persistReply(input, active, "选中的草稿无法核验，本次票据未确认上传。请重新选择后重试。", [], deps.conversations); }
+  }
+  if (selectedReadClaimId && selectedReadClaimId !== active?.claimId) return persistReply(input, active, "当前查看的单据与正在办理的草稿不同。请先明确选择要编辑的草稿，再上传票据。", [], deps.conversations);
   let intake = active;
   if (!intake) {
     try {
@@ -257,13 +280,26 @@ async function applyDecision(
   selectedEditClaimId: string | null,
   rawSearchState: unknown,
 ): Promise<ConversationTurnResult> {
-  if (input.channel === "FEISHU" && input.chatType !== "p2p" && ["START_INTAKE", "COLLECT_FIELDS", "LIST_CLAIMS", "SEARCH_CLAIMS", "NEXT_CLAIMS_PAGE", "SELECT_EDIT_CLAIM", "READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPARE_SUBMISSION"].includes(decision.action)) {
+  if (input.channel === "FEISHU" && input.chatType !== "p2p" && ["START_INTAKE", "COLLECT_FIELDS", "LIST_CLAIMS", "SEARCH_CLAIMS", "NEXT_CLAIMS_PAGE", "SELECT_EDIT_CLAIM", "DELETE_RECEIPT", "READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPARE_SUBMISSION"].includes(decision.action)) {
     return persistReply(input, null, "为保护报销信息，请私聊机器人或在 Web 工作台办理、查询与提交。", [], deps.conversations);
   }
   if (decision.action === "START_INTAKE") return startIntake(input, intake, deps);
   if (decision.action === "CLARIFY") return persistReply(input, intake, clarificationReply(decision.clarificationReason), [], deps.conversations);
   if (decision.action === "OUT_OF_SCOPE") return persistReply(input, intake, "我目前只能协助报销政策问答、票据和报销单办理；其他事项请使用相应服务。", [], deps.conversations);
   if (decision.action === "HELP") return persistReply(input, intake, helpReply(), [], deps.conversations);
+  if (decision.action === "DELETE_RECEIPT") {
+    if (!selectedEditClaimId || !deps.readWorkbench || !deps.conversations.setPendingAction || !deps.deleteReceipt) return persistReply(input, intake, "请先明确选中本人草稿，再指定要删除的票据序号。", [], deps.conversations);
+    try {
+      const workbench = await deps.readWorkbench({ actorId: input.actorId, claimId: selectedEditClaimId });
+      if (workbench.claim.id !== selectedEditClaimId || workbench.claim.status !== "DRAFT") return persistReply(input, intake, "当前草稿不可办理，请重新选择。", [], deps.conversations);
+      const ordinal = decision.receiptOrdinal;
+      if (!ordinal || ordinal > workbench.receipts.length) return persistReply(input, intake, `请指定票据序号。当前单据有 ${workbench.receipts.length} 张票据：${workbench.receipts.map((item, index) => `${index + 1}. ${item.filename}（${item.id}）`).join("；")}`, [], deps.conversations);
+      const receipt = workbench.receipts[ordinal - 1];
+      await deps.conversations.setPendingAction({ conversationId: input.conversationId, action: { kind: "DELETE_RECEIPT", claimId: selectedEditClaimId, claimVersion: workbench.claim.version, receiptId: receipt.id, expiresAt: new Date(Date.now() + 5 * 60_000).toISOString() } });
+      const safe = intake ? await clearSubmissionPreparation(intake, deps.conversations) : null;
+      return persistReply(input, safe, `即将从 ${workbench.claim.claimNumber} 删除第 ${ordinal} 张票据：${receipt.filename}（票据 ID：${receipt.id}，发票号码：${receipt.invoiceNumber || "未识别"}）。请在 5 分钟内回复“确认删除票据”。`, [], deps.conversations, undefined, selectedEditClaimId);
+    } catch { return persistReply(input, intake, "无法核验选中的票据，本次未删除。请重新选择后重试。", [], deps.conversations); }
+  }
   if (decision.action === "SEARCH_CLAIMS") {
     await deps.conversations.setSearchState?.({ conversationId: input.conversationId, state: null });
     if (!deps.searchOwnedClaims || !deps.conversations.setSearchState) return persistReply(input, intake, "报销查询暂不可用，请稍后重试。", [], deps.conversations);
@@ -349,9 +385,21 @@ async function applyDecision(
   }
   if (decision.action === "COLLECT_FIELDS") {
     if (writeTargetIsAmbiguous({ intakeClaimId: intake?.claimId, selectedReadClaimId, selectedEditClaimId, targetReference: decision.targetReference })) return persistReply(input, intake, "当前查询的单据与正在办理的草稿不同。请明确要办理的报销单号，或说明“修改当前草稿”。", [], deps.conversations);
-    if (!intake) return persistReply(input, null, "请先输入“开始报销”或上传票据，再补充报销信息。", [], deps.conversations);
     const fields = validFieldPatch(decision.fields);
-    if (!fields) return persistReply(input, intake, "这项信息不能在对话中保存；金额、币种和备注请到 Web 工作台填写。", [], deps.conversations);
+    if (!fields) return persistReply(input, intake, "这项信息不能在对话中保存；金额、币种和备注请到 Web 工作台填写。", [], deps.conversations, undefined, selectedEditClaimId ?? intake?.claimId ?? undefined);
+    if (selectedEditClaimId && decision.targetReference !== "CURRENT_INTAKE") {
+      if (!deps.updateFields) return persistReply(input, intake, "报销服务暂不可用，未确认写入。", [], deps.conversations);
+      const safe = intake ? await clearSubmissionPreparation(intake, deps.conversations) : null;
+      try {
+        const target = await resolveSelectedDraft({ actorId: input.actorId, claimId: selectedEditClaimId, readWorkbench: deps.readWorkbench });
+        if (!target) return persistReply(input, safe, "选中的草稿已变化，请重新选择后修改。", [], deps.conversations);
+        const actual = await deps.updateFields({ actorId: input.actorId, claimId: target.id, fields });
+        const verified = Object.entries(fields).every(([name, value]) => JSON.stringify(actual[name as keyof ClaimSnapshot]) === JSON.stringify(value));
+        if (!verified) return persistReply(input, safe, "字段写入结果与报销单回读不一致，请到工作台核对。", [], deps.conversations);
+        return persistReply(input, safe, `已保存到 ${target.claimNumber}。`, [], deps.conversations, undefined, target.id);
+      } catch { return persistReply(input, safe, "选中的草稿无法核验或已经变化，本次字段未确认写入。", [], deps.conversations); }
+    }
+    if (!intake) return persistReply(input, null, "请先输入“开始报销”或上传票据，再补充报销信息。", [], deps.conversations);
     if (!deps.createClaim || !deps.updateFields) return persistReply(input, intake, "报销服务暂不可用，未确认写入。请稍后重试。", [], deps.conversations);
     let bound = intake;
     if (!bound.claimId) {
@@ -436,6 +484,28 @@ function validFieldPatch(value: ConversationDecision["fields"]): ClaimFieldPatch
     } else return null;
   }
   return fields;
+}
+
+async function confirmReceiptDeletion(
+  input: { actorId: string; conversationId: string; channel: AgentMessageChannel; channelMessageId?: string },
+  intake: IntakeRecord | null,
+  rawAction: unknown,
+  deps: RunConversationTurnDeps,
+): Promise<ConversationTurnResult> {
+  const pending = readPendingAction(rawAction);
+  if (pending && deps.conversations.consumePendingAction) {
+    if (!await deps.conversations.consumePendingAction({ conversationId: input.conversationId, action: pending })) return persistReply(input, intake, "票据删除确认已经使用或已失效，请重新核对。", [], deps.conversations);
+  } else {
+    await deps.conversations.setPendingAction?.({ conversationId: input.conversationId, action: null });
+  }
+  if (!pending || !deps.readWorkbench || !deps.deleteReceipt) return persistReply(input, intake, "当前没有有效的票据删除确认。请重新指定报销单和票据。", [], deps.conversations);
+  try {
+    const current = await deps.readWorkbench({ actorId: input.actorId, claimId: pending.claimId });
+    if (current.claim.status !== "DRAFT" || current.claim.version !== pending.claimVersion || !current.receipts.some((item) => item.id === pending.receiptId)) return persistReply(input, intake, "单据或票据已变化，删除确认已失效。请重新核对。", [], deps.conversations);
+    await deps.deleteReceipt({ actorId: input.actorId, claimId: pending.claimId, receiptId: pending.receiptId, expectedClaimVersion: pending.claimVersion });
+    const safe = intake ? await clearSubmissionPreparation(intake, deps.conversations) : null;
+    return persistReply(input, safe, `已从 ${current.claim.claimNumber} 删除票据 ${pending.receiptId}。附件对象将由后台清理。`, [], deps.conversations, undefined, pending.claimId);
+  } catch { return persistReply(input, intake, "删除未确认完成，或单据已变化。请在工作台核对后重新发起。", [], deps.conversations); }
 }
 
 async function confirmSubmission(
@@ -563,6 +633,7 @@ async function persistReply(
   citations: PolicyCitation[],
   conversations: ConversationStore,
   submissionNumber?: string,
+  targetClaimId?: string,
 ): Promise<ConversationTurnResult> {
   await conversations.appendMessage({
     conversationId: input.conversationId,
@@ -571,15 +642,15 @@ async function persistReply(
     inReplyToChannelMessageId: input.channelMessageId,
     text: reply,
     citations: citations.map(({ id, title, url, excerpt, headingPath, score }) => ({ id, title, url, excerpt, headingPath, score })),
-    result: { intakeId: intake?.id ?? null, claimId: intake?.claimId ?? null, submissionNumber: submissionNumber ?? null },
+    result: { intakeId: intake?.id ?? null, claimId: targetClaimId ?? intake?.claimId ?? null, submissionNumber: submissionNumber ?? null },
   });
-  return { reply, citations, intake, ...(submissionNumber ? { submissionNumber } : {}) };
+  return { reply, citations, intake, ...(submissionNumber ? { submissionNumber } : {}), ...(targetClaimId ? { targetClaimId } : {}) };
 }
 
 async function replayPersistedTurn(assistant: ConversationMessage): Promise<ConversationTurnResult> {
   const result = isRecord(assistant.result) ? assistant.result : {};
   const submissionNumber = typeof result.submissionNumber === "string" ? result.submissionNumber : undefined;
-  return { reply: assistant.text, citations: asPolicyCitations(assistant.citations), intake: null, ...(submissionNumber ? { submissionNumber } : {}) };
+  return { reply: assistant.text, citations: asPolicyCitations(assistant.citations), intake: null, ...(submissionNumber ? { submissionNumber } : {}), ...(typeof result.claimId === "string" ? { targetClaimId: result.claimId } : {}) };
 }
 
 function asPolicyCitations(value: unknown): PolicyCitation[] {

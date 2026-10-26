@@ -33,6 +33,9 @@ export class ReimbursementApiClient implements ReimbursementPort {
   createClaimDraft(input: ToolCallContext & { purpose: string }) { return this.request<ClaimSnapshot>(input, "/api/v1/claims", "POST", { purpose: input.purpose }); }
   createUploadSession(input: ToolCallContext & { claimId: string; filename: string; contentType: string; sizeBytes: number }) { return this.request<{ receiptId: string; uploadUrl: string }>(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}/uploads`, "POST", { filename: input.filename, contentType: input.contentType, sizeBytes: input.sizeBytes }); }
   finalizeReceiptUpload(input: ToolCallContext & { claimId: string; receiptId: string }) { return this.request<{ receiptId: string; status: string }>(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}/receipts`, "POST", { receiptId: input.receiptId }); }
+  async deleteOwnedReceipt(input: ToolCallContext & { claimId: string; receiptId: string; expectedClaimVersion: number }): Promise<void> {
+    await this.request(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}/receipts/${encodeURIComponent(input.receiptId)}?expectedClaimVersion=${input.expectedClaimVersion}`, "DELETE");
+  }
   async getClaimWorkbench(input: ToolCallContext & { claimId: string }) {
     const path = `/api/v1/claims/${encodeURIComponent(input.claimId)}`;
     const [claim, receipts] = await Promise.all([this.request<ClaimSnapshot>(input, path, "GET"), this.request<{ items: ReceiptSnapshot[] }>(input, `${path}/receipts`, "GET")]);
@@ -70,7 +73,7 @@ export class ReimbursementApiClient implements ReimbursementPort {
 
   private async request<T>(context: ToolCallContext, path: string, method: string, body?: unknown): Promise<T> {
     const response = await this.fetcher(`${this.baseUrl}${path}`, { method, headers: { "Accept": "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json" }), "Authorization": `Bearer ${this.token(context)}`, "X-Agent-Service-Key": this.options.serviceKey, "Idempotency-Key": context.idempotencyKey }, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
-    const payload = await response.json().catch(() => ({}));
+    const payload = response.status === 204 ? {} : await response.json().catch(() => ({}));
     if (!response.ok) throw new ReimbursementApiHttpError(typeof payload.message === "string" ? payload.message : "报销服务暂不可用", response.status, typeof payload.code === "string" ? payload.code : undefined);
     return payload as T;
   }

@@ -6,7 +6,7 @@ import { buildConversationContext, type ConversationContext } from "@/src/applic
 import { conversationCollectedFieldNames } from "@/src/domain/agent-conversation";
 import type { ConversationAction, ConversationDecision } from "@/src/infrastructure/model/chat-model";
 
-export const intentActions = ["POLICY_QUERY", "START_INTAKE", "COLLECT_FIELDS", "LIST_CLAIMS", "SEARCH_CLAIMS", "NEXT_CLAIMS_PAGE", "SELECT_EDIT_CLAIM", "READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPARE_SUBMISSION", "HELP", "CLARIFY", "OUT_OF_SCOPE"] as const satisfies readonly ConversationAction[];
+export const intentActions = ["POLICY_QUERY", "START_INTAKE", "COLLECT_FIELDS", "LIST_CLAIMS", "SEARCH_CLAIMS", "NEXT_CLAIMS_PAGE", "SELECT_EDIT_CLAIM", "DELETE_RECEIPT", "READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPARE_SUBMISSION", "HELP", "CLARIFY", "OUT_OF_SCOPE"] as const satisfies readonly ConversationAction[];
 
 const intentCaseSchema = z.object({
   id: z.string().trim().min(1).max(100),

@@ -26,6 +26,15 @@ async function createEmployee() {
 }
 
 describe("AgentConversationRepository", () => {
+  it("consumes a pending receipt deletion at most once", async () => {
+    const employee = await createEmployee();
+    const conversation = await repository.getOrCreatePrivate(employee.id);
+    const action = { kind: "DELETE_RECEIPT" as const, claimId: "claim-1", claimVersion: 3, receiptId: "receipt-2", expiresAt: new Date(Date.now() + 60_000).toISOString() };
+    await repository.setPendingAction({ conversationId: conversation.id, action });
+    expect(await repository.consumePendingAction({ conversationId: conversation.id, action })).toBe(true);
+    expect(await repository.consumePendingAction({ conversationId: conversation.id, action })).toBe(false);
+    await expect(repository.getConversationByIdOrThrow(conversation.id)).resolves.toMatchObject({ pendingAction: null });
+  });
   it("persists an edit target independently of read selection and active Intake", async () => {
     const employee = await createEmployee();
     const conversation = await repository.getOrCreatePrivate(employee.id);

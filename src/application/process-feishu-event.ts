@@ -92,7 +92,7 @@ export async function processFeishuEvent(
     });
     return {
       kind: "AGENT_REPLIED",
-      claimId: result.intake?.claimId ?? null,
+      claimId: result.targetClaimId ?? result.intake?.claimId ?? null,
       replyText: formatReply(result, deps.publicAppUrl, message.chatType),
     };
   } catch (error) {
@@ -135,8 +135,9 @@ function formatReply(result: ConversationTurnResult, publicAppUrl: string, chatT
     const excerpt = citation.excerpt.trim().replace(/\s+/g, " ").slice(0, 280);
     return `政策依据：${citation.title}${section ? `（${section}）` : ""}${excerpt ? `\n证据摘录：${excerpt}` : ""}`;
   }).join("\n");
-  const workspace = chatType === "group" ? "如需继续办理个人报销，请私聊机器人或打开 Web 工作台。" : result.intake?.claimId
-    ? `请在工作台确认或补充信息：${claimUrl(publicAppUrl, result.intake.claimId)}`
+  const targetClaimId = result.targetClaimId ?? result.intake?.claimId;
+  const workspace = chatType === "group" ? "如需继续办理个人报销，请私聊机器人或打开 Web 工作台。" : targetClaimId
+    ? `请在工作台确认或补充信息：${claimUrl(publicAppUrl, targetClaimId)}`
     : `可在报销工作台继续办理：${publicAppUrl}/claims`;
   return [reply, citations, workspace].filter(Boolean).join("\n\n");
 }

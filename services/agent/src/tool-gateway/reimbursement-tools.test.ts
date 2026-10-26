@@ -3,6 +3,17 @@ import { describe, expect, it, vi } from "vitest";
 import { ReimbursementToolGateway, type ToolCallResultStore } from "./reimbursement-tools";
 
 describe("ReimbursementToolGateway", () => {
+  it("deletes only a stable receipt ID at the confirmed claim version", async () => {
+    const port = { deleteOwnedReceipt: vi.fn().mockResolvedValue(undefined) };
+    const store: ToolCallResultStore = { findCompleted: vi.fn().mockResolvedValue(null), saveCompleted: vi.fn() };
+    const gateway = new ReimbursementToolGateway(port as never, store);
+    const call = { actorEmployeeId: "employee-1", actorRole: "EMPLOYEE" as const, channel: "FEISHU" as const, conversationId: "conversation-1", toolCallId: "delete-1", idempotencyKey: "delete-1", name: "delete_owned_receipt" as const,
+      arguments: { claimId: "claim-1", receiptId: "receipt-2", expectedClaimVersion: 3 } };
+    await gateway.execute(call);
+    expect(port.deleteOwnedReceipt).toHaveBeenCalledWith(expect.objectContaining({ actorEmployeeId: "employee-1", claimId: "claim-1", receiptId: "receipt-2", expectedClaimVersion: 3 }));
+    await expect(gateway.execute({ ...call, arguments: { ...call.arguments, expectedClaimVersion: 0 } })).rejects.toThrow("invalid expectedClaimVersion");
+    expect(port.deleteOwnedReceipt).toHaveBeenCalledTimes(1);
+  });
   it("rejects owner overrides, unknown fields, and invalid search limits", async () => {
     const port = { searchOwnedClaims: vi.fn() };
     const store: ToolCallResultStore = { findCompleted: vi.fn().mockResolvedValue(null), saveCompleted: vi.fn() };

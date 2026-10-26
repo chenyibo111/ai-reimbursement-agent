@@ -1,6 +1,6 @@
 import type { ClaimFieldPatch, OwnedClaimSearchQuery, ReimbursementPort, ToolCallContext } from "../ports/reimbursement-port";
 
-export type ReimbursementToolName = "create_claim_draft" | "create_upload_session" | "finalize_receipt_upload" | "get_claim_workbench" | "list_owned_claims" | "search_owned_claims" | "find_owned_claim_by_number" | "update_claim_fields" | "get_claim_validation" | "request_submission_confirmation" | "submit_claim";
+export type ReimbursementToolName = "create_claim_draft" | "create_upload_session" | "finalize_receipt_upload" | "delete_owned_receipt" | "get_claim_workbench" | "list_owned_claims" | "search_owned_claims" | "find_owned_claim_by_number" | "update_claim_fields" | "get_claim_validation" | "request_submission_confirmation" | "submit_claim";
 export type ToolCall = ToolCallContext & { name: ReimbursementToolName; arguments: Record<string, unknown> };
 
 export interface ToolCallResultStore {
@@ -22,6 +22,12 @@ export class ReimbursementToolGateway {
       case "create_claim_draft": result = { claim: await this.port.createClaimDraft({ ...context, purpose: optionalPurpose(call.arguments) }) }; break;
       case "create_upload_session": result = { upload: await this.port.createUploadSession({ ...context, claimId: requiredString(call.arguments, "claimId"), filename: requiredString(call.arguments, "filename"), contentType: requiredString(call.arguments, "contentType"), sizeBytes: requiredNumber(call.arguments, "sizeBytes") }) }; break;
       case "finalize_receipt_upload": result = { receipt: await this.port.finalizeReceiptUpload({ ...context, claimId: requiredString(call.arguments, "claimId"), receiptId: requiredString(call.arguments, "receiptId") }) }; break;
+      case "delete_owned_receipt": {
+        const expectedClaimVersion = requiredNumber(call.arguments, "expectedClaimVersion");
+        if (!Number.isSafeInteger(expectedClaimVersion) || expectedClaimVersion < 1) throw new Error("invalid expectedClaimVersion");
+        await this.port.deleteOwnedReceipt({ ...context, claimId: requiredString(call.arguments, "claimId"), receiptId: requiredString(call.arguments, "receiptId"), expectedClaimVersion });
+        result = { deleted: true }; break;
+      }
       case "get_claim_workbench": result = { workbench: await this.port.getClaimWorkbench({ ...context, claimId: requiredString(call.arguments, "claimId") }) }; break;
       case "list_owned_claims": result = { claims: await this.port.listOwnedClaims({ ...context, limit: requiredNumber(call.arguments, "limit") }) }; break;
       case "search_owned_claims": result = { page: await this.port.searchOwnedClaims({ ...context, query: ownedClaimSearchQuery(call.arguments) }) }; break;

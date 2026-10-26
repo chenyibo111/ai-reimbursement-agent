@@ -100,7 +100,7 @@ func (repository *PostgresReceiptRepository) FindByContentHash(ctx context.Conte
 	`, hash))
 }
 
-func (repository *PostgresReceiptRepository) DeleteOwned(ctx context.Context, receiptID string, claimID string, actorID string) error {
+func (repository *PostgresReceiptRepository) DeleteOwned(ctx context.Context, receiptID string, claimID string, actorID string, expectedVersion int64) error {
 	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin receipt deletion: %w", err)
@@ -108,7 +108,8 @@ func (repository *PostgresReceiptRepository) DeleteOwned(ctx context.Context, re
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var status domain.ClaimStatus
-	if err = tx.QueryRow(ctx, `SELECT status FROM reimbursement.claims WHERE id = $1 AND owner_id = $2 FOR UPDATE`, claimID, actorID).Scan(&status); err != nil {
+	var version int64
+	if err = tx.QueryRow(ctx, `SELECT status, version FROM reimbursement.claims WHERE id = $1 AND owner_id = $2 FOR UPDATE`, claimID, actorID).Scan(&status, &version); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return application.ErrClaimNotFound
 		}
@@ -117,18 +118,42 @@ func (repository *PostgresReceiptRepository) DeleteOwned(ctx context.Context, re
 	if status != domain.ClaimStatusDraft {
 		return domain.ErrClaimNotDraft
 	}
+	if version != expectedVersion {
+		return domain.ErrClaimVersionConflict
+	}
 
-	if _, err = scanReceipt(tx.QueryRow(ctx, `
+	receipt, err := scanReceipt(tx.QueryRow(ctx, `
 		SELECT id, claim_id, owner_id, filename, content_type, expected_size, object_key,
 		       content_hash, status, invoice_number, invoice_date, total_amount_cent, seller_name, ocr_confidence, created_at, updated_at
 		FROM reimbursement.receipts
 		WHERE id = $1 AND claim_id = $2 AND owner_id = $3
 		FOR UPDATE
-	`, receiptID, claimID, actorID)); err != nil {
+	`, receiptID, claimID, actorID))
+	if err != nil {
 		return err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO reimbursement.object_cleanup_jobs (object_key) VALUES ($1) ON CONFLICT (object_key) DO NOTHING`, receipt.ObjectKey); err != nil {
+		return fmt.Errorf("queue receipt object cleanup: %w", err)
 	}
 	if err = writeReceiptAuditAndEvent(ctx, tx, receiptID, claimID, actorID, "RECEIPT_DELETED", "ReceiptDeleted"); err != nil {
 		return err
+	}
+	if _, err = tx.Exec(ctx, `
+		WITH closed AS (
+			UPDATE reimbursement.review_cases
+			SET receipt_id = NULL,
+			    status = CASE WHEN status IN ('OPEN', 'CLAIMED') THEN 'CLOSED' ELSE status END,
+			    resolution = CASE WHEN status IN ('OPEN', 'CLAIMED') THEN 'RECEIPT_DELETED' ELSE resolution END,
+			    resolved_by = CASE WHEN status IN ('OPEN', 'CLAIMED') THEN $2 ELSE resolved_by END,
+			    resolved_at = CASE WHEN status IN ('OPEN', 'CLAIMED') THEN now() ELSE resolved_at END,
+			    updated_at = now(), version = version + 1
+			WHERE receipt_id = $1
+			RETURNING id
+		)
+		INSERT INTO reimbursement.review_case_audits (review_case_id, actor_id, action)
+		SELECT id, $2, 'RECEIPT_DELETED_BY_EMPLOYEE' FROM closed
+	`, receiptID, actorID); err != nil {
+		return fmt.Errorf("close receipt review cases: %w", err)
 	}
 	result, err := tx.Exec(ctx, `DELETE FROM reimbursement.receipts WHERE id = $1 AND claim_id = $2 AND owner_id = $3`, receiptID, claimID, actorID)
 	if err != nil {
@@ -136,6 +161,9 @@ func (repository *PostgresReceiptRepository) DeleteOwned(ctx context.Context, re
 	}
 	if result.RowsAffected() != 1 {
 		return application.ErrReceiptNotFound
+	}
+	if _, err = tx.Exec(ctx, `UPDATE reimbursement.claims SET version = version + 1, updated_at = now() WHERE id = $1`, claimID); err != nil {
+		return fmt.Errorf("advance claim version after receipt deletion: %w", err)
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit receipt deletion: %w", err)

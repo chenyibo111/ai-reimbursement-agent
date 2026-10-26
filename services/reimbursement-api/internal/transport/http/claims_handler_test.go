@@ -559,6 +559,25 @@ func TestDeleteReceiptDeletesOwnedDraftReceipt(t *testing.T) {
 	}
 }
 
+func TestDeleteReceiptPassesExpectedVersionForAgentConfirmation(t *testing.T) {
+	receipts := &deletingFakeReceipts{}
+	handler := NewRouter(Dependencies{Claims: fakeClaims{}, Receipts: receipts, Auth: StaticActorResolver{}})
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/claims/claim-1/receipts/receipt-2?expectedClaimVersion=3", nil)
+	request.Header.Set("Authorization", "Bearer employee-1")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent || receipts.receiptID != "receipt-2" || receipts.version != 3 {
+		t.Fatalf("response=%d receipt=%s version=%d", response.Code, receipts.receiptID, receipts.version)
+	}
+	invalid := httptest.NewRequest(http.MethodDelete, "/api/v1/claims/claim-1/receipts/receipt-2?expectedClaimVersion=0", nil)
+	invalid.Header.Set("Authorization", "Bearer employee-1")
+	invalidResponse := httptest.NewRecorder()
+	handler.ServeHTTP(invalidResponse, invalid)
+	if invalidResponse.Code != http.StatusBadRequest {
+		t.Fatalf("invalid version status=%d", invalidResponse.Code)
+	}
+}
+
 func TestReceiptResponseKeepsMissingMetadataNull(t *testing.T) {
 	encoded, err := json.Marshal(receiptResponse(application.ReceiptView{ID: "receipt-1", ClaimID: "claim-1", Filename: "pending.pdf", ClosedByReview: true}))
 	if err != nil {
@@ -738,6 +757,7 @@ func (fakeReceipts) ListReceipts(_ context.Context, actorID string, claimID stri
 
 type deletingFakeReceipts struct {
 	actorID, claimID, receiptID string
+	version                     int64
 }
 
 func (*deletingFakeReceipts) CreateUploadSession(context.Context, string, string, application.CreateUploadSessionCommand) (application.UploadSession, error) {
@@ -751,5 +771,9 @@ func (*deletingFakeReceipts) ListReceipts(context.Context, string, string) ([]ap
 }
 func (service *deletingFakeReceipts) DeleteReceipt(_ context.Context, actorID string, claimID string, receiptID string) error {
 	service.actorID, service.claimID, service.receiptID = actorID, claimID, receiptID
+	return nil
+}
+func (service *deletingFakeReceipts) DeleteReceiptAtVersion(_ context.Context, actorID string, claimID string, receiptID string, version int64) error {
+	service.actorID, service.claimID, service.receiptID, service.version = actorID, claimID, receiptID, version
 	return nil
 }

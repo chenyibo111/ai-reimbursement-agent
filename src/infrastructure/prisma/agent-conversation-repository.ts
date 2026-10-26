@@ -171,6 +171,21 @@ export class AgentConversationRepository {
     });
   }
 
+  async setPendingAction(input: { conversationId: string; action: import("@/src/application/pending-action").PendingAction | null }): Promise<void> {
+    await this.prisma.agentConversation.update({
+      where: { id: input.conversationId },
+      data: { pendingAction: input.action === null ? Prisma.JsonNull : input.action as Prisma.InputJsonValue },
+    });
+  }
+
+  async consumePendingAction(input: { conversationId: string; action: import("@/src/application/pending-action").PendingAction }): Promise<boolean> {
+    const result = await this.prisma.agentConversation.updateMany({
+      where: { id: input.conversationId, pendingAction: { equals: input.action as Prisma.InputJsonValue } },
+      data: { pendingAction: Prisma.JsonNull },
+    });
+    return result.count === 1;
+  }
+
   async setSearchState(input: { conversationId: string; state: import("@/src/application/claim-search").ClaimSearchState | null }): Promise<void> {
     await this.prisma.agentConversation.update({
       where: { id: input.conversationId },

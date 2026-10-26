@@ -323,11 +323,16 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ClaimId"
         - $ref: "#/components/parameters/ReceiptId"
+        - name: expectedClaimVersion
+          in: query
+          description: Required for Agent confirmation. Stale versions return 409; legacy Web deletion may omit it.
+          required: false
+          schema: { type: integer, format: int64, minimum: 1 }
       responses:
         "204":
-          description: Attachment deleted
+          description: Attachment record deleted; object cleanup durably queued
         "409":
-          description: Claim is no longer a draft
+          description: Claim is no longer a draft or its version has changed
           content:
             application/json:
               schema:

@@ -196,6 +196,13 @@ describe("OpenAiCompatibleChatModel", () => {
     await expect(makeModel({ action: "SEARCH_CLAIMS", reply: "查询", search: { ownerId: "other", requestedCount: 12 } }).decideConversation(context)).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
   });
 
+  it("extracts a receipt ordinal only for a deletion preview", async () => {
+    const makeModel = (decision: unknown) => new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "secret", fetchImpl: vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(decision) } }] }), { status: 200 })) });
+    const context = { summary: { text: "", throughSequence: 0 }, messages: [], intake: null, policyCitations: [], allowedFields: [] };
+    await expect(makeModel({ action: "DELETE_RECEIPT", reply: "预览", receiptOrdinal: 2 }).decideConversation(context)).resolves.toMatchObject({ action: "DELETE_RECEIPT", receiptOrdinal: 2 });
+    await expect(makeModel({ action: "READ_CLAIM", reply: "查询", receiptOrdinal: 2 }).decideConversation(context)).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  });
+
   it.each([
     ["unauthorized", new Response("provider detail", { status: 401 })],
     ["empty choices", new Response(JSON.stringify({ choices: [] }), { status: 200 })],

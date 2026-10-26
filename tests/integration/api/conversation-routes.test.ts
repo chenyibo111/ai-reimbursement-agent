@@ -226,7 +226,8 @@ it("saves conversational fields through Go and lists only Go-owned claims", asyn
       const decision = message === "我的报销列表" ? { action: "LIST_CLAIMS", reply: "ignored" }
         : message === "查 BX20261009-0001" ? { action: "READ_CLAIM", reply: "ignored", claimNumber: "BX20261009-0001" }
         : message === "这单金额" ? { action: "READ_CLAIM", reply: "ignored" }
-        : { action: "COLLECT_FIELDS", reply: "ignored", fields: { purpose: message === "修改当前事由" ? "新事由" : "客户拜访", ...(message === "修改当前事由" ? {} : { expenseCategory: "交通", participants: ["张三"], projectCode: "P-001" }) } };
+        : message === "修改当前事由" ? { action: "CLARIFY", reply: "ignored", clarificationReason: "UNCLEAR_REFERENCE" }
+        : { action: "COLLECT_FIELDS", reply: "ignored", ...(message === "修改当前正在办理的草稿事由" ? { targetReference: "CURRENT_INTAKE" } : {}), fields: { purpose: message === "修改当前正在办理的草稿事由" ? "新事由" : "客户拜访", ...(message === "修改当前正在办理的草稿事由" ? {} : { expenseCategory: "交通", participants: ["张三"], projectCode: "P-001" }) } };
       return Response.json({ choices: [{ message: { content: JSON.stringify(decision) } }] });
     }
     if (url.endsWith("/api/v1/claims") && init?.method === "POST") return Response.json(claim, { status: 201 });
@@ -262,7 +263,9 @@ it("saves conversational fields through Go and lists only Go-owned claims", asyn
     expect((await lookup.json()).reply).toContain("BX20261009-0001");
     const followup = await send("这单金额");
     expect((await followup.json()).reply).toContain("100.00");
-    const changed = await send("修改当前事由");
+    const ambiguous = await send("修改当前事由");
+    expect((await ambiguous.json()).reply).toContain("请明确");
+    const changed = await send("修改当前正在办理的草稿事由");
     expect((await changed.json()).reply).toContain("新事由");
     expect(claim.purpose).toBe("新事由");
     expect(calls).not.toContain("PATCH http://127.0.0.1:8088/api/v1/claims/old-go-claim");

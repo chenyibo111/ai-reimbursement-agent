@@ -245,7 +245,25 @@ func (handler *claimsHandler) deleteReceipt(response http.ResponseWriter, reques
 		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "缺少票据编号")
 		return
 	}
-	if err := handler.receipts.DeleteReceipt(request.Context(), actor.ID, pathClaimID(request), receiptID); err != nil {
+	var err error
+	if raw := request.URL.Query().Get("expectedClaimVersion"); raw != "" {
+		version, parseErr := strconv.ParseInt(raw, 10, 64)
+		if parseErr != nil || version < 1 {
+			writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "报销单版本无效")
+			return
+		}
+		versioned, ok := handler.receipts.(interface {
+			DeleteReceiptAtVersion(context.Context, string, string, string, int64) error
+		})
+		if !ok {
+			writeError(response, http.StatusNotImplemented, "NOT_IMPLEMENTED", "版本校验暂不可用")
+			return
+		}
+		err = versioned.DeleteReceiptAtVersion(request.Context(), actor.ID, pathClaimID(request), receiptID, version)
+	} else {
+		err = handler.receipts.DeleteReceipt(request.Context(), actor.ID, pathClaimID(request), receiptID)
+	}
+	if err != nil {
 		writeMappedError(response, err)
 		return
 	}
