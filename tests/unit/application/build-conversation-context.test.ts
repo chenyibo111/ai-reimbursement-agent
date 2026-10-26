@@ -44,4 +44,5 @@ it("uses deterministic limits and does not let a summary replace Intake facts", 
   expect(context.summary.text).toBe("旧的报销");
   expect(context.messages).toEqual([{ sequence: 12, role: "USER", channel: "WEB", text: "b".repeat(8) }]);
   expect(context.intake?.collectedFields).toEqual({ purpose: "客户拜访" });
+  expect(context.allowedFields).toEqual(["purpose", "expenseCategory", "participants", "projectCode"]);
 });

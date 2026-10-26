@@ -61,7 +61,7 @@ describe("OpenAiCompatibleChatModel", () => {
 
   it("accepts only constrained conversation decisions and sends no internal identifiers", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      choices: [{ message: { content: '{"action":"COLLECT_FIELDS","reply":"请补充同行人。","fields":{"participants":"张三"}}' } }],
+      choices: [{ message: { content: '{"action":"COLLECT_FIELDS","reply":"请补充同行人。","fields":{"participants":["张三"]}}' } }],
     }), { status: 200 }));
     const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "top-secret", fetchImpl });
 
@@ -71,7 +71,7 @@ describe("OpenAiCompatibleChatModel", () => {
       intake: { status: "COLLECTING", collectedFields: { purpose: "客户拜访" }, pendingFields: ["participants"], restartPending: false },
       policyCitations: [{ title: "制度", headingPath: ["差旅"], excerpt: "需填写同行人。", score: 0.9 }],
       allowedFields: ["participants"],
-    })).resolves.toEqual({ action: "COLLECT_FIELDS", reply: "请补充同行人。", fields: { participants: "张三" } });
+    })).resolves.toEqual({ action: "COLLECT_FIELDS", reply: "请补充同行人。", fields: { participants: ["张三"] } });
 
     const [, request] = fetchImpl.mock.calls[0] as [string, RequestInit];
     expect(String(request.body)).not.toContain("claim-private-id");
@@ -169,6 +169,24 @@ describe("OpenAiCompatibleChatModel", () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: '{"action":"READ_CLAIM","reply":"金额100元","fields":{"purpose":"出差"}}' } }] }), { status: 200 }));
     const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "secret", fetchImpl });
     await expect(model.decideConversation({ summary: { text: "", throughSequence: 0 }, messages: [], intake: null, policyCitations: [], allowedFields: ["purpose"] })).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  });
+
+  it.each([
+    { action: "COLLECT_FIELDS", reply: "ok", fields: { amount: "100" } },
+    { action: "COLLECT_FIELDS", reply: "ok", fields: { participants: Array.from({ length: 21 }, (_, index) => `员工${index}`) } },
+    { action: "COLLECT_FIELDS", reply: "ok", fields: { participants: "张三" } },
+    { action: "PREPARE_SUBMISSION", reply: "ok", claimNumber: "BX20261009-0026" },
+    { action: "READ_CLAIM", reply: "ok", claimNumber: "invalid" },
+  ])("rejects unsafe structured decision %#", async (decision) => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(decision) } }] }), { status: 200 }));
+    const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "secret", fetchImpl });
+    await expect(model.decideConversation({ summary: { text: "", throughSequence: 0 }, messages: [], intake: { status: "COLLECTING", collectedFields: {}, pendingFields: [], restartPending: false }, policyCitations: [], allowedFields: ["purpose", "expenseCategory", "participants", "projectCode"] })).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  });
+
+  it("accepts owner-lookup intent and normalizes a referenced business number", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: '{"action":"READ_CLAIM","reply":"查询","claimNumber":"bx20261009-0026"}' } }] }), { status: 200 }));
+    const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "secret", fetchImpl });
+    await expect(model.decideConversation({ summary: { text: "", throughSequence: 0 }, messages: [], intake: null, policyCitations: [], allowedFields: [] })).resolves.toMatchObject({ action: "READ_CLAIM", claimNumber: "BX20261009-0026" });
   });
 
   it.each([

@@ -1,6 +1,5 @@
 import type { AgentIntent, ChatModel, ChatModelInput, PolicyAnswerInput } from "@/src/infrastructure/model/chat-model";
 import type { ConversationContext } from "@/src/application/build-conversation-context";
-import { isConversationCollectedFieldName } from "@/src/domain/agent-conversation";
 import { z } from "zod";
 
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
@@ -85,7 +84,7 @@ export class OpenAiCompatibleChatModel implements ChatModel {
     const result = await this.complete([
       {
         role: "system",
-        content: "你是受控的报销会话意图分类器，只分类，不直接办理。只返回 JSON：{action: \"POLICY_QUERY\" | \"START_INTAKE\" | \"COLLECT_FIELDS\" | \"READ_CLAIM\" | \"READ_RECEIPT_AMOUNT\" | \"READ_SUBMISSION_SUMMARY\" | \"PREPARE_SUBMISSION\" | \"HELP\" | \"CLARIFY\" | \"OUT_OF_SCOPE\", reply: string, fields?: Record<string,string>, clarificationReason?: \"POLICY_OR_CLAIM\" | \"START_OR_HELP\" | \"MULTIPLE_ACTIONS\" | \"UNCLEAR_REFERENCE\" | \"OTHER\"}。判断的是最新一条员工消息，历史只用于消解指代。问公司制度、规则、上限用 POLICY_QUERY；问当前单据状态、单号、事由、申请报销总额等已有字段用 READ_CLAIM；问本单票据价税合计用 READ_RECEIPT_AMOUNT；问本单是否超标准、能否提交、提交前还缺什么、需要满足什么条件用只读的 READ_SUBMISSION_SUMMARY。只有员工明确请求发起提交准备、生成待确认的提交摘要时才用 PREPARE_SUBMISSION；询问能不能提交、不要提交、条件式或否定式表达绝不能用 PREPARE_SUBMISSION，更不能当成最终确认。新建一笔报销用 START_INTAKE；如何新建用 HELP。若 intake.restartPending 为 true，且员工明确同意另起一单，也用 START_INTAKE；含糊回答用 CLARIFY，不自行确认。多个相互冲突的动作或确实无法确定指代时用 CLARIFY；单一明确动作不要过度澄清。超出报销范围用 OUT_OF_SCOPE。你不生成金额、权限或状态结论，也不声称已写入或提交。只有 allowedFields 能出现在 COLLECT_FIELDS 的 fields；其他动作不得带 fields。clarificationReason 仅用于 CLARIFY。",
+        content: "你是受控的报销会话意图分类器，只分类，不直接办理。只返回 JSON：{action: \"POLICY_QUERY\" | \"START_INTAKE\" | \"COLLECT_FIELDS\" | \"LIST_CLAIMS\" | \"READ_CLAIM\" | \"READ_RECEIPT_AMOUNT\" | \"READ_SUBMISSION_SUMMARY\" | \"PREPARE_SUBMISSION\" | \"HELP\" | \"CLARIFY\" | \"OUT_OF_SCOPE\", reply: string, fields?: {purpose?:string,expenseCategory?:string,participants?:string[],projectCode?:string}, claimNumber?:string, clarificationReason?: \"POLICY_OR_CLAIM\" | \"START_OR_HELP\" | \"MULTIPLE_ACTIONS\" | \"UNCLEAR_REFERENCE\" | \"OTHER\"}。判断的是最新一条员工消息，历史只用于消解指代。问公司制度、规则、上限用 POLICY_QUERY；问本人有哪些报销单用 LIST_CLAIMS；问当前单据状态、单号、事由、申请报销总额等已有字段用 READ_CLAIM；问本单票据价税合计用 READ_RECEIPT_AMOUNT；问本单是否超标准、能否提交、提交前还缺什么、需要满足什么条件用只读的 READ_SUBMISSION_SUMMARY。只有员工明确请求发起提交准备、生成待确认的提交摘要时才用 PREPARE_SUBMISSION；询问能不能提交、不要提交、条件式或否定式表达绝不能用 PREPARE_SUBMISSION，更不能当成最终确认。新建一笔报销用 START_INTAKE；如何新建用 HELP。若 intake.restartPending 为 true，且员工明确同意另起一单，也用 START_INTAKE；含糊回答用 CLARIFY，不自行确认。多个相互冲突的动作或确实无法确定指代时用 CLARIFY；单一明确动作不要过度澄清。超出报销范围用 OUT_OF_SCOPE。你不生成金额、权限或状态结论，也不声称已写入或提交。读取时若明确提供报销单号，将其提取到 claimNumber；参与人员必须是明确的人名数组，金额、币种、备注只能在 Web 修改。只有 allowedFields 能出现在 COLLECT_FIELDS 的 fields；其他动作不得带 fields。clarificationReason 仅用于 CLARIFY。",
       },
       { role: "user", content: JSON.stringify({ summary: input.summary, messages: input.messages, intake: input.intake, allowedFields: input.allowedFields }) },
     ]);
@@ -134,10 +133,13 @@ export class OpenAiCompatibleChatModel implements ChatModel {
   }
 }
 
+const boundedField = z.string().trim().min(1).refine((value) => Array.from(value).length <= 200);
+const participant = z.string().trim().min(1).refine((value) => Array.from(value).length <= 80);
 const conversationDecisionSchema = z.object({
-  action: z.enum(["POLICY_QUERY", "START_INTAKE", "COLLECT_FIELDS", "READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPARE_SUBMISSION", "HELP", "CLARIFY", "OUT_OF_SCOPE"]),
+  action: z.enum(["POLICY_QUERY", "START_INTAKE", "COLLECT_FIELDS", "LIST_CLAIMS", "READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPARE_SUBMISSION", "HELP", "CLARIFY", "OUT_OF_SCOPE"]),
   reply: z.string().trim().min(1).max(1_000),
-  fields: z.record(z.string(), z.string().trim().min(1).max(1_000)).optional(),
+  fields: z.object({ purpose: boundedField.optional(), expenseCategory: boundedField.optional(), participants: z.array(participant).min(1).max(20).refine((values) => new Set(values).size === values.length).optional(), projectCode: boundedField.optional() }).strict().optional(),
+  claimNumber: z.string().trim().optional(),
   clarificationReason: z.enum(["POLICY_OR_CLAIM", "START_OR_HELP", "MULTIPLE_ACTIONS", "UNCLEAR_REFERENCE", "OTHER"]).optional(),
 }).strict();
 
@@ -148,13 +150,17 @@ function parseConversationDecision(
   const parsed = conversationDecisionSchema.safeParse(value);
   if (!parsed.success) throw new ChatModelError("AI 返回内容无法识别，请稍后重试。", "INVALID_RESPONSE");
   const fields = parsed.data.fields;
-  if (fields && (parsed.data.action !== "COLLECT_FIELDS" || Object.keys(fields).some((field) => !allowedFields.includes(field) || !isConversationCollectedFieldName(field)))) {
+  if (fields && (parsed.data.action !== "COLLECT_FIELDS" || Object.keys(fields).length === 0 || Object.keys(fields).some((field) => !allowedFields.includes(field)))) {
+    throw new ChatModelError("AI 返回内容无法识别，请稍后重试。", "INVALID_RESPONSE");
+  }
+  const claimNumber = parsed.data.claimNumber?.toUpperCase();
+  if (claimNumber && (!/^BX[0-9]{8}-[0-9]{4,}$/.test(claimNumber) || !["READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY"].includes(parsed.data.action))) {
     throw new ChatModelError("AI 返回内容无法识别，请稍后重试。", "INVALID_RESPONSE");
   }
   if (parsed.data.clarificationReason && parsed.data.action !== "CLARIFY") {
     throw new ChatModelError("AI 返回内容无法识别，请稍后重试。", "INVALID_RESPONSE");
   }
-  return { action: parsed.data.action, reply: parsed.data.reply, ...(fields ? { fields } : {}), ...(parsed.data.clarificationReason ? { clarificationReason: parsed.data.clarificationReason } : {}) };
+  return { action: parsed.data.action, reply: parsed.data.reply, ...(fields ? { fields } : {}), ...(claimNumber ? { claimNumber } : {}), ...(parsed.data.clarificationReason ? { clarificationReason: parsed.data.clarificationReason } : {}) };
 }
 
 function isChatCompletionEnvelope(payload: unknown): payload is { choices?: Array<{ message?: { content?: unknown } }> } {
