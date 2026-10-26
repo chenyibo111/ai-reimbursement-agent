@@ -23,6 +23,20 @@ export type ClaimSnapshot = {
   receiptCount?: number;
 };
 export type ClaimFieldPatch = { purpose?: string; expenseCategory?: string; participants?: string[]; projectCode?: string };
+export type OwnedClaimSearchQuery = {
+  status?: "DRAFT" | "SUBMITTED";
+  createdFrom?: string;
+  createdBefore?: string;
+  purposeContains?: string;
+  expenseCategory?: string;
+  minRequestedAmountCent?: number;
+  maxRequestedAmountCent?: number;
+  sort?: "created_desc" | "created_asc" | "amount_desc" | "amount_asc";
+  limit: number;
+  cursor?: string;
+  countOnly?: boolean;
+};
+export type OwnedClaimSearchPage = { items: ClaimSnapshot[]; totalCount: number; nextCursor: string | null };
 export type ReceiptSnapshot = { id: string; claimId: string; filename: string; status: string; invoiceNumber: string; ocrConfidence: number; totalAmountCent: number | null };
 export type ValidationSnapshot = { claimId: string; claimVersion: number; policyVersion: string; issues: Array<{ code: string; severity: "BLOCKING" | "WARNING"; message: string }> };
 
@@ -32,6 +46,7 @@ export interface ReimbursementPort {
   finalizeReceiptUpload(input: ToolCallContext & { claimId: string; receiptId: string }): Promise<{ receiptId: string; status: string }>;
   getClaimWorkbench(input: ToolCallContext & { claimId: string }): Promise<{ claim: ClaimSnapshot; receipts: ReceiptSnapshot[] }>;
   listOwnedClaims(input: ToolCallContext & { limit: number }): Promise<ClaimSnapshot[]>;
+  searchOwnedClaims(input: ToolCallContext & { query: OwnedClaimSearchQuery }): Promise<OwnedClaimSearchPage>;
   findOwnedClaimByNumber(input: ToolCallContext & { claimNumber: string }): Promise<ClaimSnapshot | null>;
   updateClaimFields(input: ToolCallContext & { claimId: string; version: number; fields: ClaimFieldPatch }): Promise<ClaimSnapshot>;
   getClaimValidation(input: ToolCallContext & { claimId: string }): Promise<ValidationSnapshot>;

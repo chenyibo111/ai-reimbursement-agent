@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 
-import type { ClaimFieldPatch, ClaimSnapshot, ReimbursementPort, ReceiptSnapshot, ToolCallContext, ValidationSnapshot } from "../ports/reimbursement-port";
+import type { ClaimFieldPatch, ClaimSnapshot, OwnedClaimSearchPage, OwnedClaimSearchQuery, ReimbursementPort, ReceiptSnapshot, ToolCallContext, ValidationSnapshot } from "../ports/reimbursement-port";
 
 type ApiClientOptions = {
   baseUrl: string;
@@ -42,6 +42,21 @@ export class ReimbursementApiClient implements ReimbursementPort {
     const response = await this.request<{ items: ClaimSnapshot[] }>(input, `/api/v1/claims?limit=${input.limit}`, "GET");
     if (!Array.isArray(response.items)) throw new Error("invalid owned claim list");
     return response.items.map(assertClaimSnapshot);
+  }
+  async searchOwnedClaims(input: ToolCallContext & { query: OwnedClaimSearchQuery }): Promise<OwnedClaimSearchPage> {
+    const params = new URLSearchParams({ search: "true" });
+    for (const [key, value] of Object.entries(input.query)) {
+      if (value !== undefined) params.set(key, String(value));
+    }
+    const response = await this.request<unknown>(input, `/api/v1/claims?${params}`, "GET");
+    if (!response || typeof response !== "object" || Array.isArray(response)) throw new Error("invalid owned claim search");
+    const page = response as Record<string, unknown>;
+    if (!Array.isArray(page.items) || typeof page.totalCount !== "number" || !Number.isSafeInteger(page.totalCount) || page.totalCount < 0 || (typeof page.nextCursor !== "string" && page.nextCursor !== null)) throw new Error("invalid owned claim search");
+    try {
+      const items = page.items.map((item) => assertClaimSnapshot(item as ClaimSnapshot));
+      if (items.length > input.query.limit || items.length > page.totalCount) throw new Error("invalid owned claim search");
+      return { items, totalCount: page.totalCount as number, nextCursor: page.nextCursor === "" ? null : page.nextCursor as string | null };
+    } catch { throw new Error("invalid owned claim search"); }
   }
   async findOwnedClaimByNumber(input: ToolCallContext & { claimNumber: string }) {
     const response = await this.request<{ items: ClaimSnapshot[] }>(input, `/api/v1/claims?claimNumber=${encodeURIComponent(input.claimNumber)}`, "GET");

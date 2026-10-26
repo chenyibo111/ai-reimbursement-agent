@@ -29,3 +29,24 @@ it("accepts a new Go draft whose unset participants are JSON null", async () => 
   await expect(client.listOwnedClaims({ ...context, limit: 5 })).resolves.toMatchObject([{ participants: [] }]);
   await expect(client.findOwnedClaimByNumber({ ...context, claimNumber: draft.claimNumber })).resolves.toMatchObject({ participants: [] });
 });
+
+it("encodes an owned search and preserves unset requested amount", async () => {
+  const claim = { id: "claim-1", claimNumber: "BX20261026-0001", version: 1, status: "DRAFT", purpose: "交通", expenseCategory: "交通费", participants: [], projectCode: "", totalAmountCent: null, requestedAmountCent: null, currency: "CNY" };
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ items: [claim], totalCount: 12, nextCursor: "abc" }));
+  const client = new ReimbursementApiClient({ baseUrl: "http://go.test", serviceKey: "key", signingSecret: "secret", fetcher });
+  const context = { actorEmployeeId: "employee-1", actorRole: "EMPLOYEE" as const, channel: "FEISHU" as const, conversationId: "conversation-1", toolCallId: "search-1", idempotencyKey: "search-1" };
+  const page = await client.searchOwnedClaims({ ...context, query: { status: "DRAFT", purposeContains: "交通&拜访", sort: "amount_desc", limit: 10, cursor: "a+b" } });
+  expect(page).toMatchObject({ totalCount: 12, nextCursor: "abc", items: [{ requestedAmountCent: null }] });
+  const url = new URL(String(fetcher.mock.calls[0][0]));
+  expect(url.searchParams.get("purposeContains")).toBe("交通&拜访");
+  expect(url.searchParams.get("cursor")).toBe("a+b");
+  expect(url.searchParams.get("search")).toBe("true");
+  expect(url.searchParams.has("ownerId")).toBe(false);
+});
+
+it("rejects malformed Go search pages", async () => {
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ items: [], totalCount: "12", nextCursor: null }));
+  const client = new ReimbursementApiClient({ baseUrl: "http://go.test", serviceKey: "key", signingSecret: "secret", fetcher });
+  const context = { actorEmployeeId: "employee-1", actorRole: "EMPLOYEE" as const, channel: "WEB" as const, conversationId: "conversation-1", toolCallId: "search-2", idempotencyKey: "search-2" };
+  await expect(client.searchOwnedClaims({ ...context, query: { limit: 5 } })).rejects.toThrow("invalid owned claim search");
+});

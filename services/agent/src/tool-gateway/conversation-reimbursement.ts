@@ -1,6 +1,6 @@
 import { ReimbursementToolGateway, type ReimbursementToolName } from "./reimbursement-tools";
 import { ReimbursementApiHttpError } from "../adapters/reimbursement-api-client";
-import type { ClaimFieldPatch, ClaimSnapshot, ReceiptSnapshot, ValidationSnapshot } from "../ports/reimbursement-port";
+import type { ClaimFieldPatch, ClaimSnapshot, OwnedClaimSearchPage, OwnedClaimSearchQuery, ReceiptSnapshot, ValidationSnapshot } from "../ports/reimbursement-port";
 
 export type ConversationReimbursementContext = { actorId: string; actorRole: "EMPLOYEE" | "FINANCE_REVIEWER" | "ADMIN"; channel: "WEB" | "FEISHU"; conversationId: string; turnId: string };
 type Attachment = { filename: string; mimeType: string; bytes: Uint8Array };
@@ -18,6 +18,9 @@ export function createConversationReimbursementTools(gateway: ReimbursementToolG
     arguments: args,
   });
   return {
+    async searchOwnedClaims(context: ConversationReimbursementContext, query: OwnedClaimSearchQuery): Promise<OwnedClaimSearchPage> {
+      return (await execute(context, "search_owned_claims", query, `search_owned_claims:${JSON.stringify(query)}`)).page as OwnedClaimSearchPage;
+    },
     async listOwnedClaims(context: ConversationReimbursementContext, limit: number): Promise<ClaimSnapshot[]> {
       return (await execute(context, "list_owned_claims", { limit })).claims as ClaimSnapshot[];
     },
