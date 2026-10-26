@@ -2,6 +2,13 @@ import { expect, it, vi } from "vitest";
 
 import { AgentConversationRepository } from "@/src/infrastructure/prisma/agent-conversation-repository";
 
+it("stores the read-only selection on conversation without changing an Intake", async () => {
+  const update = vi.fn().mockResolvedValue({ id: "conversation-1", selectedReadClaimId: "old-go-claim" });
+  const repository = new AgentConversationRepository({ agentConversation: { update } } as never);
+  await repository.setSelectedReadClaimId({ conversationId: "conversation-1", claimId: "old-go-claim" });
+  expect(update).toHaveBeenCalledWith({ where: { id: "conversation-1" }, data: { selectedReadClaimId: "old-go-claim" } });
+});
+
 it("stores a Go reimbursement claim ID as an opaque scalar reference", async () => {
   const update = vi.fn().mockResolvedValue({ id: "intake-1", claimId: "go-claim-1" });
   const repository = new AgentConversationRepository({

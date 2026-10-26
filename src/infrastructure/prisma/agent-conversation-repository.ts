@@ -157,6 +157,13 @@ export class AgentConversationRepository {
     return conversation;
   }
 
+  async setSelectedReadClaimId(input: { conversationId: string; claimId: string | null }): Promise<void> {
+    await this.prisma.agentConversation.update({
+      where: { id: input.conversationId },
+      data: { selectedReadClaimId: input.claimId },
+    });
+  }
+
   async getCurrentIntake(employeeId: string): Promise<ReimbursementIntake | null> {
     return this.prisma.reimbursementIntake.findFirst({
       where: { employeeId, status: { in: ["COLLECTING", "READY_TO_SUBMIT"] } },

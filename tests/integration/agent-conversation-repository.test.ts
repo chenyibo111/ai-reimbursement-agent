@@ -26,6 +26,18 @@ async function createEmployee() {
 }
 
 describe("AgentConversationRepository", () => {
+  it("persists a private read selection separately from active intake and group chat", async () => {
+    const employee = await createEmployee();
+    const conversation = await repository.getOrCreatePrivate(employee.id);
+    const group = await repository.getOrCreateGroup(employee.id, `oc-read-${employee.id}`);
+    const intake = await repository.createIntake({ employeeId: employee.id, conversationId: conversation.id, claimId: "active-go-claim" });
+    await repository.setSelectedReadClaimId({ conversationId: conversation.id, claimId: "old-go-claim" });
+    await expect(repository.getConversationByIdOrThrow(conversation.id)).resolves.toMatchObject({ selectedReadClaimId: "old-go-claim" });
+    await expect(repository.getCurrentIntake(employee.id)).resolves.toMatchObject({ id: intake.id, claimId: "active-go-claim" });
+    await expect(repository.getConversationByIdOrThrow(group.id)).resolves.toMatchObject({ selectedReadClaimId: null });
+    await repository.setSelectedReadClaimId({ conversationId: conversation.id, claimId: null });
+    await expect(repository.getConversationByIdOrThrow(conversation.id)).resolves.toMatchObject({ selectedReadClaimId: null });
+  });
   it("shares an employee private conversation between Web and Feishu but isolates group conversations", async () => {
     const employee = await createEmployee();
 

@@ -327,6 +327,7 @@ model AgentConversation {
   scopeKey               String
   kind                   AgentConversationKind
   latestFeishuChatId     String?
+  selectedReadClaimId    String?
   summary                String                @default("")
   summaryThroughSequence Int                   @default(0)
   nextSequence           Int                   @default(1)
