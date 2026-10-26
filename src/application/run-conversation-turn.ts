@@ -252,7 +252,7 @@ async function applyDecision(
   if (decision.action === "START_INTAKE") return startIntake(input, intake, deps);
   if (decision.action === "CLARIFY") return persistReply(input, intake, clarificationReply(decision.clarificationReason), [], deps.conversations);
   if (decision.action === "OUT_OF_SCOPE") return persistReply(input, intake, "我目前只能协助报销政策问答、票据和报销单办理；其他事项请使用相应服务。", [], deps.conversations);
-  if (decision.action === "HELP") return persistReply(input, intake, "我可以帮你查询报销政策或当前单据，上传票据并引导办理；也可以在 Web 工作台查看和填写。", [], deps.conversations);
+  if (decision.action === "HELP") return persistReply(input, intake, helpReply(), [], deps.conversations);
   if (decision.action === "LIST_CLAIMS") {
     if (!deps.listOwnedClaims) return persistReply(input, intake, "报销数据暂时无法查询，请稍后重试。", [], deps.conversations);
     try {
@@ -477,6 +477,19 @@ function clarificationReply(reason: ConversationDecision["clarificationReason"])
   if (reason === "MULTIPLE_ACTIONS") return "你提出了多个操作，请先明确这次要查询、补充信息，还是准备提交。";
   if (reason === "UNCLEAR_REFERENCE") return "请明确你指的是哪张票据或报销单，以及希望我查询什么。";
   return "请明确说明你希望我帮你处理的报销事项。";
+}
+
+function helpReply(): string {
+  return [
+    "我目前可以帮你：",
+    "1. 查询已同步的报销政策和规则，并附上政策依据。",
+    "2. 开始报销、上传票据，并在识别完成后查看识别结果。",
+    "3. 为当前草稿补充报销事由、费用类别、参与人员和项目编号。",
+    "4. 列出本人最近 5 张报销单；提供完整单号后，可查询单据状态、事由、申请报销总额和票据金额。",
+    "5. 查看提交条件、生成提交前摘要；核对后回复“确认提交”，才会提交当前办理的报销单。",
+    "金额、币种和备注请到 Web 工作台填写；票据识别结果如需人工修改，也请到工作台处理。本人单据的查询和办理请在飞书私聊进行。",
+    "例如，你可以说：“我的报销单”“开始报销”“这单还缺什么”。",
+  ].join("\n");
 }
 
 async function answerFromEvidence(message: string, evidence: PolicySearchResult["evidence"], model: RunConversationTurnDeps["model"]): Promise<string> {
