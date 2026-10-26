@@ -252,6 +252,39 @@ func (repository *MemoryClaimRepository) ListOwned(_ context.Context, actorID st
 	return claims, nil
 }
 
+func (repository *MemoryClaimRepository) SearchOwned(_ context.Context, actorID string, query SearchClaimsQuery) ([]domain.Claim, int64, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	owned := make([]domain.Claim, 0)
+	for _, claim := range repository.claims {
+		if claim.OwnerID == actorID {
+			owned = append(owned, claim.Clone())
+		}
+	}
+	filtered := filterAndSortClaims(owned, query)
+	total := int64(len(filtered))
+	if query.CountOnly {
+		return []domain.Claim{}, total, nil
+	}
+	if query.AfterID != "" {
+		found := false
+		for index, claim := range filtered {
+			if claim.ID == query.AfterID {
+				filtered = filtered[index+1:]
+				found = true
+				break
+			}
+		}
+		if !found {
+			return []domain.Claim{}, total, ErrInvalidClaimSearch
+		}
+	}
+	if len(filtered) > query.Limit+1 {
+		filtered = filtered[:query.Limit+1]
+	}
+	return filtered, total, nil
+}
+
 func (repository *MemoryClaimRepository) Update(_ context.Context, claim domain.Claim, expectedVersion int64, audit ClaimAudit, event ClaimOutboxEvent) error {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()

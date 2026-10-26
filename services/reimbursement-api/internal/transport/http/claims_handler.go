@@ -1,11 +1,15 @@
 package transport
 
 import (
+	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/application"
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/domain"
@@ -39,6 +43,35 @@ func (handler *claimsHandler) listClaims(response http.ResponseWriter, request *
 		writeJSON(response, http.StatusOK, map[string]any{"items": []any{claimResponse(claim)}})
 		return
 	}
+	if claimSearchRequested(request) {
+		query, err := parseClaimSearchQuery(request)
+		if err != nil {
+			writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "单据查询条件无效")
+			return
+		}
+		searcher, ok := handler.claims.(interface {
+			SearchClaims(context.Context, string, application.SearchClaimsQuery) (application.SearchClaimsPage, error)
+		})
+		if !ok {
+			writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "单据查询暂不可用")
+			return
+		}
+		page, err := searcher.SearchClaims(request.Context(), actor.ID, query)
+		if errors.Is(err, application.ErrInvalidClaimSearch) {
+			writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "单据查询条件无效")
+			return
+		}
+		if err != nil {
+			writeMappedError(response, err)
+			return
+		}
+		items := make([]map[string]any, 0, len(page.Items))
+		for _, claim := range page.Items {
+			items = append(items, claimResponse(claim))
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"items": items, "totalCount": page.TotalCount, "nextCursor": page.NextCursor})
+		return
+	}
 	limit, _ := strconv.Atoi(request.URL.Query().Get("limit"))
 	claims, err := handler.claims.ListClaims(request.Context(), actor.ID, limit)
 	if err != nil {
@@ -50,6 +83,81 @@ func (handler *claimsHandler) listClaims(response http.ResponseWriter, request *
 		items = append(items, claimResponse(claim))
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"items": items})
+}
+
+func claimSearchRequested(request *http.Request) bool {
+	for _, key := range []string{"search", "status", "createdFrom", "createdBefore", "purposeContains", "expenseCategory", "minRequestedAmountCent", "maxRequestedAmountCent", "sort", "cursor", "countOnly"} {
+		if _, exists := request.URL.Query()[key]; exists {
+			return true
+		}
+	}
+	return false
+}
+
+func parseClaimSearchQuery(request *http.Request) (application.SearchClaimsQuery, error) {
+	values := request.URL.Query()
+	allowed := map[string]bool{"search": true, "status": true, "createdFrom": true, "createdBefore": true, "purposeContains": true, "expenseCategory": true, "minRequestedAmountCent": true, "maxRequestedAmountCent": true, "sort": true, "limit": true, "cursor": true, "countOnly": true}
+	for key, entries := range values {
+		if !allowed[key] || len(entries) != 1 {
+			return application.SearchClaimsQuery{}, application.ErrInvalidClaimSearch
+		}
+	}
+	query := application.SearchClaimsQuery{Status: values.Get("status"), PurposeContains: strings.TrimSpace(values.Get("purposeContains")), ExpenseCategory: strings.TrimSpace(values.Get("expenseCategory")), Sort: values.Get("sort"), Cursor: values.Get("cursor")}
+	if raw := values.Get("limit"); raw != "" {
+		limit, err := strconv.Atoi(raw)
+		if err != nil || limit < 1 || limit > 100 {
+			return query, application.ErrInvalidClaimSearch
+		}
+		query.Limit = limit
+	}
+	if raw := values.Get("countOnly"); raw != "" {
+		if raw != "true" && raw != "false" {
+			return query, application.ErrInvalidClaimSearch
+		}
+		query.CountOnly = raw == "true"
+	}
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		return query, err
+	}
+	for _, item := range []struct {
+		name   string
+		target *time.Time
+	}{{"createdFrom", &query.CreatedFrom}, {"createdBefore", &query.CreatedBefore}} {
+		if raw := values.Get(item.name); raw != "" {
+			date, err := time.ParseInLocation("2006-01-02", raw, location)
+			if err != nil {
+				return query, application.ErrInvalidClaimSearch
+			}
+			*item.target = date.UTC()
+		}
+	}
+	for _, item := range []struct {
+		name   string
+		target **int64
+	}{{"minRequestedAmountCent", &query.MinRequestedAmountCent}, {"maxRequestedAmountCent", &query.MaxRequestedAmountCent}} {
+		if raw := values.Get(item.name); raw != "" {
+			amount, err := strconv.ParseInt(raw, 10, 64)
+			if err != nil || amount < 0 {
+				return query, application.ErrInvalidClaimSearch
+			}
+			*item.target = &amount
+		}
+	}
+	if query.Status != "" && query.Status != "DRAFT" && query.Status != "SUBMITTED" {
+		return query, application.ErrInvalidClaimSearch
+	}
+	if !query.CreatedFrom.IsZero() && !query.CreatedBefore.IsZero() && !query.CreatedFrom.Before(query.CreatedBefore) {
+		return query, application.ErrInvalidClaimSearch
+	}
+	if query.Cursor != "" {
+		decoded, err := base64.RawURLEncoding.DecodeString(query.Cursor)
+		var cursor map[string]any
+		if err != nil || len(decoded) > 500 || json.Unmarshal(decoded, &cursor) != nil || cursor["i"] == nil {
+			return query, application.ErrInvalidClaimSearch
+		}
+	}
+	return query, nil
 }
 
 func (handler *claimsHandler) createUploadSession(response http.ResponseWriter, request *http.Request) {

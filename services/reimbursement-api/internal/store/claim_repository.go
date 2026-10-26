@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/application"
@@ -152,6 +153,111 @@ func (repository *PostgresClaimRepository) ListOwned(ctx context.Context, actorI
 		claims = append(claims, claim)
 	}
 	return claims, rows.Err()
+}
+
+func (repository *PostgresClaimRepository) SearchOwned(ctx context.Context, actorID string, query application.SearchClaimsQuery) ([]domain.Claim, int64, error) {
+	args := []any{actorID}
+	conditions := []string{"owner_id = $1"}
+	add := func(column string, value any, operator string) {
+		args = append(args, value)
+		conditions = append(conditions, fmt.Sprintf("%s %s $%d", column, operator, len(args)))
+	}
+	if query.Status != "" {
+		add("status", query.Status, "=")
+	}
+	if !query.CreatedFrom.IsZero() {
+		add("created_at", query.CreatedFrom, ">=")
+	}
+	if !query.CreatedBefore.IsZero() {
+		add("created_at", query.CreatedBefore, "<")
+	}
+	if query.PurposeContains != "" {
+		args = append(args, "%"+escapeLike(query.PurposeContains)+"%")
+		conditions = append(conditions, fmt.Sprintf("purpose ILIKE $%d ESCAPE '\\'", len(args)))
+	}
+	if query.ExpenseCategory != "" {
+		add("expense_category", query.ExpenseCategory, "=")
+	}
+	if query.MinRequestedAmountCent != nil {
+		add("requested_amount_cent", *query.MinRequestedAmountCent, ">=")
+	}
+	if query.MaxRequestedAmountCent != nil {
+		add("requested_amount_cent", *query.MaxRequestedAmountCent, "<=")
+	}
+	baseWhere := strings.Join(conditions, " AND ")
+	var total int64
+	if err := repository.pool.QueryRow(ctx, "SELECT count(*) FROM reimbursement.claims WHERE "+baseWhere, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count owned claims: %w", err)
+	}
+	if query.CountOnly {
+		return []domain.Claim{}, total, nil
+	}
+	order := "created_at DESC, id ASC"
+	column := "created_at"
+	comparison := "<"
+	switch query.Sort {
+	case application.ClaimSearchCreatedAsc:
+		order, comparison = "created_at ASC, id ASC", ">"
+	case application.ClaimSearchAmountDesc:
+		order, column = "requested_amount_cent DESC NULLS LAST, id ASC", "requested_amount_cent"
+	case application.ClaimSearchAmountAsc:
+		order, column, comparison = "requested_amount_cent ASC NULLS LAST, id ASC", "requested_amount_cent", ">"
+	}
+	if query.AfterID != "" {
+		if column == "created_at" {
+			at, err := time.Parse(time.RFC3339Nano, query.AfterValue)
+			if err != nil {
+				return nil, 0, application.ErrInvalidClaimSearch
+			}
+			args = append(args, at, query.AfterID)
+			conditions = append(conditions, fmt.Sprintf("(created_at %s $%d OR (created_at = $%d AND id > $%d))", comparison, len(args)-1, len(args)-1, len(args)))
+		} else if query.AfterNull {
+			args = append(args, query.AfterID)
+			conditions = append(conditions, fmt.Sprintf("(requested_amount_cent IS NULL AND id > $%d)", len(args)))
+		} else {
+			var amount int64
+			if _, err := fmt.Sscan(query.AfterValue, &amount); err != nil {
+				return nil, 0, application.ErrInvalidClaimSearch
+			}
+			args = append(args, amount, query.AfterID)
+			conditions = append(conditions, fmt.Sprintf("(requested_amount_cent IS NULL OR requested_amount_cent %s $%d OR (requested_amount_cent = $%d AND id > $%d))", comparison, len(args)-1, len(args)-1, len(args)))
+		}
+	}
+	args = append(args, query.Limit+1)
+	statement := fmt.Sprintf("SELECT id FROM reimbursement.claims WHERE %s ORDER BY %s LIMIT $%d", strings.Join(conditions, " AND "), order, len(args))
+	rows, err := repository.pool.Query(ctx, statement, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("search owned claim ids: %w", err)
+	}
+	ids := make([]string, 0, query.Limit+1)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, 0, err
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, 0, err
+	}
+	claims := make([]domain.Claim, 0, len(ids))
+	for _, id := range ids {
+		claim, err := repository.FindOwned(ctx, id, actorID)
+		if err != nil {
+			return nil, 0, err
+		}
+		claims = append(claims, claim)
+	}
+	return claims, total, nil
+}
+
+func escapeLike(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `%`, `\%`)
+	return strings.ReplaceAll(value, `_`, `\_`)
 }
 
 func (repository *PostgresClaimRepository) Update(ctx context.Context, claim domain.Claim, expectedVersion int64, audit application.ClaimAudit, event application.ClaimOutboxEvent) error {
