@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-25-section-aware-policy-retrieval-design.md`
 
-**执行状态（2026-10-25）：** Task 1–4 与 Task 5 的代码、测试、构建已完成。本机开发库已应用迁移，Web、任务 Worker 和飞书 Worker 已重建启动。对已授权的「YB企业费用报销管理制度」执行真实重索引时发现原文含嵌入电子表格，解析器按完整性约束拒绝遗漏该块，返回 `DOCUMENT_UNSUPPORTED_SHEET`；旧 v1 活动快照仍保留。因此真实文档的 v2 同步及飞书/Web 人工问答验收待原文改为正文/文档表格，或另行实现嵌入表格读取并确认权限后完成。
+**执行状态（2026-10-26）：** Task 1–4 与 Task 5 的代码、测试、构建已完成。原文中的嵌入电子表格已由用户替换为普通文档表格。补充修正迁移将误落入连接用户 schema 的 `PolicySection` 安全移至 `public` 后，授权来源已真实同步为 v2 活动快照（51 个章节、51 个检索片）。实际向量检索的宽泛住宿问题与北京上海定向问题均命中同一个完整住宿费章节，含 600/500/400 元三档。飞书/Web 最终回答仍待用户从界面人工验收。
 
 ## Global Constraints
 
@@ -125,6 +125,6 @@
 - [x] **Step 1: Write failing API/UI tests** for counts becoming visible only after active snapshot switch and safe parse-failure status; test stale counts remain the last successful counts after a failed job.
 - [x] **Step 2: Run focused tests**; expect FAIL.
 - [x] **Step 3: Implement the existing admin source-row display** without a new page or a premature “sync complete” message.
-- [x] **Step 4a: Run `npm test`, `npm run lint`, `npx tsc --noEmit`, and `npm run build`**; 411 tests passed, lint had 0 errors and 2 unrelated existing warnings, types and build passed. The additive migration is applied to the local development database.
-- [ ] **Step 4b: Complete live acceptance.** Authorized-source resync was attempted but safely rejected the embedded spreadsheet; after resolving it, resync and manually ask broad and specific lodging questions in Feishu/Web.
+- [x] **Step 4a: Run `npm test`, `npm run lint`, `npx tsc --noEmit`, and `npm run build`**; latest rerun passed 413 tests, lint had 0 errors and 2 unrelated existing warnings, types and build passed. The additive and corrective migrations are applied to the local development and test databases.
+- [ ] **Step 4b: Complete live acceptance.** Authorized-source v2 resync succeeded after the embedded sheet was replaced with an ordinary document table. Direct retrieval checks passed for broad and city-specific lodging questions with all three rate tiers present; manual Feishu/Web answer checks remain.
 - [x] **Step 5: Review the full diff for secrets, policy-answer regressions and migration safety; commit final tests/UI/docs.**
