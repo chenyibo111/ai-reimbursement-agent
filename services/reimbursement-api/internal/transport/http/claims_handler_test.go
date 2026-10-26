@@ -485,6 +485,38 @@ func TestListClaimsReturnsOnlyAuthenticatedActorsClaims(t *testing.T) {
 	}
 }
 
+func TestClaimNumberQueryValidatesFormatAndReturnsOwnerScopedResult(t *testing.T) {
+	handler := NewRouter(Dependencies{Claims: fakeClaims{}, Auth: StaticActorResolver{}})
+	for _, scenario := range []struct {
+		number string
+		status int
+		count  int
+	}{
+		{"BX20261008-0001", http.StatusOK, 1},
+		{"BX20261008-9999", http.StatusOK, 0},
+		{"not-a-number", http.StatusBadRequest, 0},
+	} {
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/claims?claimNumber="+scenario.number, nil)
+		request.Header.Set("Authorization", "Bearer employee-1")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != scenario.status {
+			t.Fatalf("%s status = %d, want %d", scenario.number, response.Code, scenario.status)
+		}
+		if scenario.status == http.StatusOK {
+			var body struct {
+				Items []any `json:"items"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if len(body.Items) != scenario.count {
+				t.Fatalf("%s items = %d, want %d", scenario.number, len(body.Items), scenario.count)
+			}
+		}
+	}
+}
+
 func TestListReceiptsReturnsOnlyReceiptsBelongingToTheAuthenticatedClaim(t *testing.T) {
 	handler := NewRouter(Dependencies{Claims: fakeClaims{}, Receipts: fakeReceipts{}, Auth: StaticActorResolver{}})
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/claims/claim-1/receipts", nil)
@@ -654,6 +686,12 @@ func (fakeClaims) ListClaims(_ context.Context, actorID string, _ int) ([]applic
 		return nil, application.ErrClaimNotFound
 	}
 	return []application.ClaimView{{ID: "claim-1", OwnerID: actorID, Status: domain.ClaimStatusDraft, Purpose: "客户拜访", Version: 1}}, nil
+}
+func (fakeClaims) FindClaimByNumber(_ context.Context, actorID string, claimNumber string) (application.ClaimView, error) {
+	if actorID != "employee-1" || claimNumber != "BX20261008-0001" {
+		return application.ClaimView{}, application.ErrClaimNotFound
+	}
+	return application.ClaimView{ID: "claim-1", ClaimNumber: claimNumber, OwnerID: actorID, Status: domain.ClaimStatusDraft, Version: 1}, nil
 }
 func (fakeClaims) GetClaim(_ context.Context, actorID string, claimID string) (application.ClaimView, error) {
 	if actorID != "employee-1" || claimID != "claim-1" {

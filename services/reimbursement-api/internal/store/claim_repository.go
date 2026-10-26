@@ -76,6 +76,18 @@ func (repository *PostgresClaimRepository) FindOwned(ctx context.Context, claimI
 	return claim, nil
 }
 
+func (repository *PostgresClaimRepository) FindOwnedByNumber(ctx context.Context, claimNumber string, actorID string) (domain.Claim, error) {
+	var claimID string
+	err := repository.pool.QueryRow(ctx, `SELECT id FROM reimbursement.claims WHERE claim_number = $1 AND owner_id = $2`, claimNumber, actorID).Scan(&claimID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Claim{}, application.ErrClaimNotFound
+	}
+	if err != nil {
+		return domain.Claim{}, fmt.Errorf("query owned claim number: %w", err)
+	}
+	return repository.FindOwned(ctx, claimID, actorID)
+}
+
 type claimRow interface{ Scan(...any) error }
 
 func scanClaim(row claimRow) (domain.Claim, error) {

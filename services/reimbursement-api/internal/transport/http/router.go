@@ -11,6 +11,7 @@ import (
 type ClaimService interface {
 	CreateClaim(ctx context.Context, actorID string, command application.CreateClaimCommand) (application.ClaimView, error)
 	ListClaims(ctx context.Context, actorID string, limit int) ([]application.ClaimView, error)
+	FindClaimByNumber(ctx context.Context, actorID string, claimNumber string) (application.ClaimView, error)
 	GetClaim(ctx context.Context, actorID string, claimID string) (application.ClaimView, error)
 	UpdateClaim(ctx context.Context, actorID string, claimID string, expectedVersion int64, command application.PatchClaimCommand) (application.ClaimView, error)
 }

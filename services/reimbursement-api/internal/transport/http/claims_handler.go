@@ -3,12 +3,15 @@ package transport
 import (
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/application"
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/domain"
 )
+
+var claimNumberPattern = regexp.MustCompile(`^BX[0-9]{8}-[0-9]{4,}$`)
 
 type claimsHandler struct {
 	claims      ClaimService
@@ -18,6 +21,24 @@ type claimsHandler struct {
 
 func (handler *claimsHandler) listClaims(response http.ResponseWriter, request *http.Request) {
 	actor, _ := ActorFromContext(request.Context())
+	if _, present := request.URL.Query()["claimNumber"]; present {
+		claimNumber := request.URL.Query().Get("claimNumber")
+		if !claimNumberPattern.MatchString(claimNumber) {
+			writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "报销单号格式无效")
+			return
+		}
+		claim, err := handler.claims.FindClaimByNumber(request.Context(), actor.ID, claimNumber)
+		if err == application.ErrClaimNotFound {
+			writeJSON(response, http.StatusOK, map[string]any{"items": []any{}})
+			return
+		}
+		if err != nil {
+			writeMappedError(response, err)
+			return
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"items": []any{claimResponse(claim)}})
+		return
+	}
 	limit, _ := strconv.Atoi(request.URL.Query().Get("limit"))
 	claims, err := handler.claims.ListClaims(request.Context(), actor.ID, limit)
 	if err != nil {

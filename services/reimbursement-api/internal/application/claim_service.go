@@ -40,9 +40,21 @@ type ClaimView = domain.Claim
 type ClaimRepository interface {
 	Create(context.Context, domain.Claim, ClaimAudit, ClaimOutboxEvent) error
 	FindOwned(context.Context, string, string) (domain.Claim, error)
+	FindOwnedByNumber(context.Context, string, string) (domain.Claim, error)
 	ListOwned(context.Context, string, int) ([]domain.Claim, error)
 	Update(context.Context, domain.Claim, int64, ClaimAudit, ClaimOutboxEvent) error
 	Delete(context.Context, string, string, int64, ClaimAudit, ClaimOutboxEvent) error
+}
+
+func (service *ClaimService) FindClaimByNumber(ctx context.Context, actorID string, claimNumber string) (ClaimView, error) {
+	claim, err := service.repository.FindOwnedByNumber(ctx, claimNumber, actorID)
+	if errors.Is(err, ErrClaimNotFound) {
+		return ClaimView{}, ErrClaimNotFound
+	}
+	if err != nil {
+		return ClaimView{}, fmt.Errorf("find owned claim by number: %w", err)
+	}
+	return claim.Clone(), nil
 }
 
 func (service *ClaimService) ListClaims(ctx context.Context, actorID string, limit int) ([]ClaimView, error) {
@@ -215,6 +227,17 @@ func (repository *MemoryClaimRepository) FindOwned(_ context.Context, claimID st
 		return domain.Claim{}, ErrClaimNotFound
 	}
 	return claim.Clone(), nil
+}
+
+func (repository *MemoryClaimRepository) FindOwnedByNumber(_ context.Context, claimNumber string, actorID string) (domain.Claim, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	for _, claim := range repository.claims {
+		if claim.OwnerID == actorID && claim.ClaimNumber == claimNumber {
+			return claim.Clone(), nil
+		}
+	}
+	return domain.Claim{}, ErrClaimNotFound
 }
 
 func (repository *MemoryClaimRepository) ListOwned(_ context.Context, actorID string, limit int) ([]domain.Claim, error) {

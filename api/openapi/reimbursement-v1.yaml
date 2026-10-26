@@ -121,6 +121,11 @@ paths:
           in: query
           required: false
           schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: claimNumber
+          in: query
+          required: false
+          description: Exact actor-owned business claim number; missing and inaccessible claims both return an empty items array.
+          schema: { type: string, pattern: '^BX[0-9]{8}-[0-9]{4,}$' }
       responses:
         "200":
           description: Actor-owned claim page
