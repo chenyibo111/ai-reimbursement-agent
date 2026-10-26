@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-26-agent-field-write-and-owned-claim-lookup-design.md`
 
+**实施记录（2026-10-26）：** Task 1–6 已在 `feature/agent-fields-and-owned-claim-lookup` 分步提交。Task 7 的路由契约、Go 仓储隔离测试与自动化回归已通过：根目录 110 文件 / 431 测试、Agent 9 文件 / 23 测试、React 9 文件 / 34 测试、Go 全套、lint（2 条既有警告）、TypeScript 检查和 Next/React 生产构建。Playwright 浏览器流程、真实模型评测及双员工飞书/Web 人工验收仍未执行，不视为已验收；操作步骤见 `docs/operations/agent-owned-claim-acceptance.md`。
+
 ## Global Constraints
 
 - Use the current `feature/agent-fields-and-owned-claim-lookup` checkout; no worktree. Preserve unrelated changes.
@@ -108,7 +110,7 @@
 
 **Interfaces:** No new product API. Acceptance follows the spec's field, owner-isolation, read-selection and confirmation-token scenarios.
 
-- [ ] **Step 1: Add browser E2E/contract assertions** for user-visible saved fields, own-claim list and explicit selection, and unchanged submit target; run them and fix any integration failure. Unit and service tests already provide the RED checks before each feature implementation.
+- [x] **Step 1: Add browser E2E/contract assertions** for user-visible saved fields, own-claim list and explicit selection, and unchanged submit target; run them and fix any integration failure. Unit and service tests already provide the RED checks before each feature implementation. Route contract and turn-level target assertions passed; browser flow remains pending under Step 2.
 - [ ] **Step 2: Run Go tests, `npm test`, `npm run lint`, `npx tsc --noEmit`, `npm run build`, React app tests/build, and the relevant Playwright E2E tests.** Record exact counts and any unrelated warnings; do not mark acceptance complete for an unrun command.
 - [ ] **Step 3: Run a real-model intent evaluation only with explicit user approval for model requests/cost; otherwise report it as pending.** Do not log the employee's raw text in the observability platform.
 - [ ] **Step 4: Manually verify private Feishu and Web with an authorized employee, a second employee for cross-owner denial, and a prepared submission invalidated by field edit.** If external account access is unavailable, give exact user steps and leave this checkbox pending.

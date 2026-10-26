@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -11,6 +12,43 @@ import (
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/domain"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func TestPostgresClaimNumberLookupScopesByOwner(t *testing.T) {
+	databaseURL := os.Getenv("TEST_REIMBURSEMENT_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_REIMBURSEMENT_DATABASE_URL is not configured")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	suffix := time.Now().UTC().Format("20060102150405.000000000")
+	ownerID := "number-owner-" + suffix
+	otherID := "number-other-" + suffix
+	for _, id := range []string{ownerID, otherID} {
+		if _, err := pool.Exec(ctx, `INSERT INTO reimbursement.employees (id, display_name) VALUES ($1, 'Number Lookup Test')`, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repository := NewPostgresClaimRepository(pool)
+	service := application.NewClaimService(repository, fixedIDGenerator{value: "number-claim-" + suffix}, NewPostgresClaimNumberGenerator(pool), time.Now)
+	created, err := service.CreateClaim(ctx, ownerID, application.CreateClaimCommand{Purpose: "客户拜访"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found, err := repository.FindOwnedByNumber(ctx, created.ClaimNumber, ownerID)
+	if err != nil || found.ID != created.ID {
+		t.Fatalf("owner lookup = %#v, %v", found, err)
+	}
+	if _, err := repository.FindOwnedByNumber(ctx, created.ClaimNumber, otherID); !errors.Is(err, application.ErrClaimNotFound) {
+		t.Fatalf("foreign number lookup = %v", err)
+	}
+	if _, err := repository.FindOwnedByNumber(ctx, "BX20261009-999999999", ownerID); !errors.Is(err, application.ErrClaimNotFound) {
+		t.Fatalf("missing number lookup = %v", err)
+	}
+}
 
 func TestPostgresClaimRepositoryWritesAuditAndOutboxAtomically(t *testing.T) {
 	databaseURL := os.Getenv("TEST_REIMBURSEMENT_DATABASE_URL")

@@ -328,9 +328,14 @@ it("selects an older owned claim for reads while writes stay bound to the Intake
   let turns = 0;
   const readWorkbench = vi.fn(async ({ claimId }: { claimId: string }) => ({ claim: { id: claimId, claimNumber: "BX20261009-0026", version: 2, status: "SUBMITTED", purpose: "旧事由", requestedAmountCent: 10000, totalAmountCent: 10000, currency: "CNY" as const }, receipts: [] }));
   const setup = createDeps({
-    model: { decideConversation: async () => ++turns <= 2
-      ? { action: "READ_CLAIM" as const, reply: "ignored", ...(turns === 1 ? { claimNumber: "BX20261009-0026" } : {}) }
-      : { action: "COLLECT_FIELDS" as const, reply: "ignored", fields: { purpose: "新事由" } } },
+    model: { decideConversation: async () => {
+      ++turns;
+      return turns <= 2
+        ? { action: "READ_CLAIM" as const, reply: "ignored", ...(turns === 1 ? { claimNumber: "BX20261009-0026" } : {}) }
+        : turns === 3
+          ? { action: "COLLECT_FIELDS" as const, reply: "ignored", fields: { purpose: "新事由" } }
+          : { action: "PREPARE_SUBMISSION" as const, reply: "ignored" };
+    } },
     findOwnedClaimByNumber: async () => ({ id: "old-claim", claimNumber: "BX20261009-0026", status: "SUBMITTED", purpose: "旧事由", version: 2, currency: "CNY", totalAmountCent: 10000 }),
     readWorkbench,
   });
@@ -348,6 +353,10 @@ it("selects an older owned claim for reads while writes stay bound to the Intake
   expect(readWorkbench).toHaveBeenLastCalledWith({ actorId: "employee-1", claimId: "old-claim" });
   await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "改事由" }, setup.deps);
   expect(setup.updateFields).toHaveBeenCalledWith({ actorId: "employee-1", claimId: "active-claim", fields: { purpose: "新事由" } });
+  await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "准备提交" }, setup.deps);
+  expect(setup.prepareSubmission).toHaveBeenCalledWith({ actorId: "employee-1", claimId: "active-claim" });
+  await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "确认提交" }, setup.deps);
+  expect(setup.submitClaim).toHaveBeenCalledWith({ actorId: "employee-1", claimId: "active-claim", confirmationToken: "confirmation-token" });
 });
 
 it("gives the same safe reply for a missing or foreign business number", async () => {

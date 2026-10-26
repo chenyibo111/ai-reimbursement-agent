@@ -198,3 +198,76 @@ it("answers a private amount query from the signed-in employee's Go claim", asyn
     if (originalModelKey === undefined) delete process.env.MODEL_PROVIDER_API_KEY; else process.env.MODEL_PROVIDER_API_KEY = originalModelKey;
   }
 });
+
+it("saves conversational fields through Go and lists only Go-owned claims", async () => {
+  const employeeId = `conversation-api-${crypto.randomUUID()}`;
+  await prisma.employee.create({ data: { id: employeeId, displayName: "员工 A" } });
+  const repository = new AgentConversationRepository(prisma);
+  const conversation = await repository.getOrCreatePrivate(employeeId);
+  await repository.createIntake({ employeeId, conversationId: conversation.id, pendingFields: ["purpose"] });
+  const originalFetch = globalThis.fetch;
+  const original = { provider: process.env.MODEL_PROVIDER, baseUrl: process.env.MODEL_BASE_URL, name: process.env.MODEL_NAME, key: process.env.MODEL_PROVIDER_API_KEY };
+  process.env.MODEL_PROVIDER = "openai-compatible";
+  process.env.MODEL_BASE_URL = "http://model.test/v1";
+  process.env.MODEL_NAME = "fixture";
+  process.env.MODEL_PROVIDER_API_KEY = "fixture-key";
+  let claim = { id: "go-claim-fields", claimNumber: "BX20261009-0026", version: 1, status: "DRAFT", purpose: "", expenseCategory: "", participants: [] as string[], projectCode: "", requestedAmountCent: null, totalAmountCent: null, currency: "CNY" };
+  const oldClaim = { ...claim, id: "old-go-claim", claimNumber: "BX20261009-0001", version: 3, status: "SUBMITTED", purpose: "旧单", requestedAmountCent: 10000 };
+  const calls: string[] = [];
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    calls.push(`${init?.method ?? "GET"} ${url}`);
+    if (url === "http://model.test/v1/chat/completions") {
+      const payload = JSON.parse(String(init?.body));
+      const messages = JSON.parse(payload.messages[1].content).messages as Array<{ text: string }>;
+      const message = messages[0]?.text;
+      const decision = message === "我的报销列表" ? { action: "LIST_CLAIMS", reply: "ignored" }
+        : message === "查 BX20261009-0001" ? { action: "READ_CLAIM", reply: "ignored", claimNumber: "BX20261009-0001" }
+        : message === "这单金额" ? { action: "READ_CLAIM", reply: "ignored" }
+        : { action: "COLLECT_FIELDS", reply: "ignored", fields: { purpose: message === "修改当前事由" ? "新事由" : "客户拜访", ...(message === "修改当前事由" ? {} : { expenseCategory: "交通", participants: ["张三"], projectCode: "P-001" }) } };
+      return Response.json({ choices: [{ message: { content: JSON.stringify(decision) } }] });
+    }
+    if (url.endsWith("/api/v1/claims") && init?.method === "POST") return Response.json(claim, { status: 201 });
+    if (url.endsWith("/api/v1/claims/go-claim-fields") && init?.method === "PATCH") {
+      const patch = JSON.parse(String(init.body));
+      expect(patch).toEqual(claim.version === 1
+        ? { version: 1, purpose: "客户拜访", expenseCategory: "交通", participants: ["张三"], projectCode: "P-001" }
+        : { version: 2, purpose: "新事由" });
+      claim = { ...claim, ...patch, version: claim.version + 1 };
+      return Response.json(claim);
+    }
+    if (url.endsWith("/api/v1/claims/go-claim-fields")) return Response.json(claim);
+    if (url.endsWith("/api/v1/claims/go-claim-fields/receipts")) return Response.json({ items: [] });
+    if (url.endsWith("/api/v1/claims?claimNumber=BX20261009-0001")) return Response.json({ items: [oldClaim] });
+    if (url.endsWith("/api/v1/claims/old-go-claim")) return Response.json(oldClaim);
+    if (url.endsWith("/api/v1/claims/old-go-claim/receipts")) return Response.json({ items: [] });
+    if (url.endsWith("/api/v1/claims?limit=5")) return Response.json({ items: [claim] });
+    throw new Error(`unexpected request: ${url}`);
+  }) as typeof fetch;
+  const send = (message: string) => postMessage(new Request("http://localhost/api/conversations/private/messages", { method: "POST", headers: { "content-type": "application/json", cookie: session(employeeId) }, body: JSON.stringify({ message, turnId: `turn-${crypto.randomUUID()}` }) }));
+  try {
+    const saved = await send("项目 P-001，客户拜访，张三同行");
+    expect(saved.status).toBe(200);
+    expect((await saved.json()).reply).toContain("已保存到报销草稿");
+    expect(claim).toMatchObject({ purpose: "客户拜访", expenseCategory: "交通", participants: ["张三"], projectCode: "P-001" });
+    expect(calls.filter((call) => call.includes("go-claim-fields") && call.startsWith("GET ")).length).toBe(4);
+    const listed = await send("我的报销列表");
+    expect(listed.status).toBe(200);
+    expect((await listed.json()).reply).toContain("BX20261009-0026");
+    const lookup = await send("查 BX20261009-0001");
+    expect((await lookup.json()).reply).toContain("BX20261009-0001");
+    const followup = await send("这单金额");
+    expect((await followup.json()).reply).toContain("100.00");
+    const changed = await send("修改当前事由");
+    expect((await changed.json()).reply).toContain("新事由");
+    expect(claim.purpose).toBe("新事由");
+    expect(calls).not.toContain("PATCH http://127.0.0.1:8088/api/v1/claims/old-go-claim");
+    expect((await repository.getCurrentIntake(employeeId))?.claimId).toBe("go-claim-fields");
+    expect(await prisma.claimDraft.count({ where: { employeeId } })).toBe(0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of [["MODEL_PROVIDER", original.provider], ["MODEL_BASE_URL", original.baseUrl], ["MODEL_NAME", original.name], ["MODEL_PROVIDER_API_KEY", original.key]] as const) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
+});
