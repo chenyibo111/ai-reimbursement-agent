@@ -11,7 +11,7 @@ docker compose --profile migration up -d --build web feishu-bot-worker reimburse
 docker compose ps web feishu-bot-worker reimbursement-api reimbursement-web reimbursement-edge
 ```
 
-浏览器统一从 `http://localhost:8088/claims` 进入；确认各服务处于 `Up`，且飞书私聊机器人能回复。若本机只验证 Web 私有会话，可先不启动 `feishu-bot-worker`。不要仅重启旧容器而不重建镜像，否则验收的仍是旧代码。
+React + Go 报销工作台从 `http://localhost:8088/claims` 进入；本轮的 Web 私有 Agent 对话入口仍是旧 Next 界面的 `http://localhost:3000/claims` 悬浮“报销助理”，**React 页面目前没有该聊天悬浮入口**。两者共用同一个 `localhost` 登录 Cookie，但端口和页面不同。确认各服务处于 `Up`，且飞书私聊机器人能回复。若本机只验证 Web 私有会话，可先不启动 `feishu-bot-worker`。不要仅重启旧容器而不重建镜像，否则验收的仍是旧代码。
 
 1. 员工 A 在 Web 私有会话或飞书私聊说“开始报销”，检查仅建立 Intake、未建立 Go 草稿。再明确提供报销事由、费用类别、参与人员和项目编号。回复应为“已保存到报销草稿”，Go 工作台和 Web 页面刷新后字段应完全一致。金额、币种、备注的对话代填请求应引导去 Web，且不得声称已保存。
 2. 员工 A 说“我的报销单”，应最多看到五张本人单据的单号、状态、事由。提供一张较早的完整 `BXYYYYMMDD-序号` 单号，再追问“这单金额/状态”；每次都应以 Go 当前本人数据回答。员工 B 输入同一单号，与不存在的单号得到同样的安全未找到回复。
