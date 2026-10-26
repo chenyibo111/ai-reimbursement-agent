@@ -42,6 +42,8 @@ export async function POST(request: Request) {
         createClaim: ({ purpose }) => tools.createClaim(context, purpose),
         updateFields: ({ claimId, fields }) => tools.updateFields(context, claimId, fields),
         readWorkbench: ({ claimId }) => tools.readWorkbench(context, claimId),
+        listOwnedClaims: ({ limit }) => tools.listOwnedClaims(context, limit),
+        findOwnedClaimByNumber: ({ claimNumber }) => tools.findOwnedClaimByNumber(context, claimNumber),
         readValidation: ({ claimId }) => tools.readValidation(context, claimId),
         prepareSubmission: async ({ claimId }) => { const confirmation = await tools.prepareSubmission(context, claimId); return { token: confirmation.confirmationToken, claimId: confirmation.claimId, claimVersion: confirmation.claimVersion, workbench: confirmation.workbench }; },
         submitClaim: async ({ claimId, confirmationToken }) => { const submitted = await tools.submit(context, claimId, confirmationToken); return { submissionNumber: submitted.submissionNumber }; },
