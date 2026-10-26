@@ -40,7 +40,7 @@ export async function POST(request: Request) {
           chunks: new PrismaPolicyKnowledgeRepository(prisma),
         }) : undefined,
         createClaim: ({ purpose }) => tools.createClaim(context, purpose),
-        updatePurpose: ({ claimId, value }) => tools.updatePurpose(context, claimId, value),
+        updateFields: ({ claimId, fields }) => tools.updateFields(context, claimId, fields),
         readWorkbench: ({ claimId }) => tools.readWorkbench(context, claimId),
         readValidation: ({ claimId }) => tools.readValidation(context, claimId),
         prepareSubmission: async ({ claimId }) => { const confirmation = await tools.prepareSubmission(context, claimId); return { token: confirmation.confirmationToken, claimId: confirmation.claimId, claimVersion: confirmation.claimVersion, workbench: confirmation.workbench }; },

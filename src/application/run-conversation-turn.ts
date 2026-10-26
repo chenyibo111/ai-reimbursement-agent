@@ -3,7 +3,7 @@ import type { AgentMessageChannel, AgentMessageRole, ReimbursementIntakeStatus }
 import type { ConversationDecision, ChatModel } from "@/src/infrastructure/model/chat-model";
 import type { PolicyCitation, PolicySearchResult } from "@/src/application/search-policy-knowledge";
 import { formatClaimFacts, type ClaimFactKind } from "@/src/application/format-claim-facts";
-import type { ClaimSnapshot, ReceiptSnapshot, ValidationSnapshot } from "@/services/agent/src/ports/reimbursement-port";
+import type { ClaimFieldPatch, ClaimSnapshot, ReceiptSnapshot, ValidationSnapshot } from "@/services/agent/src/ports/reimbursement-port";
 import { ReimbursementApiHttpError } from "@/services/agent/src/adapters/reimbursement-api-client";
 
 type ConversationRecord = { id: string; summary: string; summaryThroughSequence: number };
@@ -43,6 +43,7 @@ export type RunConversationTurnDeps = {
   uploadReceipt?: (input: { actorId: string; claimId: string; filename: string; mimeType: string; bytes: Uint8Array; notificationTarget?: { conversationId: string; chatId: string } }) => Promise<{ id: string; jobId?: string }>;
   extractReceipt?: (input: { actorId: string; claimId: string; receiptId: string }) => Promise<unknown>;
   updatePurpose?: (input: { actorId: string; claimId: string; value: string }) => Promise<{ version: number }>;
+  updateFields?: (input: { actorId: string; claimId: string; fields: ClaimFieldPatch }) => Promise<ClaimSnapshot>;
   readWorkbench?: (input: { actorId: string; claimId: string }) => Promise<{ claim: ClaimSnapshot; receipts: ReceiptSnapshot[] }>;
   readValidation?: (input: { actorId: string; claimId: string }) => Promise<ValidationSnapshot>;
   prepareSubmission?: (input: { actorId: string; claimId: string }) => Promise<{ token: string; claimId: string; claimVersion: number; workbench: { claim: ClaimSnapshot; receipts: ReceiptSnapshot[] } }>;
@@ -217,21 +218,37 @@ async function applyDecision(
   }
   if (decision.action === "COLLECT_FIELDS") {
     if (!intake) return persistReply(input, null, "请先输入“开始报销”或上传票据，再补充报销信息。", [], deps.conversations);
-    const collectedFields = { ...intake.collectedFields, ...(decision.fields ?? {}) };
-    if (intake.claimId && typeof decision.fields?.purpose === "string" && deps.updatePurpose) {
-      await deps.updatePurpose({ actorId: input.actorId, claimId: intake.claimId, value: decision.fields.purpose });
+    const fields = validFieldPatch(decision.fields);
+    if (!fields) return persistReply(input, intake, "这项信息不能在对话中保存；金额、币种和备注请到 Web 工作台填写。", [], deps.conversations);
+    if (!deps.createClaim || !deps.updateFields) return persistReply(input, intake, "报销服务暂不可用，未确认写入。请稍后重试。", [], deps.conversations);
+    let bound = intake;
+    if (!bound.claimId) {
+      try {
+        const claim = await deps.createClaim({ actorId: input.actorId });
+        bound = await deps.conversations.updateIntake({ id: intake.id, claimId: claim.id });
+      } catch {
+        return persistReply(input, intake, "暂时无法创建报销草稿，本次信息未确认写入，请稍后重试。", [], deps.conversations);
+      }
     }
-    const pendingFields = intake.pendingFields.filter((field) => !(field in (decision.fields ?? {})));
-    const invalidatesSubmission = intake.status === "READY_TO_SUBMIT" && typeof decision.fields?.purpose === "string";
+    let actual: ClaimSnapshot;
+    try {
+      actual = await deps.updateFields({ actorId: input.actorId, claimId: bound.claimId!, fields });
+    } catch {
+      const safe = await clearSubmissionPreparation(bound, deps.conversations);
+      return persistReply(input, safe, "报销草稿可能已创建，但字段未确认写入。请到工作台核对后重试。", [], deps.conversations);
+    }
+    const verified = Object.fromEntries(Object.entries(fields).filter(([name, value]) => JSON.stringify(actual[name as keyof ClaimSnapshot]) === JSON.stringify(value))) as ClaimFieldPatch;
+    const safe = await clearSubmissionPreparation(bound, deps.conversations);
+    if (!Object.keys(verified).length) return persistReply(input, safe, "字段写入结果与报销单回读不一致，未确认保存；请到工作台核对后重试。", [], deps.conversations);
     const updated = await deps.conversations.updateIntake({
-      id: intake.id,
-      collectedFields,
-      pendingFields,
-      ...(invalidatesSubmission ? { status: "COLLECTING" as const, submissionToken: null, submissionPreview: null } : {}),
+      id: safe.id,
+      collectedFields: { ...safe.collectedFields, ...verified },
+      pendingFields: safe.pendingFields.filter((field) => !(field in verified)),
     });
     const fieldLabels: Record<string, string> = { purpose: "报销事由", expenseCategory: "费用类别", participants: "参与人员", projectCode: "项目编号" };
-    const saved = Object.entries(decision.fields ?? {}).map(([name, value]) => `${fieldLabels[name] ?? name}：${value}`);
-    return persistReply(input, updated, saved.length ? `已记录${saved.join("；")}。` : "没有可记录的字段，请说明要补充的报销信息。", [], deps.conversations);
+    const saved = Object.entries(verified).map(([name, value]) => `${fieldLabels[name] ?? name}：${Array.isArray(value) ? value.join("、") : value}`);
+    const partial = Object.keys(verified).length !== Object.keys(fields).length;
+    return persistReply(input, updated, `已保存到报销草稿：${saved.join("；")}。${partial ? "其余字段未确认写入，请到工作台核对或重试。" : ""}`, [], deps.conversations);
   }
 
   if (decision.action === "PREPARE_SUBMISSION") {
@@ -269,6 +286,23 @@ async function applyDecision(
   }
 
   return persistReply(input, intake, "如需查询当前报销单或票据金额，请明确提出查询；如需继续办理，请在报销工作台查看和填写。", [], deps.conversations);
+}
+
+function validFieldPatch(value: ConversationDecision["fields"]): ClaimFieldPatch | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const entries = Object.entries(value);
+  if (!entries.length) return null;
+  const fields: ClaimFieldPatch = {};
+  for (const [name, raw] of entries) {
+    if (name === "participants" && Array.isArray(raw) && raw.length >= 1 && raw.length <= 20 && raw.every((item) => typeof item === "string" && Array.from(item.trim()).length >= 1 && Array.from(item.trim()).length <= 80)) {
+      const participants = raw.map((item: string) => item.trim());
+      if (new Set(participants).size !== participants.length) return null;
+      fields.participants = participants;
+    } else if ((name === "purpose" || name === "expenseCategory" || name === "projectCode") && typeof raw === "string" && Array.from(raw.trim()).length >= 1 && Array.from(raw.trim()).length <= 200) {
+      fields[name] = raw.trim();
+    } else return null;
+  }
+  return fields;
 }
 
 async function confirmSubmission(

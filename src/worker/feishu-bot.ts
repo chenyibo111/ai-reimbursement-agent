@@ -95,7 +95,7 @@ function createProcessDeps(input: {
           const receipt = await tools.uploadReceipt(context, receiptInput.claimId, { filename: receiptInput.filename, mimeType: receiptInput.mimeType, bytes: receiptInput.bytes });
           return { id: receipt.receiptId };
         },
-        updatePurpose: ({ claimId, value }) => tools.updatePurpose(context, claimId, value),
+        updateFields: ({ claimId, fields }) => tools.updateFields(context, claimId, fields),
         readWorkbench: ({ claimId }) => tools.readWorkbench(context, claimId),
         readValidation: ({ claimId }) => tools.readValidation(context, claimId),
         prepareSubmission: async ({ claimId }) => {

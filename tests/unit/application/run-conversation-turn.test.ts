@@ -2,6 +2,7 @@ import { expect, it, vi } from "vitest";
 
 import { runConversationTurn, type ConversationStore } from "@/src/application/run-conversation-turn";
 import { ReimbursementApiHttpError } from "@/services/agent/src/adapters/reimbursement-api-client";
+import type { ClaimFieldPatch } from "@/services/agent/src/ports/reimbursement-port";
 
 type Intake = {
   id: string;
@@ -46,6 +47,7 @@ function createDeps(overrides: Partial<Record<string, unknown>> = {}) {
   const createClaim = vi.fn(async () => ({ id: "agent-claim-1", version: 1 }));
   const uploadReceipt = vi.fn(async () => ({ id: "receipt-1", jobId: "ocr-job-1" }));
   const updatePurpose = vi.fn(async () => ({ version: 2 }));
+  const updateFields = vi.fn(async ({ fields }: { actorId: string; claimId: string; fields: ClaimFieldPatch }) => ({ id: "agent-claim-1", claimNumber: "BX20261009-0026", version: 2, status: "DRAFT", purpose: fields.purpose ?? "", expenseCategory: fields.expenseCategory ?? "", participants: fields.participants ?? [], projectCode: fields.projectCode ?? "", totalAmountCent: null, currency: "CNY" as const }));
   const prepareSubmission = vi.fn(async () => ({ token: "confirmation-token", claimId: "agent-claim-1", claimVersion: 2, workbench: { claim: { id: "agent-claim-1", claimNumber: "BX-001", version: 2, status: "DRAFT", purpose: "客户拜访", requestedAmountCent: 12_345, totalAmountCent: 12_345, currency: "CNY" as const, receiptCount: 2 }, receipts: [{ id: "r1", claimId: "agent-claim-1", filename: "a.pdf", status: "EXTRACTED", invoiceNumber: "1", ocrConfidence: 0.9, totalAmountCent: 5000 }, { id: "r2", claimId: "agent-claim-1", filename: "b.pdf", status: "EXTRACTED", invoiceNumber: "2", ocrConfidence: 0.9, totalAmountCent: 7345 }] } }));
   const readValidation = vi.fn(async () => ({ claimId: "agent-claim-1", claimVersion: 2, policyVersion: "p1", issues: [] }));
   const submitClaim = vi.fn(async () => ({ submissionNumber: "RB20260001" }));
@@ -57,6 +59,7 @@ function createDeps(overrides: Partial<Record<string, unknown>> = {}) {
       preflightAttachment: async () => undefined,
       uploadReceipt,
       updatePurpose,
+      updateFields,
       readValidation,
       prepareSubmission,
       submitClaim,
@@ -67,6 +70,7 @@ function createDeps(overrides: Partial<Record<string, unknown>> = {}) {
     createClaim,
     uploadReceipt,
     updatePurpose,
+    updateFields,
     prepareSubmission,
     submitClaim,
     createIntake,
@@ -192,7 +196,7 @@ it("creates the first agent claim with a purpose collected before the attachment
   await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "客户拜访", }, deps);
   await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "上传发票", attachment }, deps);
 
-  expect(createClaim).toHaveBeenCalledWith({ actorId: "employee-1", purpose: "客户拜访" });
+  expect(createClaim).toHaveBeenCalledWith({ actorId: "employee-1" });
   expect(getIntake()).toMatchObject({ claimId: "agent-claim-1", collectedFields: { purpose: "客户拜访" } });
 });
 
@@ -260,7 +264,7 @@ it("does not expose or replace an Intake that belongs to another conversation", 
 });
 
 it("writes only allowlisted Intake fields through the claim field use case", async () => {
-  const { deps, updatePurpose, getIntake } = createDeps({
+  const { deps, updateFields, getIntake } = createDeps({
     model: { decideConversation: async () => ({ action: "COLLECT_FIELDS" as const, reply: "已记录事由。", fields: { purpose: "客户拜访" } }) },
   });
   await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1", pendingFields: ["purpose"] });
@@ -269,8 +273,45 @@ it("writes only allowlisted Intake fields through the claim field use case", asy
     intake: { collectedFields: { purpose: "客户拜访" } },
   });
 
-  expect(updatePurpose).toHaveBeenCalledWith({ actorId: "employee-1", claimId: "agent-claim-1", value: "客户拜访" });
+  expect(updateFields).toHaveBeenCalledWith({ actorId: "employee-1", claimId: "agent-claim-1", fields: { purpose: "客户拜访" } });
   expect(getIntake()).toMatchObject({ collectedFields: { purpose: "客户拜访" } });
+});
+
+it("creates a Go draft for the first fields and acknowledges only verified readback", async () => {
+  const fields = { purpose: "客户拜访", expenseCategory: "交通", participants: ["张三"], projectCode: "P-001" };
+  const setup = createDeps({ model: { decideConversation: async () => ({ action: "COLLECT_FIELDS" as const, reply: "ignored", fields }) } });
+  await setup.deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1" });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "补充字段" }, setup.deps);
+  expect(setup.createClaim).toHaveBeenCalledOnce();
+  expect(setup.updateFields).toHaveBeenCalledWith({ actorId: "employee-1", claimId: "agent-claim-1", fields });
+  expect(result.reply).toContain("已保存");
+  expect(result.intake?.collectedFields).toEqual(fields);
+});
+
+it("does not acknowledge an unverified write or retain an old confirmation", async () => {
+  const setup = createDeps({ model: { decideConversation: async () => ({ action: "COLLECT_FIELDS" as const, reply: "ignored", fields: { purpose: "新事由" } }) }, updateFields: async () => ({ id: "agent-claim-1", version: 3, purpose: "旧事由" }) });
+  await setup.deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1", status: "READY_TO_SUBMIT", submissionToken: "old-token" });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "修改事由" }, setup.deps);
+  expect(result.reply).not.toContain("已保存");
+  expect(result.intake?.submissionToken).toBeNull();
+  expect(result.intake?.collectedFields).not.toHaveProperty("purpose", "新事由");
+});
+
+it("rejects an amount proposal before creating a draft", async () => {
+  const setup = createDeps({ model: { decideConversation: async () => ({ action: "COLLECT_FIELDS" as const, reply: "saved", fields: { requestedAmountCent: 10000 } }) } });
+  await setup.deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1" });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "金额一百" }, setup.deps);
+  expect(result.reply).toContain("Web 工作台");
+  expect(setup.createClaim).not.toHaveBeenCalled();
+  expect(setup.updateFields).not.toHaveBeenCalled();
+});
+
+it("does not overwrite a concurrent Web edit after a Go version conflict", async () => {
+  const setup = createDeps({ model: { decideConversation: async () => ({ action: "COLLECT_FIELDS" as const, reply: "saved", fields: { purpose: "新事由" } }) }, updateFields: async () => { throw new ReimbursementApiHttpError("changed", 409, "VERSION_CONFLICT"); } });
+  await setup.deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1" });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "改事由" }, setup.deps);
+  expect(result.reply).not.toContain("已保存");
+  expect(result.intake?.collectedFields).toEqual({});
 });
 
 it.each(["这张发票金额是 999 元", "你没有读取报销单的权限"])("does not repeat ungrounded model facts: %s", async (reply) => {
