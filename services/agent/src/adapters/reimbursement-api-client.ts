@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 
-import type { ClaimSnapshot, ReimbursementPort, ReceiptSnapshot, ToolCallContext, ValidationSnapshot } from "../ports/reimbursement-port";
+import type { ClaimFieldPatch, ClaimSnapshot, ReimbursementPort, ReceiptSnapshot, ToolCallContext, ValidationSnapshot } from "../ports/reimbursement-port";
 
 type ApiClientOptions = {
   baseUrl: string;
@@ -38,7 +38,17 @@ export class ReimbursementApiClient implements ReimbursementPort {
     const [claim, receipts] = await Promise.all([this.request<ClaimSnapshot>(input, path, "GET"), this.request<{ items: ReceiptSnapshot[] }>(input, `${path}/receipts`, "GET")]);
     return { claim, receipts: receipts.items };
   }
-  updateClaimFields(input: ToolCallContext & { claimId: string; version: number; purpose?: string }) { return this.request<ClaimSnapshot>(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}`, "PATCH", { version: input.version, ...(input.purpose === undefined ? {} : { purpose: input.purpose }) }); }
+  async listOwnedClaims(input: ToolCallContext & { limit: number }) {
+    const response = await this.request<{ items: ClaimSnapshot[] }>(input, `/api/v1/claims?limit=${input.limit}`, "GET");
+    if (!Array.isArray(response.items)) throw new Error("invalid owned claim list");
+    return response.items.map(assertClaimSnapshot);
+  }
+  async findOwnedClaimByNumber(input: ToolCallContext & { claimNumber: string }) {
+    const response = await this.request<{ items: ClaimSnapshot[] }>(input, `/api/v1/claims?claimNumber=${encodeURIComponent(input.claimNumber)}`, "GET");
+    if (!Array.isArray(response.items) || response.items.length > 1) throw new Error("invalid claim lookup response");
+    return response.items.length ? assertClaimSnapshot(response.items[0]) : null;
+  }
+  updateClaimFields(input: ToolCallContext & { claimId: string; version: number; fields: ClaimFieldPatch }) { return this.request<ClaimSnapshot>(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}`, "PATCH", { version: input.version, ...input.fields }); }
   getClaimValidation(input: ToolCallContext & { claimId: string }) { return this.request<ValidationSnapshot>(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}/validation`, "GET"); }
   requestSubmissionConfirmation(input: ToolCallContext & { claimId: string; version: number }) { return this.request<{ confirmationToken: string; claimId: string; claimVersion: number }>(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}/submission-requests`, "POST", { version: input.version }); }
   submitClaim(input: ToolCallContext & { claimId: string; confirmationToken: string }) { return this.request<{ claimId: string; submissionNumber: string }>(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}/submit`, "POST", { confirmationToken: input.confirmationToken }); }
@@ -57,4 +67,9 @@ export class ReimbursementApiClient implements ReimbursementPort {
     const signed = `${header}.${payload}`;
     return `${signed}.${createHmac("sha256", this.options.signingSecret).update(signed).digest("base64url")}`;
   }
+}
+
+function assertClaimSnapshot(value: ClaimSnapshot): ClaimSnapshot {
+  if (!value || typeof value.id !== "string" || typeof value.claimNumber !== "string" || typeof value.version !== "number" || typeof value.status !== "string" || !Array.isArray(value.participants) || typeof value.expenseCategory !== "string" || typeof value.projectCode !== "string") throw new Error("invalid claim response");
+  return value;
 }

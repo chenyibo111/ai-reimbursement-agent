@@ -1,22 +1,34 @@
 import { ReimbursementToolGateway, type ReimbursementToolName } from "./reimbursement-tools";
-import type { ClaimSnapshot, ReceiptSnapshot, ValidationSnapshot } from "../ports/reimbursement-port";
+import type { ClaimFieldPatch, ClaimSnapshot, ReceiptSnapshot, ValidationSnapshot } from "../ports/reimbursement-port";
 
 export type ConversationReimbursementContext = { actorId: string; actorRole: "EMPLOYEE" | "FINANCE_REVIEWER" | "ADMIN"; channel: "WEB" | "FEISHU"; conversationId: string; turnId: string };
 type Attachment = { filename: string; mimeType: string; bytes: Uint8Array };
 
 /** Adapts persisted conversation actions to the eight audited reimbursement tools. */
 export function createConversationReimbursementTools(gateway: ReimbursementToolGateway, fetcher: typeof fetch = fetch, internalStorageEndpoint?: string) {
-  const execute = (context: ConversationReimbursementContext, name: ReimbursementToolName, args: Record<string, unknown>) => gateway.execute({
+  const execute = (context: ConversationReimbursementContext, name: ReimbursementToolName, args: Record<string, unknown>, operationKey: string = name) => gateway.execute({
     actorEmployeeId: context.actorId,
     actorRole: context.actorRole,
     channel: context.channel,
     conversationId: context.conversationId,
-    toolCallId: `${context.actorId}:${context.conversationId}:${context.turnId}:${name}`,
-    idempotencyKey: `${context.actorId}:${context.conversationId}:${context.turnId}:${name}`,
+    toolCallId: `${context.actorId}:${context.conversationId}:${context.turnId}:${operationKey}`,
+    idempotencyKey: `${context.actorId}:${context.conversationId}:${context.turnId}:${operationKey}`,
     name,
     arguments: args,
   });
   return {
+    async listOwnedClaims(context: ConversationReimbursementContext, limit: number): Promise<ClaimSnapshot[]> {
+      return (await execute(context, "list_owned_claims", { limit })).claims as ClaimSnapshot[];
+    },
+    async findOwnedClaimByNumber(context: ConversationReimbursementContext, claimNumber: string): Promise<ClaimSnapshot | null> {
+      return (await execute(context, "find_owned_claim_by_number", { claimNumber })).claim as ClaimSnapshot | null;
+    },
+    async updateFields(context: ConversationReimbursementContext, claimId: string, fields: ClaimFieldPatch): Promise<ClaimSnapshot> {
+      const before = (await execute(context, "get_claim_workbench", { claimId }, "fields.pre-read")).workbench as { claim: ClaimSnapshot };
+      await execute(context, "update_claim_fields", { claimId, version: before.claim.version, ...fields }, "fields.patch");
+      const after = (await execute(context, "get_claim_workbench", { claimId }, "fields.post-read")).workbench as { claim: ClaimSnapshot };
+      return after.claim;
+    },
     async readWorkbench(context: ConversationReimbursementContext, claimId: string) {
       return (await execute(context, "get_claim_workbench", { claimId })).workbench as { claim: ClaimSnapshot; receipts: ReceiptSnapshot[] };
     },

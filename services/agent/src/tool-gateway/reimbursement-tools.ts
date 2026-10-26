@@ -1,6 +1,6 @@
-import type { ReimbursementPort, ToolCallContext } from "../ports/reimbursement-port";
+import type { ClaimFieldPatch, ReimbursementPort, ToolCallContext } from "../ports/reimbursement-port";
 
-export type ReimbursementToolName = "create_claim_draft" | "create_upload_session" | "finalize_receipt_upload" | "get_claim_workbench" | "update_claim_fields" | "get_claim_validation" | "request_submission_confirmation" | "submit_claim";
+export type ReimbursementToolName = "create_claim_draft" | "create_upload_session" | "finalize_receipt_upload" | "get_claim_workbench" | "list_owned_claims" | "find_owned_claim_by_number" | "update_claim_fields" | "get_claim_validation" | "request_submission_confirmation" | "submit_claim";
 export type ToolCall = ToolCallContext & { name: ReimbursementToolName; arguments: Record<string, unknown> };
 
 export interface ToolCallResultStore {
@@ -23,7 +23,9 @@ export class ReimbursementToolGateway {
       case "create_upload_session": result = { upload: await this.port.createUploadSession({ ...context, claimId: requiredString(call.arguments, "claimId"), filename: requiredString(call.arguments, "filename"), contentType: requiredString(call.arguments, "contentType"), sizeBytes: requiredNumber(call.arguments, "sizeBytes") }) }; break;
       case "finalize_receipt_upload": result = { receipt: await this.port.finalizeReceiptUpload({ ...context, claimId: requiredString(call.arguments, "claimId"), receiptId: requiredString(call.arguments, "receiptId") }) }; break;
       case "get_claim_workbench": result = { workbench: await this.port.getClaimWorkbench({ ...context, claimId: requiredString(call.arguments, "claimId") }) }; break;
-      case "update_claim_fields": result = { claim: await this.port.updateClaimFields({ ...context, claimId: requiredString(call.arguments, "claimId"), version: requiredNumber(call.arguments, "version"), ...(typeof call.arguments.purpose === "string" ? { purpose: call.arguments.purpose } : {}) }) }; break;
+      case "list_owned_claims": result = { claims: await this.port.listOwnedClaims({ ...context, limit: requiredNumber(call.arguments, "limit") }) }; break;
+      case "find_owned_claim_by_number": result = { claim: await this.port.findOwnedClaimByNumber({ ...context, claimNumber: requiredString(call.arguments, "claimNumber") }) }; break;
+      case "update_claim_fields": result = { claim: await this.port.updateClaimFields({ ...context, claimId: requiredString(call.arguments, "claimId"), version: requiredNumber(call.arguments, "version"), fields: claimFieldPatch(call.arguments) }) }; break;
       case "get_claim_validation": result = { validation: await this.port.getClaimValidation({ ...context, claimId: requiredString(call.arguments, "claimId") }) }; break;
       case "request_submission_confirmation": result = { confirmation: await this.port.requestSubmissionConfirmation({ ...context, claimId: requiredString(call.arguments, "claimId"), version: requiredNumber(call.arguments, "version") }) }; break;
       case "submit_claim": result = { submission: await this.port.submitClaim({ ...context, claimId: requiredString(call.arguments, "claimId"), confirmationToken: requiredString(call.arguments, "confirmationToken") }) }; break;
@@ -35,6 +37,18 @@ export class ReimbursementToolGateway {
       throw error;
     }
   }
+}
+
+function claimFieldPatch(args: Record<string, unknown>): ClaimFieldPatch {
+  const fields: ClaimFieldPatch = {};
+  for (const [key, value] of Object.entries(args)) {
+    if (key === "claimId" || key === "version") continue;
+    if (key === "participants" && Array.isArray(value) && value.every((item) => typeof item === "string")) { fields.participants = value; continue; }
+    if ((key === "purpose" || key === "expenseCategory" || key === "projectCode") && typeof value === "string") { fields[key] = value; continue; }
+    throw new Error(`invalid claim field ${key}`);
+  }
+  if (!Object.keys(fields).length) throw new Error("no claim fields supplied");
+  return fields;
 }
 
 function assertContext(value: ToolCallContext) {

@@ -5,6 +5,19 @@ import { createConversationReimbursementTools } from "./conversation-reimburseme
 describe("createConversationReimbursementTools", () => {
   const context = { actorId: "employee-1", actorRole: "EMPLOYEE" as const, channel: "FEISHU" as const, conversationId: "conversation-1", turnId: "message-1" };
 
+  it("uses separate stable identities for pre-read, patch and post-read", async () => {
+    const before = { id: "claim-1", version: 2, purpose: "old", expenseCategory: "", participants: [], projectCode: "" };
+    const after = { ...before, version: 3, purpose: "new", participants: ["张三"] };
+    const execute = vi.fn().mockResolvedValueOnce({ workbench: { claim: before, receipts: [] } })
+      .mockResolvedValueOnce({ claim: after })
+      .mockResolvedValueOnce({ workbench: { claim: after, receipts: [] } });
+    const tools = createConversationReimbursementTools({ execute } as never);
+    await expect(tools.updateFields(context, "claim-1", { purpose: "new", participants: ["张三"] })).resolves.toEqual(after);
+    const ids = execute.mock.calls.map(([call]) => call.toolCallId);
+    expect(new Set(ids).size).toBe(3);
+    expect(execute.mock.calls[1][0].arguments).toEqual({ claimId: "claim-1", version: 2, purpose: "new", participants: ["张三"] });
+  });
+
   it("reads distinct receipt amounts and preserves unknown amounts", async () => {
     const workbench = { claim: { id: "claim-1", claimNumber: "BX-1", version: 4, status: "DRAFT", purpose: "出差", requestedAmountCent: 12000, totalAmountCent: null, currency: "CNY" }, receipts: [
       { id: "receipt-1", claimId: "claim-1", filename: "a.pdf", status: "EXTRACTED", invoiceNumber: "001", ocrConfidence: 0.98, totalAmountCent: 5000 },
