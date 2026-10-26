@@ -1,6 +1,6 @@
 # Agent 字段写入与本人单据查询设计
 
-**状态：待用户确认（2026-10-26）**
+**状态：用户已确认（2026-10-26）**
 
 ## 意图与范围
 
@@ -37,6 +37,7 @@ Go 已有按当前员工列单、按员工和 ID 读单、草稿版本化 PATCH�
 
 - Go：复用 `GET /api/v1/claims` 的本人列表，增加可选精确 `claimNumber` 过滤；保留现有 `GET /api/v1/claims/{id}` 的本人校验和 `PATCH /api/v1/claims/{id}` 的草稿版本校验。不增加 Agent 专属的绕权数据库读取。
 - Agent 工具端口：类型化 `list_owned_claims`、`find_owned_claim_by_number`、四字段 `update_claim_fields`；所有调用携带现有 actor/channel/conversation/tool-call 身份与审计信息。模型不能自行填充 `actorEmployeeId`。
+- 同一对话回合中的“写入前读取”和“写入后回读”必须使用不同且稳定的工具调用 ID；现有完成结果缓存不能把写入前快照错误复用为回读结果。重放同一回合仍须复用各步骤原有 ID 和幂等键。
 - 会话持久化：为 `AgentConversation` 增加 nullable `selectedReadClaimId`，只保存 Go ID，不建立跨 schema 外键。模型上下文只提供必要的单号/状态摘要，不把 Go 身份令牌或其他员工数据放进提示词。
 - 可观察性：记录动作类别、成功/失败码、工具耗时和请求关联 ID；不把字段值、参与人员、完整消息、票据内容或 Token 送入日志。
 
