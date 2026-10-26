@@ -214,6 +214,7 @@ it("saves conversational fields through Go and lists only Go-owned claims", asyn
   let claim = { id: "go-claim-fields", claimNumber: "BX20261009-0026", version: 1, status: "DRAFT", purpose: "", expenseCategory: "", participants: [] as string[], projectCode: "", requestedAmountCent: null, totalAmountCent: null, currency: "CNY" };
   const oldClaim = { ...claim, id: "old-go-claim", claimNumber: "BX20261009-0001", version: 3, status: "SUBMITTED", purpose: "旧单", requestedAmountCent: 10000 };
   const calls: string[] = [];
+  const modelMessages: string[] = [];
   globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     calls.push(`${init?.method ?? "GET"} ${url}`);
@@ -221,6 +222,7 @@ it("saves conversational fields through Go and lists only Go-owned claims", asyn
       const payload = JSON.parse(String(init?.body));
       const messages = JSON.parse(payload.messages[1].content).messages as Array<{ text: string }>;
       const message = messages[0]?.text;
+      modelMessages.push(message ?? "");
       const decision = message === "我的报销列表" ? { action: "LIST_CLAIMS", reply: "ignored" }
         : message === "查 BX20261009-0001" ? { action: "READ_CLAIM", reply: "ignored", claimNumber: "BX20261009-0001" }
         : message === "这单金额" ? { action: "READ_CLAIM", reply: "ignored" }
@@ -255,6 +257,8 @@ it("saves conversational fields through Go and lists only Go-owned claims", asyn
     expect(listed.status).toBe(200);
     expect((await listed.json()).reply).toContain("BX20261009-0026");
     const lookup = await send("查 BX20261009-0001");
+    expect(modelMessages.at(-1)).toBe("查 BX20261009-0001");
+    expect(calls).toContain("GET http://127.0.0.1:8088/api/v1/claims?claimNumber=BX20261009-0001");
     expect((await lookup.json()).reply).toContain("BX20261009-0001");
     const followup = await send("这单金额");
     expect((await followup.json()).reply).toContain("100.00");

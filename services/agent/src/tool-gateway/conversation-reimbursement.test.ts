@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createConversationReimbursementTools } from "./conversation-reimbursement";
+import { ReimbursementApiHttpError } from "../adapters/reimbursement-api-client";
+import { ReimbursementToolGateway } from "./reimbursement-tools";
 
 describe("createConversationReimbursementTools", () => {
   const context = { actorId: "employee-1", actorRole: "EMPLOYEE" as const, channel: "FEISHU" as const, conversationId: "conversation-1", turnId: "message-1" };
@@ -18,6 +20,26 @@ describe("createConversationReimbursementTools", () => {
     expect(execute.mock.calls[1][0].arguments).toEqual({ claimId: "claim-1", version: 2, purpose: "new", participants: ["张三"] });
   });
 
+  it("accepts a version conflict only when a fresh Go read already matches every proposed field", async () => {
+    const before = { id: "claim-1", version: 2, purpose: "旧事由", participants: [] };
+    const matching = { ...before, version: 3, purpose: "新事由", participants: ["张三"] };
+    const execute = vi.fn().mockResolvedValueOnce({ workbench: { claim: before, receipts: [] } })
+      .mockRejectedValueOnce(new ReimbursementApiHttpError("changed", 409, "VERSION_CONFLICT"))
+      .mockResolvedValueOnce({ workbench: { claim: matching, receipts: [] } });
+    const tools = createConversationReimbursementTools({ execute } as never);
+    await expect(tools.updateFields(context, "claim-1", { purpose: "新事由", participants: ["张三"] })).resolves.toEqual(matching);
+    expect(new Set(execute.mock.calls.map(([call]) => call.toolCallId)).size).toBe(3);
+  });
+
+  it("keeps a version conflict when Go still disagrees with a proposed field", async () => {
+    const before = { id: "claim-1", version: 2, purpose: "旧事由" };
+    const execute = vi.fn().mockResolvedValueOnce({ workbench: { claim: before, receipts: [] } })
+      .mockRejectedValueOnce(new ReimbursementApiHttpError("changed", 409, "VERSION_CONFLICT"))
+      .mockResolvedValueOnce({ workbench: { claim: { ...before, version: 3, purpose: "Web 新事由" }, receipts: [] } });
+    const tools = createConversationReimbursementTools({ execute } as never);
+    await expect(tools.updateFields(context, "claim-1", { purpose: "Agent 新事由" })).rejects.toMatchObject({ code: "VERSION_CONFLICT" });
+  });
+
   it("reads distinct receipt amounts and preserves unknown amounts", async () => {
     const workbench = { claim: { id: "claim-1", claimNumber: "BX-1", version: 4, status: "DRAFT", purpose: "出差", requestedAmountCent: 12000, totalAmountCent: null, currency: "CNY" }, receipts: [
       { id: "receipt-1", claimId: "claim-1", filename: "a.pdf", status: "EXTRACTED", invoiceNumber: "001", ocrConfidence: 0.98, totalAmountCent: 5000 },
@@ -28,6 +50,29 @@ describe("createConversationReimbursementTools", () => {
 
     await expect(tools.readWorkbench(context, "claim-1")).resolves.toEqual(workbench);
     expect(execute.mock.calls[0][0]).toMatchObject({ name: "get_claim_workbench", actorEmployeeId: "employee-1", arguments: { claimId: "claim-1" } });
+  });
+
+  it("does not reuse a cached workbench for another claim in the same turn", async () => {
+    const execute = vi.fn().mockResolvedValue({ workbench: { claim: { id: "claim-1" }, receipts: [] } });
+    const tools = createConversationReimbursementTools({ execute } as never);
+    await tools.readWorkbench(context, "claim-1");
+    await tools.readWorkbench(context, "claim-2");
+    const ids = execute.mock.calls.map(([call]) => call.toolCallId);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it("returns the correct claim with actual completed-tool replay enabled", async () => {
+    const completed = new Map<string, Record<string, unknown>>();
+    const getClaimWorkbench = vi.fn(async ({ claimId }: { claimId: string }) => ({ claim: { id: claimId }, receipts: [] }));
+    const gateway = new ReimbursementToolGateway({ getClaimWorkbench } as never, {
+      findCompleted: async (toolCallId) => completed.get(toolCallId) ?? null,
+      saveCompleted: async ({ toolCallId, result }) => { completed.set(toolCallId, result); },
+    });
+    const tools = createConversationReimbursementTools(gateway);
+    await expect(tools.readWorkbench(context, "claim-1")).resolves.toMatchObject({ claim: { id: "claim-1" } });
+    await expect(tools.readWorkbench(context, "claim-2")).resolves.toMatchObject({ claim: { id: "claim-2" } });
+    await expect(tools.readWorkbench(context, "claim-1")).resolves.toMatchObject({ claim: { id: "claim-1" } });
+    expect(getClaimWorkbench).toHaveBeenCalledTimes(2);
   });
 
   it("reads validation without requesting a confirmation token", async () => {

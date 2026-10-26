@@ -70,6 +70,7 @@ export class ReimbursementApiClient implements ReimbursementPort {
 }
 
 function assertClaimSnapshot(value: ClaimSnapshot): ClaimSnapshot {
-  if (!value || typeof value.id !== "string" || typeof value.claimNumber !== "string" || typeof value.version !== "number" || typeof value.status !== "string" || !Array.isArray(value.participants) || typeof value.expenseCategory !== "string" || typeof value.projectCode !== "string") throw new Error("invalid claim response");
-  return value;
+  const participants = value?.participants === null ? [] : value?.participants;
+  if (!value || typeof value.id !== "string" || typeof value.claimNumber !== "string" || typeof value.version !== "number" || typeof value.status !== "string" || !Array.isArray(participants) || typeof value.expenseCategory !== "string" || typeof value.projectCode !== "string") throw new Error("invalid claim response");
+  return { ...value, participants };
 }

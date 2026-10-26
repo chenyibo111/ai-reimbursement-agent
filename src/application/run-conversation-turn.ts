@@ -77,6 +77,12 @@ export async function runConversationTurn(
     await deps.conversations.appendMessage({ conversationId: conversation.id, role: "USER", channel: input.channel, channelMessageId: input.channelMessageId, text: message });
   }
   let active = await getConversationIntake(input.actorId, conversation.id, deps.conversations);
+  if (input.channel === "FEISHU" && input.chatType !== "p2p") active = null;
+  else {
+    const reconciliation = await reconcileIntakeFields(input.actorId, active, deps);
+    active = reconciliation.intake;
+    if (reconciliation.warning) return persistReply(input, active, reconciliation.warning, [], deps.conversations);
+  }
 
   const attachment = input.attachment;
   if (attachment && input.channel === "FEISHU" && input.chatType !== "p2p") {
@@ -100,6 +106,41 @@ export async function runConversationTurn(
   }
   if (decision.action === "POLICY_QUERY") return answerPolicyQuestion(input, active, message, deps);
   return applyDecision(input, active, decision, deps, conversation.selectedReadClaimId ?? null);
+}
+
+async function reconcileIntakeFields(
+  actorId: string,
+  intake: IntakeRecord | null,
+  deps: RunConversationTurnDeps,
+): Promise<{ intake: IntakeRecord | null; warning?: string }> {
+  if (!intake || !Object.keys(intake.collectedFields).length) return { intake };
+  let claim: ClaimSnapshot | null = null;
+  if (intake.claimId) {
+    if (!deps.readWorkbench) return { intake, warning: "暂时无法核对会话中的报销字段，本次请求未继续处理。请稍后到工作台确认后重试。" };
+    try {
+      claim = (await deps.readWorkbench({ actorId, claimId: intake.claimId })).claim;
+    } catch {
+      return { intake, warning: "暂时无法核对会话中的报销字段，本次请求未继续处理。请稍后到工作台确认后重试。" };
+    }
+  }
+  const fieldLabels: Record<string, string> = { purpose: "报销事由", expenseCategory: "费用类别", participants: "参与人员", projectCode: "项目编号" };
+  const verified: Record<string, unknown> = {};
+  const unverified: string[] = [];
+  for (const [name, value] of Object.entries(intake.collectedFields)) {
+    if (claim && name in fieldLabels && JSON.stringify(claim[name as keyof ClaimSnapshot]) === JSON.stringify(value)) verified[name] = value;
+    else unverified.push(fieldLabels[name] ?? "其他旧会话字段");
+  }
+  if (!unverified.length) return { intake };
+  const safe = await clearSubmissionPreparation(intake, deps.conversations);
+  const updated = await deps.conversations.updateIntake({
+    id: safe.id,
+    collectedFields: verified,
+    pendingFields: unverified.includes("报销事由") ? [...new Set([...safe.pendingFields, "purpose"])] : safe.pendingFields,
+  });
+  return {
+    intake: updated,
+    warning: `旧会话中的${[...new Set(unverified)].join("、")}未保存到当前报销单，已从会话记录移除；请核对工作台并重新确认这些字段。本次请求未继续处理，请重新发送。`,
+  };
 }
 
 async function handleAttachment(
@@ -226,10 +267,16 @@ async function applyDecision(
       let claimId = selectedReadClaimId ?? intake?.claimId ?? null;
       if (decision.claimNumber) {
         const number = decision.claimNumber.toUpperCase();
-        if (!/^BX[0-9]{8}-[0-9]{4,}$/.test(number)) return persistReply(input, intake, "报销单号格式无效，请提供完整单号。", [], deps.conversations);
+        if (!/^BX[0-9]{8}-[0-9]{4,}$/.test(number)) {
+          await deps.conversations.setSelectedReadClaimId?.({ conversationId: input.conversationId, claimId: null });
+          return persistReply(input, intake, "报销单号格式无效，请提供完整单号。", [], deps.conversations);
+        }
         if (!deps.findOwnedClaimByNumber || !deps.conversations.setSelectedReadClaimId) return persistReply(input, intake, "报销数据暂时无法查询，请稍后重试。", [], deps.conversations);
         const found = await deps.findOwnedClaimByNumber({ actorId: input.actorId, claimNumber: number });
-        if (!found) return persistReply(input, intake, "未找到该报销单，或你无权访问。请核对单号。", [], deps.conversations);
+        if (!found) {
+          await deps.conversations.setSelectedReadClaimId({ conversationId: input.conversationId, claimId: null });
+          return persistReply(input, intake, "未找到该报销单，或你无权访问。请核对单号。", [], deps.conversations);
+        }
         claimId = found.id;
         await deps.conversations.setSelectedReadClaimId({ conversationId: input.conversationId, claimId });
       }

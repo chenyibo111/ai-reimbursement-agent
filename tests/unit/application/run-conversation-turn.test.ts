@@ -297,6 +297,23 @@ it("does not acknowledge an unverified write or retain an old confirmation", asy
   expect(result.intake?.collectedFields).not.toHaveProperty("purpose", "新事由");
 });
 
+it("warns and removes legacy Intake-only fields instead of presenting them as saved", async () => {
+  const readWorkbench = vi.fn(async () => ({ claim: { id: "agent-claim-1", claimNumber: "BX20261009-0026", version: 2, status: "DRAFT", purpose: "客户拜访", expenseCategory: "", participants: [], projectCode: "", totalAmountCent: null, currency: "CNY" as const }, receipts: [] }));
+  const setup = createDeps({ readWorkbench, model: { decideConversation: async () => ({ action: "READ_CLAIM" as const, reply: "ignored" }) } });
+  await setup.deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1", collectedFields: { purpose: "客户拜访", expenseCategory: "交通", participants: ["张三"] }, pendingFields: [] });
+
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "这单信息是什么" }, setup.deps);
+
+  expect(result.reply).toContain("费用类别、参与人员");
+  expect(result.reply).toContain("未保存");
+  expect(result.intake?.collectedFields).toEqual({ purpose: "客户拜访" });
+  expect(setup.updateFields).not.toHaveBeenCalled();
+  expect(readWorkbench).toHaveBeenCalledWith({ actorId: "employee-1", claimId: "agent-claim-1" });
+  const next = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "现在这单信息是什么" }, setup.deps);
+  expect(next.reply).toContain("BX20261009-0026");
+  expect(next.reply).not.toContain("旧会话中的");
+});
+
 it("rejects an amount proposal before creating a draft", async () => {
   const setup = createDeps({ model: { decideConversation: async () => ({ action: "COLLECT_FIELDS" as const, reply: "saved", fields: { requestedAmountCent: 10000 } }) } });
   await setup.deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1" });
@@ -326,7 +343,7 @@ it("lists at most five owner claims without creating an Intake", async () => {
 it("selects an older owned claim for reads while writes stay bound to the Intake", async () => {
   let selectedReadClaimId: string | null = null;
   let turns = 0;
-  const readWorkbench = vi.fn(async ({ claimId }: { claimId: string }) => ({ claim: { id: claimId, claimNumber: "BX20261009-0026", version: 2, status: "SUBMITTED", purpose: "旧事由", requestedAmountCent: 10000, totalAmountCent: 10000, currency: "CNY" as const }, receipts: [] }));
+  const readWorkbench = vi.fn(async ({ claimId }: { claimId: string }) => ({ claim: { id: claimId, claimNumber: "BX20261009-0026", version: 2, status: claimId === "old-claim" ? "SUBMITTED" : "DRAFT", purpose: claimId === "old-claim" ? "旧事由" : "新事由", requestedAmountCent: 10000, totalAmountCent: 10000, currency: "CNY" as const }, receipts: [] }));
   const setup = createDeps({
     model: { decideConversation: async () => {
       ++turns;
@@ -361,9 +378,14 @@ it("selects an older owned claim for reads while writes stay bound to the Intake
 
 it("gives the same safe reply for a missing or foreign business number", async () => {
   const setup = createDeps({ findOwnedClaimByNumber: async () => null, readWorkbench: async () => { throw new Error("must not read"); }, model: { decideConversation: async () => ({ action: "READ_CLAIM" as const, reply: "ignored", claimNumber: "BX20261009-0026" }) } });
-  setup.deps.conversations = { ...setup.deps.conversations, setSelectedReadClaimId: async () => undefined } as never;
+  const setSelectedReadClaimId = vi.fn(async () => undefined);
+  setup.deps.conversations = { ...setup.deps.conversations,
+    getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0, selectedReadClaimId: "previous-claim" }),
+    setSelectedReadClaimId,
+  } as never;
   const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "查询 BX20261009-0026" }, setup.deps);
   expect(result.reply).toBe("未找到该报销单，或你无权访问。请核对单号。");
+  expect(setSelectedReadClaimId).toHaveBeenCalledWith({ conversationId: "conversation-1", claimId: null });
 });
 
 it("does not list private claims in a Feishu group", async () => {
@@ -372,6 +394,18 @@ it("does not list private claims in a Feishu group", async () => {
   const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "group", message: "我的报销单" }, setup.deps);
   expect(result.reply).toContain("私聊");
   expect(listOwnedClaims).not.toHaveBeenCalled();
+});
+
+it("does not reveal stale private Intake fields in a Feishu group", async () => {
+  const readWorkbench = vi.fn(async () => ({ claim: { id: "claim-1" }, receipts: [] }));
+  const decideConversation = vi.fn(async () => ({ action: "READ_CLAIM" as const, reply: "ignored" }));
+  const setup = createDeps({ readWorkbench, model: { decideConversation } });
+  await setup.deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "claim-1", collectedFields: { purpose: "私密客户拜访" } });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "group", message: "看看当前报销单" }, setup.deps);
+  expect(result.reply).toContain("私聊");
+  expect(result.reply).not.toContain("报销事由");
+  expect(readWorkbench).not.toHaveBeenCalled();
+  expect(decideConversation).toHaveBeenCalledWith(expect.objectContaining({ intake: null }));
 });
 
 it.each(["这张发票金额是 999 元", "你没有读取报销单的权限"])("does not repeat ungrounded model facts: %s", async (reply) => {

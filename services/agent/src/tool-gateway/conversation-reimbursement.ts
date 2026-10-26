@@ -1,4 +1,5 @@
 import { ReimbursementToolGateway, type ReimbursementToolName } from "./reimbursement-tools";
+import { ReimbursementApiHttpError } from "../adapters/reimbursement-api-client";
 import type { ClaimFieldPatch, ClaimSnapshot, ReceiptSnapshot, ValidationSnapshot } from "../ports/reimbursement-port";
 
 export type ConversationReimbursementContext = { actorId: string; actorRole: "EMPLOYEE" | "FINANCE_REVIEWER" | "ADMIN"; channel: "WEB" | "FEISHU"; conversationId: string; turnId: string };
@@ -25,12 +26,19 @@ export function createConversationReimbursementTools(gateway: ReimbursementToolG
     },
     async updateFields(context: ConversationReimbursementContext, claimId: string, fields: ClaimFieldPatch): Promise<ClaimSnapshot> {
       const before = (await execute(context, "get_claim_workbench", { claimId }, "fields.pre-read")).workbench as { claim: ClaimSnapshot };
-      await execute(context, "update_claim_fields", { claimId, version: before.claim.version, ...fields }, "fields.patch");
+      try {
+        await execute(context, "update_claim_fields", { claimId, version: before.claim.version, ...fields }, "fields.patch");
+      } catch (error) {
+        if (!(error instanceof ReimbursementApiHttpError) || error.code !== "VERSION_CONFLICT") throw error;
+        const current = (await execute(context, "get_claim_workbench", { claimId }, "fields.conflict-read")).workbench as { claim: ClaimSnapshot };
+        if (!Object.entries(fields).every(([name, value]) => JSON.stringify(current.claim[name as keyof ClaimSnapshot]) === JSON.stringify(value))) throw error;
+        return current.claim;
+      }
       const after = (await execute(context, "get_claim_workbench", { claimId }, "fields.post-read")).workbench as { claim: ClaimSnapshot };
       return after.claim;
     },
     async readWorkbench(context: ConversationReimbursementContext, claimId: string) {
-      return (await execute(context, "get_claim_workbench", { claimId })).workbench as { claim: ClaimSnapshot; receipts: ReceiptSnapshot[] };
+      return (await execute(context, "get_claim_workbench", { claimId }, `get_claim_workbench:${claimId}`)).workbench as { claim: ClaimSnapshot; receipts: ReceiptSnapshot[] };
     },
     async readValidation(context: ConversationReimbursementContext, claimId: string) {
       return (await execute(context, "get_claim_validation", { claimId })).validation as ValidationSnapshot;
