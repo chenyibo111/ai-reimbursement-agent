@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-25-section-aware-policy-retrieval-design.md`
 
-**执行状态（2026-10-26）：** Task 1–4 与 Task 5 的代码、测试、构建已完成。原文中的嵌入电子表格已由用户替换为普通文档表格。补充修正迁移将误落入连接用户 schema 的 `PolicySection` 安全移至 `public` 后，授权来源已真实同步为 v2 活动快照（51 个章节、51 个检索片）。实际向量检索的宽泛住宿问题与北京上海定向问题均命中同一个完整住宿费章节，含 600/500/400 元三档。飞书/Web 最终回答仍待用户从界面人工验收。
+**执行状态（2026-10-26）：** Task 1–4 与 Task 5 的代码、测试、构建已完成。原文中的嵌入电子表格已由用户替换为普通文档表格。补充修正迁移将误落入连接用户 schema 的 `PolicySection` 安全移至 `public` 后，授权来源已真实同步为 v2 活动快照（51 个章节、51 个检索片）。实际向量检索的宽泛住宿问题与北京上海定向问题均命中同一个完整住宿费章节，含 600/500/400 元三档。用户已确认飞书端人工问答验证完成；Web 端最终回答尚未单独确认。
 
 ## Global Constraints
 
@@ -126,5 +126,5 @@
 - [x] **Step 2: Run focused tests**; expect FAIL.
 - [x] **Step 3: Implement the existing admin source-row display** without a new page or a premature “sync complete” message.
 - [x] **Step 4a: Run `npm test`, `npm run lint`, `npx tsc --noEmit`, and `npm run build`**; latest rerun passed 413 tests, lint had 0 errors and 2 unrelated existing warnings, types and build passed. The additive and corrective migrations are applied to the local development and test databases.
-- [ ] **Step 4b: Complete live acceptance.** Authorized-source v2 resync succeeded after the embedded sheet was replaced with an ordinary document table. Direct retrieval checks passed for broad and city-specific lodging questions with all three rate tiers present; manual Feishu/Web answer checks remain.
+- [ ] **Step 4b: Complete live acceptance.** Authorized-source v2 resync succeeded after the embedded sheet was replaced with an ordinary document table. Direct retrieval checks passed for broad and city-specific lodging questions with all three rate tiers present. The user confirmed Feishu manual answer validation; separate Web answer validation remains unconfirmed.
 - [x] **Step 5: Review the full diff for secrets, policy-answer regressions and migration safety; commit final tests/UI/docs.**
