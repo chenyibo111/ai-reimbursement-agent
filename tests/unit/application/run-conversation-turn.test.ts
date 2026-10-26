@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 
-import { runConversationTurn } from "@/src/application/run-conversation-turn";
+import { runConversationTurn, type ConversationStore } from "@/src/application/run-conversation-turn";
 import { ReimbursementApiHttpError } from "@/services/agent/src/adapters/reimbursement-api-client";
 
 type Intake = {
@@ -13,6 +13,7 @@ type Intake = {
   pendingFields: string[];
   submissionToken: string | null;
   submissionPreview?: Record<string, unknown> | null;
+  restartRequestedAt?: Date | null;
 };
 
 function createDeps(overrides: Partial<Record<string, unknown>> = {}) {
@@ -27,6 +28,10 @@ function createDeps(overrides: Partial<Record<string, unknown>> = {}) {
     intake = { ...intake, ...input };
     return intake;
   });
+  const restartIntake = vi.fn(async ({ employeeId, conversationId }: { employeeId: string; conversationId: string; intakeId: string; requestedAfter: Date }) => {
+    intake = { id: "intake-restarted", employeeId, conversationId, status: "COLLECTING", claimId: null, collectedFields: {}, pendingFields: ["purpose"], submissionToken: null, restartRequestedAt: null };
+    return intake;
+  });
   const compareAndSetSummary = vi.fn(async () => true);
   const conversations = {
     getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0 }),
@@ -35,6 +40,7 @@ function createDeps(overrides: Partial<Record<string, unknown>> = {}) {
     getCurrentIntake: async () => intake,
     createIntake,
     updateIntake,
+    restartIntake,
     compareAndSetSummary,
   };
   const createClaim = vi.fn(async () => ({ id: "agent-claim-1", version: 1 }));
@@ -46,7 +52,7 @@ function createDeps(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     deps: {
       conversations,
-      model: { decideConversation: async () => ({ action: "ANSWER" as const, reply: "好的" }) },
+      model: { decideConversation: async () => ({ action: "HELP" as const, reply: "好的" }) },
       createClaim,
       preflightAttachment: async () => undefined,
       uploadReceipt,
@@ -65,14 +71,17 @@ function createDeps(overrides: Partial<Record<string, unknown>> = {}) {
     submitClaim,
     createIntake,
     updateIntake,
+    restartIntake,
     compareAndSetSummary,
   };
 }
 
 it("answers a policy question without creating an Intake or a claim", async () => {
+  const classifyIntent = vi.fn(async () => "POLICY_QUERY" as const);
+  const searchPolicy = vi.fn(async () => ({ citations: [{ id: "citation-1", title: "制度", url: "https://example", headingPath: [], excerpt: "住宿上限 500 元", score: 0.9 }], evidence: [{ sectionId: "section-1", title: "制度", headingPath: [], text: "住宿上限 500 元", complete: true }], incomplete: false }));
   const { deps, createClaim, getIntake } = createDeps({
-    searchPolicy: async () => [{ id: "citation-1", title: "制度", url: "https://example", headingPath: [], excerpt: "住宿上限 500 元", score: 0.9 }],
-    model: { classifyIntent: async () => "POLICY_QUERY" as const, answerPolicy: async () => "住宿上限为 500 元。", decideConversation: async () => { throw new Error("must not decide"); } },
+    searchPolicy,
+    model: { classifyIntent, answerPolicy: async () => "住宿上限为 500 元。", decideConversation: async () => ({ action: "POLICY_QUERY" as const, reply: "模型伪造金额999元" }) },
   });
 
   const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "住宿上限是多少" }, deps);
@@ -80,6 +89,69 @@ it("answers a policy question without creating an Intake or a claim", async () =
   expect(result).toMatchObject({ reply: "住宿上限为 500 元。", citations: [{ id: "citation-1" }], intake: null });
   expect(createClaim).not.toHaveBeenCalled();
   expect(getIntake()).toBeNull();
+  expect(searchPolicy).toHaveBeenCalledTimes(1);
+  expect(classifyIntent).not.toHaveBeenCalled();
+});
+
+it("does not give a definitive policy answer when chapter evidence is incomplete", async () => {
+  const answerPolicy = vi.fn(async () => "北京上海上限 600 元");
+  const { deps } = createDeps({
+    searchPolicy: async () => ({ citations: [{ id: "c1", title: "差旅", url: "https://example", excerpt: "北京上海 600 元", headingPath: ["住宿"], score: 0.9 }], evidence: [], incomplete: true }),
+    model: { decideConversation: async () => ({ action: "POLICY_QUERY" as const, reply: "" }), answerPolicy },
+  });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "住宿费规则" }, deps);
+  expect(result.reply).toContain("无法读取完整章节");
+  expect(result.citations).toHaveLength(1);
+  expect(answerPolicy).not.toHaveBeenCalled();
+});
+
+it("does not treat an in-flight redelivery of a start request as restart confirmation", async () => {
+  const setup = createDeps({ model: { decideConversation: async () => ({ action: "START_INTAKE" as const, reply: "只分类" }) } });
+  await setup.deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1" });
+  let inboundCount = 0;
+  let enterFirstReply!: () => void;
+  let releaseFirstReply!: () => void;
+  const firstReplyEntered = new Promise<void>((resolve) => { enterFirstReply = resolve; });
+  const firstReplyBlocked = new Promise<void>((resolve) => { releaseFirstReply = resolve; });
+  let assistantCount = 0;
+  const deps = {
+    ...setup.deps,
+    conversations: {
+      ...setup.deps.conversations,
+      appendUserMessageIfAbsent: async () => ({ message: { sequence: 1 }, created: ++inboundCount === 1 }),
+      findAssistantReplyByInboundMessageId: async () => null,
+      appendMessage: async (input: Parameters<ConversationStore["appendMessage"]>[0]) => {
+        if (input.role === "ASSISTANT" && ++assistantCount === 1) {
+          enterFirstReply();
+          await firstReplyBlocked;
+        }
+        return setup.appendMessage(input);
+      },
+    },
+  };
+  const input = { actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU" as const, chatType: "p2p" as const, channelMessageId: "om-replayed-start", message: "另起一单" };
+  const first = runConversationTurn(input, deps);
+  await firstReplyEntered;
+  try {
+    await expect(runConversationTurn(input, deps)).rejects.toThrow("inbound turn is already processing");
+    expect(setup.restartIntake).not.toHaveBeenCalled();
+  } finally {
+    releaseFirstReply();
+    await first;
+  }
+});
+
+it("uses Go rather than policy retrieval for a current-claim standards question", async () => {
+  const searchPolicy = vi.fn(async () => []);
+  const readWorkbench = vi.fn(async () => ({ claim: { id: "agent-claim-1", claimNumber: "BX-001", version: 2, status: "DRAFT", purpose: "客户拜访", requestedAmountCent: 10000, totalAmountCent: 10000, currency: "CNY" as const, receiptCount: 0 }, receipts: [] }));
+  const readValidation = vi.fn(async () => ({ claimId: "agent-claim-1", claimVersion: 2, policyVersion: "p1", issues: [] }));
+  const { deps } = createDeps({ searchPolicy, readWorkbench, readValidation, model: { decideConversation: async () => ({ action: "READ_SUBMISSION_SUMMARY" as const, reply: "政策片段999元" }) } });
+  await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1" });
+
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "本单住宿是否超标准" }, deps);
+  expect(result.reply).not.toContain("999");
+  expect(readValidation).toHaveBeenCalledOnce();
+  expect(searchPolicy).not.toHaveBeenCalled();
 });
 
 it("creates one agent-owned claim on the first attachment and reuses it for later attachments", async () => {
@@ -98,7 +170,7 @@ it("passes an OCR notification target only for a Feishu attachment with a verifi
   const { deps, uploadReceipt } = createDeps();
   const attachment = { filename: "invoice.png", mimeType: "image/png", bytes: new Uint8Array([1, 2, 3]) };
 
-  await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatId: "oc-receipt", channelMessageId: "om-upload", message: "上传发票", attachment }, deps);
+  await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", chatId: "oc-receipt", channelMessageId: "om-upload", message: "上传发票", attachment }, deps);
   await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "上传发票", attachment }, deps);
 
   expect(uploadReceipt).toHaveBeenNthCalledWith(1, expect.objectContaining({
@@ -108,8 +180,11 @@ it("passes an OCR notification target only for a Feishu attachment with a verifi
 });
 
 it("creates the first agent claim with a purpose collected before the attachment", async () => {
+  let textTurns = 0;
   const { deps, createClaim, getIntake } = createDeps({
-    model: { decideConversation: async () => ({ action: "COLLECT_FIELDS" as const, reply: "已记录事由。", fields: { purpose: "客户拜访" } }) },
+    model: { decideConversation: async () => ++textTurns === 1
+      ? { action: "START_INTAKE" as const, reply: "已开始" }
+      : { action: "COLLECT_FIELDS" as const, reply: "已记录事由。", fields: { purpose: "客户拜访" } } },
   });
   const attachment = { filename: "invoice.png", mimeType: "image/png", bytes: new Uint8Array([1, 2, 3]) };
 
@@ -121,8 +196,8 @@ it("creates the first agent claim with a purpose collected before the attachment
   expect(getIntake()).toMatchObject({ claimId: "agent-claim-1", collectedFields: { purpose: "客户拜访" } });
 });
 
-it("creates an Intake only for an explicit start command and persists an assistant reply", async () => {
-  const { deps, createClaim, getIntake, appendMessage } = createDeps();
+it("creates an Intake for a model-recognized start request and persists an assistant reply", async () => {
+  const { deps, createClaim, getIntake, appendMessage } = createDeps({ model: { decideConversation: async () => ({ action: "START_INTAKE" as const, reply: "模型文本不可作为办理结果" }) } });
 
   const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "开始报销" }, deps);
 
@@ -132,33 +207,53 @@ it("creates an Intake only for an explicit start command and persists an assista
   expect(appendMessage).toHaveBeenCalledTimes(2);
 });
 
-it("abandons the current Intake in the same conversation before starting a new one", async () => {
-  const { deps, createIntake, updateIntake, getIntake } = createDeps();
+it("asks before replacing an active Intake and restarts only after a second explicit model decision", async () => {
+  const { deps, createIntake, updateIntake, restartIntake, getIntake } = createDeps({ model: { decideConversation: async () => ({ action: "START_INTAKE" as const, reply: "已新建" }) } });
   await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1" });
 
-  await expect(runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "开始报销" }, deps)).resolves.toMatchObject({
-    reply: expect.stringContaining("已开始新的"),
-    intake: { status: "COLLECTING" },
-  });
-
-  expect(updateIntake).toHaveBeenCalledWith(expect.objectContaining({ status: "ABANDONED", submissionToken: null, submissionPreview: null }));
-  expect(createIntake).toHaveBeenCalledTimes(2);
+  const first = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "新建一笔报销" }, deps);
+  expect(first.reply).toContain("正在办理");
+  expect(updateIntake).toHaveBeenCalledWith(expect.objectContaining({ restartRequestedAt: expect.any(Date) }));
+  expect(createIntake).toHaveBeenCalledTimes(1);
+  expect(restartIntake).not.toHaveBeenCalled();
   expect(getIntake()).toMatchObject({ status: "COLLECTING" });
+
+  const second = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "是的，另起一单" }, deps);
+  expect(second.reply).toContain("已开始新的");
+  expect(restartIntake).toHaveBeenCalledWith(expect.objectContaining({ intakeId: "intake-1", requestedAfter: expect.any(Date) }));
+  expect(getIntake()).toMatchObject({ id: "intake-restarted", status: "COLLECTING" });
+});
+
+it("expires a restart request and asks again instead of replacing the Intake", async () => {
+  const { deps, restartIntake, updateIntake } = createDeps({ model: { decideConversation: async () => ({ action: "START_INTAKE" as const, reply: "已新建" }) } });
+  await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", restartRequestedAt: new Date(Date.now() - 11 * 60_000) });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "是，另起一单" }, deps);
+  expect(result.reply).toContain("正在办理");
+  expect(restartIntake).not.toHaveBeenCalled();
+  expect(updateIntake).toHaveBeenCalledWith(expect.objectContaining({ restartRequestedAt: expect.any(Date) }));
+});
+
+it("clears a pending restart when the employee changes topic", async () => {
+  const { deps, updateIntake, restartIntake } = createDeps({ model: { decideConversation: async () => ({ action: "HELP" as const, reply: "已新建" }) } });
+  await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", restartRequestedAt: new Date() });
+  await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "先说说流程" }, deps);
+  expect(updateIntake).toHaveBeenCalledWith(expect.objectContaining({ restartRequestedAt: null }));
+  expect(restartIntake).not.toHaveBeenCalled();
 });
 
 it("does not expose or replace an Intake that belongs to another conversation", async () => {
-  const { deps, createClaim, uploadReceipt } = createDeps();
+  const { deps, createClaim, uploadReceipt } = createDeps({ model: { decideConversation: async () => ({ action: "START_INTAKE" as const, reply: "模型文本不可作为办理结果" }) } });
   const foreign = { id: "intake-private", employeeId: "employee-1", conversationId: "private-conversation", status: "COLLECTING" as const, claimId: "claim-private", collectedFields: {}, pendingFields: ["purpose"], submissionToken: null };
   deps.conversations.getCurrentIntake = async () => foreign;
   deps.conversations.createIntake = vi.fn(async () => { throw new Error("active intake exists"); });
 
-  await expect(runConversationTurn({ actorId: "employee-1", conversationId: "group-conversation", channel: "FEISHU", message: "开始报销" }, deps)).resolves.toMatchObject({
+  await expect(runConversationTurn({ actorId: "employee-1", conversationId: "group-conversation", channel: "FEISHU", chatType: "group", message: "开始报销" }, deps)).resolves.toMatchObject({
     intake: null,
-    reply: expect.stringContaining("另一会话"),
+    reply: expect.stringContaining("私聊"),
   });
-  await expect(runConversationTurn({ actorId: "employee-1", conversationId: "group-conversation", channel: "FEISHU", message: "上传票据", attachment: { filename: "receipt.jpg", mimeType: "image/jpeg", bytes: new Uint8Array([1]) } }, deps)).resolves.toMatchObject({
+  await expect(runConversationTurn({ actorId: "employee-1", conversationId: "group-conversation", channel: "FEISHU", chatType: "group", message: "上传票据", attachment: { filename: "receipt.jpg", mimeType: "image/jpeg", bytes: new Uint8Array([1]) } }, deps)).resolves.toMatchObject({
     intake: null,
-    reply: expect.stringContaining("另一会话"),
+    reply: expect.stringContaining("私聊"),
   });
   expect(createClaim).not.toHaveBeenCalled();
   expect(uploadReceipt).not.toHaveBeenCalled();
@@ -179,11 +274,35 @@ it("writes only allowlisted Intake fields through the claim field use case", asy
 });
 
 it.each(["这张发票金额是 999 元", "你没有读取报销单的权限"])("does not repeat ungrounded model facts: %s", async (reply) => {
-  const { deps } = createDeps({ model: { decideConversation: async () => ({ action: "ANSWER" as const, reply }) } });
+  const { deps } = createDeps({ model: { decideConversation: async () => ({ action: "HELP" as const, reply }) } });
   const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "当前单据怎么样" }, deps);
   expect(result.reply).not.toContain("999");
   expect(result.reply).not.toContain("没有读取报销单的权限");
   expect(result.reply).toContain("工作台");
+});
+
+it.each([
+  ["HELP", "工作台"],
+  ["CLARIFY", "明确"],
+  ["OUT_OF_SCOPE", "报销"],
+] as const)("uses a server-owned %s reply", async (action, expected) => {
+  const { deps } = createDeps({ model: { decideConversation: async () => ({ action, reply: "金额为999元，已提交" }) } });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "请帮我" }, deps);
+  expect(result.reply).toContain(expected);
+  expect(result.reply).not.toContain("999");
+  expect(result.reply).not.toContain("已提交");
+});
+
+it("fails closed when the model is unavailable", async () => {
+  const searchPolicy = vi.fn();
+  const { deps, createClaim, prepareSubmission, submitClaim } = createDeps({ searchPolicy, model: { decideConversation: async () => { throw new Error("provider secret"); } } });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "新建报销" }, deps);
+  expect(result.reply).toContain("暂时");
+  expect(result.reply).not.toContain("provider secret");
+  expect(searchPolicy).not.toHaveBeenCalled();
+  expect(createClaim).not.toHaveBeenCalled();
+  expect(prepareSubmission).not.toHaveBeenCalled();
+  expect(submitClaim).not.toHaveBeenCalled();
 });
 
 it("acknowledges the persisted purpose rather than a fabricated model reply", async () => {
@@ -242,11 +361,11 @@ it("does not reveal whether a 404 claim exists when reading facts", async () => 
   expect(result.reply).not.toContain("private backend detail");
 });
 
-it.each(["READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPARE_SUBMISSION"] as const)("keeps %s private in a Feishu group", async (action) => {
+it.each(["START_INTAKE", "COLLECT_FIELDS", "READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPARE_SUBMISSION"] as const)("keeps %s private in a Feishu group", async (action) => {
   const readWorkbench = vi.fn();
   const readValidation = vi.fn();
   const prepareSubmission = vi.fn();
-  const { deps } = createDeps({ readWorkbench, readValidation, prepareSubmission, model: { decideConversation: async () => ({ action, reply: "金额为999元" }) } });
+  const { deps, createIntake, updateIntake } = createDeps({ readWorkbench, readValidation, prepareSubmission, model: { decideConversation: async () => ({ action, reply: "金额为999元", ...(action === "COLLECT_FIELDS" ? { fields: { purpose: "客户拜访" } } : {}) }) } });
   await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1" });
   const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "group", message: "@机器人 帮我看看报销" }, deps);
   expect(result.reply).toContain("私聊");
@@ -255,6 +374,8 @@ it.each(["READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPAR
   expect(readWorkbench).not.toHaveBeenCalled();
   expect(readValidation).not.toHaveBeenCalled();
   expect(prepareSubmission).not.toHaveBeenCalled();
+  expect(createIntake).toHaveBeenCalledTimes(1);
+  expect(updateIntake).not.toHaveBeenCalled();
 });
 
 it("never submits on a group confirmation even when a token exists", async () => {
@@ -368,7 +489,7 @@ it("invalidates a prepared submission when another attachment changes the claim"
 it("rolls older conversation messages into a bounded summary before model routing", async () => {
   let receivedSummary = "";
   const { deps, compareAndSetSummary } = createDeps({
-    model: { decideConversation: async (context: { summary: { text: string } }) => { receivedSummary = context.summary.text; return { action: "ANSWER" as const, reply: "好的" }; } },
+    model: { decideConversation: async (context: { summary: { text: string } }) => { receivedSummary = context.summary.text; return { action: "HELP" as const, reply: "好的" }; } },
   });
   deps.conversations.listMessages = async () => Array.from({ length: 16 }, (_, index) => ({ sequence: index + 1, role: "USER" as const, channel: "WEB" as const, text: `历史消息 ${index + 1}` }));
   await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "继续办理" }, deps);

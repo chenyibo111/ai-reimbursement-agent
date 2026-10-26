@@ -39,6 +39,18 @@ it("restricts policy sources to allowlisted administrators and validates the exp
   const payload = await listed.json();
   expect(payload.sources).toHaveLength(1);
   expect(payload.sources[0]).not.toHaveProperty("resourceToken");
+  expect(payload.sources[0]).toMatchObject({ sectionCount: null, chunkCount: null });
+
+  const staged = await prisma.policyDocumentSnapshot.create({ data: { sourceId: created.id, sourceRevision: "revision-1", contentHash: "hash-1", title: "制度", blocks: [], indexVersion: 2 } });
+  await prisma.policySection.create({ data: { snapshotId: staged.id, sequence: 0, headingPath: ["住宿"], content: "北京上海 600 元", complete: true } });
+  const beforeActivation = await GET(new Request("http://localhost/api/admin/policy-sources", { headers: { cookie: `reimbursement_session=${token}` } }));
+  expect((await beforeActivation.json()).sources[0]).toMatchObject({ sectionCount: null, chunkCount: null });
+  await prisma.policyDocumentSnapshot.update({ where: { id: staged.id }, data: { status: "ACTIVE", activatedAt: new Date() } });
+  const afterActivation = await GET(new Request("http://localhost/api/admin/policy-sources", { headers: { cookie: `reimbursement_session=${token}` } }));
+  expect((await afterActivation.json()).sources[0]).toMatchObject({ sectionCount: 1, chunkCount: 0 });
+  await prisma.policySource.update({ where: { id: created.id }, data: { lastFailureCode: "DOCUMENT_UNAUTHORIZED" } });
+  const afterFailure = await GET(new Request("http://localhost/api/admin/policy-sources", { headers: { cookie: `reimbursement_session=${token}` } }));
+  expect((await afterFailure.json()).sources[0]).toMatchObject({ sectionCount: 1, chunkCount: 0, lastFailureCode: "DOCUMENT_UNAUTHORIZED" });
 
   const disable = await PATCH(new Request(`http://localhost/api/admin/policy-sources/${created.id}`, {
     method: "PATCH",

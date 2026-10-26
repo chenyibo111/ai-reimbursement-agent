@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 
-type Source = { id: string; title: string; canonicalUrl: string; type: "FEISHU_DOCX" | "FEISHU_WIKI"; enabled: boolean; lastSuccessfulSyncAt: string | null; lastFailureCode: string | null };
+type Source = { id: string; title: string; canonicalUrl: string; type: "FEISHU_DOCX" | "FEISHU_WIKI"; enabled: boolean; lastSuccessfulSyncAt: string | null; lastFailureCode: string | null; sectionCount: number | null; chunkCount: number | null };
 
 export function PolicySourceManager() {
   const [sources, setSources] = useState<Source[]>([]);
@@ -13,7 +13,14 @@ export function PolicySourceManager() {
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
-  const load = useCallback(async () => { const response = await fetch("/api/admin/policy-sources"); const payload = await response.json(); if (response.ok) setSources(payload.sources ?? []); else setError(payload.error ?? "无法读取来源"); }, []);
+  const load = useCallback(async () => {
+    try {
+      const response = await fetch("/api/admin/policy-sources");
+      const payload = await response.json();
+      if (response.ok) { setSources(payload.sources ?? []); setError(""); }
+      else setError(payload.error ?? "无法读取来源，请稍后重试");
+    } catch { setError("无法连接到服务，请检查网络后重试"); }
+  }, []);
   useEffect(() => { void load(); }, [load]);
 
   async function add(event: FormEvent<HTMLFormElement>) {
@@ -23,7 +30,7 @@ export function PolicySourceManager() {
 
   async function updateEnabled(source: Source) {
     setError(""); setNotice(""); setBusyId(source.id);
-    try { const response = await fetch(`/api/admin/policy-sources/${source.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: !source.enabled }) }); const payload = await response.json(); if (!response.ok) { setError(payload.error ?? "无法更新来源状态"); return; } setSources((items) => items.map((item) => item.id === source.id ? payload : item)); setNotice(source.enabled ? "来源已停用，不会参与政策问答。" : "来源已启用，可再次手动同步。"); } finally { setBusyId(null); }
+    try { const response = await fetch(`/api/admin/policy-sources/${source.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: !source.enabled }) }); const payload = await response.json(); if (!response.ok) { setError(payload.error ?? "无法更新来源状态"); return; } setSources((items) => items.map((item) => item.id === source.id ? { ...item, ...payload, sectionCount: item.sectionCount, chunkCount: item.chunkCount } : item)); setNotice(source.enabled ? "来源已停用，不会参与政策问答。" : "来源已启用，可再次手动同步。"); } finally { setBusyId(null); }
   }
 
   async function sync(source: Source) {
@@ -36,12 +43,18 @@ export function PolicySourceManager() {
     <section className="policy-hero"><p className="eyebrow">政策管理员</p><h1>政策知识来源</h1><p>仅添加已获授权的飞书文档或 Wiki 页面；系统不会搜索或枚举飞书空间。</p></section>
     {error ? <p role="alert" className="notice-error">{error}</p> : null}{notice ? <p role="status" className="policy-status">{notice}</p> : null}
     <form className="policy-create-form" noValidate onSubmit={add}><label>来源标题<input value={title} onChange={(event) => setTitle(event.target.value)} required disabled={isAdding} /></label><label>飞书链接<input type="url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://xxx.feishu.cn/docx/..." required disabled={isAdding} /></label><button className="button-primary" disabled={isAdding}>{isAdding ? "正在添加…" : "添加来源"}</button></form>
-    <section className="policy-rule-preview" aria-labelledby="policy-source-list-title"><h2 id="policy-source-list-title">已登记来源</h2>{sources.length === 0 ? <p>尚未登记政策来源。添加授权文档后，员工才能获得带原文引用的制度答复。</p> : <ul>{sources.map((source) => { const busy = busyId === source.id; return <li key={source.id}><div><strong>{source.title}</strong><span>{sourceTypeLabel(source.type)} · {source.enabled ? "已启用" : "已停用"} · {source.lastSuccessfulSyncAt ? `上次同步 ${formatDate(source.lastSuccessfulSyncAt)}` : "尚未同步"}</span><a href={source.canonicalUrl} target="_blank" rel="noreferrer">打开原文</a>{source.lastFailureCode ? <p>最近同步失败：{policyFailureLabel(source.lastFailureCode)}。已保留上一次成功内容。</p> : null}</div><div className="policy-source-actions"><button className="button-outline" type="button" onClick={() => void updateEnabled(source)} disabled={busy}>{source.enabled ? "停用来源" : "重新启用"}</button><button className="button-outline" type="button" onClick={() => void sync(source)} disabled={busy || !source.enabled}>{busy ? "处理中…" : "立即同步"}</button></div></li>; })}</ul>}</section>
+    <section className="policy-rule-preview" aria-labelledby="policy-source-list-title"><h2 id="policy-source-list-title">已登记来源</h2><button className="button-outline" type="button" onClick={() => void load()}>刷新同步状态</button>{sources.length === 0 ? <p>尚未登记政策来源。添加授权文档后，员工才能获得带原文引用的制度答复。</p> : <ul>{sources.map((source) => { const busy = busyId === source.id; return <li key={source.id}><div><strong>{source.title}</strong><span>{sourceTypeLabel(source.type)} · {source.enabled ? "已启用" : "已停用"} · {source.lastSuccessfulSyncAt ? `上次同步 ${formatDate(source.lastSuccessfulSyncAt)}` : "尚未同步"}</span><span>{policySourceIndexLabel(source)}</span><a href={source.canonicalUrl} target="_blank" rel="noreferrer">打开原文</a>{source.lastFailureCode ? <p>最近同步失败：{policyFailureLabel(source.lastFailureCode)}。已保留上一次成功内容。</p> : null}</div><div className="policy-source-actions"><button className="button-outline" type="button" onClick={() => void updateEnabled(source)} disabled={busy}>{source.enabled ? "停用来源" : "重新启用"}</button><button className="button-outline" type="button" onClick={() => void sync(source)} disabled={busy || !source.enabled}>{busy ? "处理中…" : "立即同步"}</button></div></li>; })}</ul>}</section>
   </main>;
 }
 
 function sourceTypeLabel(type: Source["type"]): string { return type === "FEISHU_WIKI" ? "飞书知识库" : "飞书文档"; }
 function formatDate(value: string): string { return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)); }
+
+export function policySourceIndexLabel(source: Pick<Source, "sectionCount" | "chunkCount">): string {
+  if (source.chunkCount === null || source.sectionCount === null) return "尚无可检索内容";
+  if (source.sectionCount === 0 && source.chunkCount > 0) return `旧版索引：${source.chunkCount} 个检索片；重新同步后可按章节检索`;
+  return `当前索引：${source.sectionCount} 个章节 · ${source.chunkCount} 个检索片`;
+}
 
 export function policySyncNotice(payload: Record<string, unknown>): string {
   if (typeof payload.jobStatus === "string") return "同步任务已加入队列，完成后会更新来源状态。";
@@ -54,6 +67,7 @@ export function policyFailureLabel(code: string): string {
   if (code === "EMBEDDING_UNAVAILABLE") return "向量化服务不可用，请检查知识库服务是否已启动";
   if (code === "DOCUMENT_UNAUTHORIZED") return "飞书应用无权读取此文档，请将文档授权给应用";
   if (code === "DOCUMENT_RESOURCE_NOT_FOUND") return "未找到飞书文档，请检查链接是否正确";
-  if (code === "DOCUMENT_INVALID_RESPONSE") return "飞书文档访问被拒绝或返回异常，请检查应用权限和文档授权";
+  if (code === "DOCUMENT_UNSUPPORTED_SHEET") return "文档含嵌入电子表格，当前无法完整读取其中条款；请将相关内容转为文档正文或表格后重试";
+  if (code === "DOCUMENT_INVALID_RESPONSE") return "飞书文档结构无法完整读取，请检查复杂内容、应用权限和文档授权";
   return code;
 }

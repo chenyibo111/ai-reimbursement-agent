@@ -394,6 +394,7 @@ model ReimbursementIntake {
   pendingFields          String[]                  @default([])
   submissionToken        String?
   submissionPreview      Json?
+  restartRequestedAt     DateTime?
   lastUserConfirmationAt DateTime?
   createdAt              DateTime                  @default(now())
   updatedAt              DateTime                  @updatedAt
@@ -555,20 +556,40 @@ model PolicyDocumentSnapshot {
   status         PolicySnapshotStatus @default(STAGED)
   sourceRevision String
   contentHash    String
+  indexVersion   Int                  @default(1)
   title          String
   blocks         Json
   createdAt      DateTime             @default(now())
   activatedAt    DateTime?
   chunks         PolicyChunk[]
+  sections       PolicySection[]
 
-  @@unique([sourceId, sourceRevision])
+  @@unique([sourceId, sourceRevision, indexVersion])
   @@index([sourceId, status, createdAt])
+}
+
+model PolicySection {
+  id           String                 @id @default(cuid())
+  snapshotId   String
+  snapshot     PolicyDocumentSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  sequence     Int
+  headingPath  String[]               @default([])
+  content      String
+  sourceAnchor String?
+  complete     Boolean                @default(true)
+  createdAt    DateTime               @default(now())
+  chunks       PolicyChunk[]
+
+  @@unique([snapshotId, sequence])
+  @@index([snapshotId, sequence])
 }
 
 model PolicyChunk {
   id           String                       @id @default(cuid())
   snapshotId   String
   snapshot     PolicyDocumentSnapshot       @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  sectionId    String?
+  section      PolicySection?               @relation(fields: [sectionId], references: [id], onDelete: Cascade)
   sequence     Int
   headingPath  String[]                     @default([])
   content      String

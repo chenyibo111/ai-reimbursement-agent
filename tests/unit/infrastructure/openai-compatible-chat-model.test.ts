@@ -56,6 +56,7 @@ describe("OpenAiCompatibleChatModel", () => {
     const body = JSON.parse(String(request.body));
     expect(body.messages[1].content).toContain("一线城市住宿费用上限为每晚 500 元。");
     expect(body.messages[1].content).not.toContain("https://");
+    expect(body.messages[0].content).toContain("不同城市档位和例外");
   });
 
   it("accepts only constrained conversation decisions and sends no internal identifiers", async () => {
@@ -67,7 +68,7 @@ describe("OpenAiCompatibleChatModel", () => {
     await expect(model.decideConversation({
       summary: { text: "此前问答", throughSequence: 2 },
       messages: [{ sequence: 3, role: "USER", channel: "WEB", text: "还有张三同行" }],
-      intake: { status: "COLLECTING", collectedFields: { purpose: "客户拜访" }, pendingFields: ["participants"] },
+      intake: { status: "COLLECTING", collectedFields: { purpose: "客户拜访" }, pendingFields: ["participants"], restartPending: false },
       policyCitations: [{ title: "制度", headingPath: ["差旅"], excerpt: "需填写同行人。", score: 0.9 }],
       allowedFields: ["participants"],
     })).resolves.toEqual({ action: "COLLECT_FIELDS", reply: "请补充同行人。", fields: { participants: "张三" } });
@@ -106,6 +107,64 @@ describe("OpenAiCompatibleChatModel", () => {
     expect(body.messages[0].content).toContain(action);
   });
 
+  it.each(["POLICY_QUERY", "START_INTAKE", "HELP", "CLARIFY", "OUT_OF_SCOPE"])("accepts the unified %s action", async (action) => {
+    const decision = action === "CLARIFY"
+      ? { action, reply: "请明确需求", clarificationReason: "MULTIPLE_ACTIONS" }
+      : { action, reply: "已分类" };
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(decision) } }] }), { status: 200 }));
+    const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "secret", fetchImpl });
+
+    await expect(model.decideConversation({ summary: { text: "", throughSequence: 0 }, messages: [], intake: null, policyCitations: [], allowedFields: [] })).resolves.toEqual(decision);
+  });
+
+  it.each([
+    { action: "INVENT_ACTION", reply: "ok" },
+    { action: "HELP", reply: "ok", extra: "unexpected" },
+    { action: "READ_CLAIM", reply: "ok", clarificationReason: "OTHER" },
+    { action: "CLARIFY", reply: "ok", clarificationReason: "MADE_UP" },
+  ])("rejects an invalid unified decision %#", async (decision) => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(decision) } }] }), { status: 200 }));
+    const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "secret", fetchImpl });
+
+    await expect(model.decideConversation({ summary: { text: "", throughSequence: 0 }, messages: [], intake: null, policyCitations: [], allowedFields: [] })).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  });
+
+  it("classifies without sending pre-retrieved policy text or internal identifiers", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: '{"action":"POLICY_QUERY","reply":"ok"}' } }] }), { status: 200 }));
+    const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "secret", fetchImpl });
+
+    await model.decideConversation({
+      summary: { text: "", throughSequence: 0 },
+      messages: [{ sequence: 1, role: "USER", channel: "WEB", text: "本单住宿超标了吗" }],
+      intake: null,
+      policyCitations: [{ title: "SENSITIVE_POLICY_TITLE", headingPath: [], excerpt: "SENSITIVE_POLICY_TEXT", score: 0.9 }],
+      allowedFields: [],
+    });
+
+    const body = String(fetchImpl.mock.calls[0][1].body);
+    expect(body).not.toContain("SENSITIVE_POLICY_TEXT");
+    expect(body).not.toContain("SENSITIVE_POLICY_TITLE");
+    expect(body).not.toContain("secret");
+    expect(body).toContain("本单住宿超标了吗");
+    expect(body).toContain("不要提交");
+    expect(body).toContain("多个");
+    expect(body).toContain("当前单据状态");
+    expect(body).toContain("提交前还缺什么");
+    expect(body).toContain("明确请求发起提交准备");
+  });
+
+  it("tells the model how to interpret an affirmative reply to a pending restart", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: '{"action":"START_INTAKE","reply":"ok"}' } }] }), { status: 200 }));
+    const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "secret", fetchImpl });
+    await model.decideConversation({
+      summary: { text: "", throughSequence: 0 }, messages: [{ sequence: 2, role: "USER", channel: "WEB", text: "是的，另起一单" }],
+      intake: { status: "COLLECTING", collectedFields: {}, pendingFields: ["purpose"], restartPending: true }, policyCitations: [], allowedFields: ["purpose"],
+    });
+    const request = JSON.parse(String(fetchImpl.mock.calls[0][1].body));
+    expect(request.messages[0].content).toContain("restartPending");
+    expect(request.messages[1].content).toContain('"restartPending":true');
+  });
+
   it("rejects fields attached to a read action", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: '{"action":"READ_CLAIM","reply":"金额100元","fields":{"purpose":"出差"}}' } }] }), { status: 200 }));
     const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "secret", fetchImpl });
@@ -132,5 +191,11 @@ describe("OpenAiCompatibleChatModel", () => {
     const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "top-secret", fetchImpl });
 
     await expect(model.decide(input)).rejects.toMatchObject({ message: "AI 服务响应超时，请稍后重试。", code: "TIMEOUT" });
+  });
+
+  it("classifies the Node AbortSignal timeout reason as TIMEOUT", async () => {
+    const fetchImpl = vi.fn().mockRejectedValue(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+    const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "top-secret", fetchImpl });
+    await expect(model.decide(input)).rejects.toMatchObject({ code: "TIMEOUT" });
   });
 });

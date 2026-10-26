@@ -5,6 +5,24 @@ import { EmbeddingProviderError } from "@/src/infrastructure/embedding/embedding
 
 const source = { id: "source-1", type: "FEISHU_DOCX" as const, resourceToken: "ABCdef0123456789", canonicalUrl: "https://acme.feishu.cn/docx/ABCdef0123456789", title: "差旅制度" };
 
+it("reindexes unchanged source text when the active snapshot uses index version one", async () => {
+  const stageSnapshot = vi.fn().mockResolvedValue({ id: "snapshot-v2" });
+  const activateSnapshot = vi.fn();
+  const blocks = [
+    { kind: "heading" as const, text: "住宿费", level: 2 },
+    { kind: "paragraph" as const, text: "北京、上海不超过 600 元。" },
+  ];
+  const result = await syncPolicySource({ actorId: "admin-1", sourceId: source.id }, {
+    sources: { getEnabledSourceForSync: async () => source, getLatestContentHash: async () => JSON.stringify(blocks), getLatestIndexState: async () => ({ contentHash: "old", indexVersion: 1 }), stageSnapshot, activateSnapshot, markSyncFailure: vi.fn() },
+    documents: { read: async () => ({ title: source.title, revision: "same-revision", canonicalUrl: source.canonicalUrl, blocks }) },
+    embeddings: { embed: async ({ texts }) => texts.map(() => Array.from({ length: 1024 }, (_, i) => i === 0 ? 1 : 0)) },
+    now: () => new Date("2026-10-25T00:00:00Z"),
+  });
+  expect(result).toEqual({ status: "SYNCED", sectionCount: 1, chunkCount: 1 });
+  expect(stageSnapshot).toHaveBeenCalledWith(expect.objectContaining({ revision: "same-revision", indexVersion: 2, sections: [expect.objectContaining({ headingPath: ["住宿费"], content: "北京、上海不超过 600 元。" })] }));
+  expect(activateSnapshot).toHaveBeenCalledWith({ sourceId: source.id, snapshotId: "snapshot-v2", now: new Date("2026-10-25T00:00:00Z") });
+});
+
 it("activates a changed document only after all chunks are embedded", async () => {
   const stageSnapshot = vi.fn().mockResolvedValue({ id: "snapshot-1" });
   const activateSnapshot = vi.fn();
@@ -14,7 +32,7 @@ it("activates a changed document only after all chunks are embedded", async () =
     embeddings: { embed: async () => [Array.from({ length: 1024 }, (_, i) => i ? 0 : 1)] },
     now: () => new Date("2026-09-27T00:00:00Z"),
   });
-  expect(result).toEqual({ status: "SYNCED", chunkCount: 1 });
+  expect(result).toEqual({ status: "SYNCED", sectionCount: 1, chunkCount: 1 });
   expect(stageSnapshot).toHaveBeenCalledWith(expect.objectContaining({ sourceId: source.id, chunks: [expect.objectContaining({ embedding: expect.any(Array) })] }));
   expect(activateSnapshot).toHaveBeenCalledWith({ sourceId: source.id, snapshotId: "snapshot-1", now: new Date("2026-09-27T00:00:00Z") });
 });
@@ -22,16 +40,35 @@ it("activates a changed document only after all chunks are embedded", async () =
 it("embeds a long policy document in batches of at most 32 chunks", async () => {
   const embed = vi.fn(async ({ texts }: { texts: string[] }) => texts.map(() => Array.from({ length: 1024 }, (_, index) => index === 0 ? 1 : 0)));
   const stageSnapshot = vi.fn().mockResolvedValue({ id: "snapshot-1" });
-  const blocks = Array.from({ length: 33 }, (_, index) => ({ kind: "paragraph" as const, text: `第${index + 1}条${"A".repeat(80)}` }));
+  const blocks = Array.from({ length: 33 }, (_, index) => ({ kind: "paragraph" as const, text: `第${index + 1}条${"A".repeat(801)}` }));
 
   await expect(syncPolicySource({ actorId: "admin-1", sourceId: source.id }, {
     sources: { getEnabledSourceForSync: async () => source, getLatestContentHash: async () => null, stageSnapshot, activateSnapshot: vi.fn(), markSyncFailure: vi.fn() },
     documents: { read: async () => ({ title: "差旅制度", revision: "1", canonicalUrl: source.canonicalUrl, blocks }) },
     embeddings: { embed }, now: () => new Date(),
-  })).resolves.toEqual({ status: "SYNCED", chunkCount: 33 });
+  })).resolves.toEqual({ status: "SYNCED", sectionCount: 1, chunkCount: 33 });
 
   expect(embed.mock.calls.map(([input]) => input.texts.length)).toEqual([32, 1]);
   expect(stageSnapshot).toHaveBeenCalledWith(expect.objectContaining({ chunks: expect.arrayContaining([expect.objectContaining({ embedding: expect.any(Array) })]) }));
+});
+
+it("includes heading paths in embedding input while preserving exact source text in stored chunks", async () => {
+  const embed = vi.fn(async ({ texts }: { texts: string[] }) => texts.map(() => Array(1024).fill(0)));
+  const stageSnapshot = vi.fn().mockResolvedValue({ id: "snapshot-2" });
+  const blocks = [
+    { kind: "heading" as const, text: "报销政策", level: 1 },
+    { kind: "heading" as const, text: "住宿费", level: 2 },
+    { kind: "heading" as const, text: "北京上海", level: 3 },
+    { kind: "paragraph" as const, text: "每晚 600 元" },
+  ];
+  await syncPolicySource({ actorId: "admin-1", sourceId: source.id }, {
+    sources: { getEnabledSourceForSync: async () => source, getLatestContentHash: async () => null, stageSnapshot, activateSnapshot: vi.fn(), markSyncFailure: vi.fn() },
+    documents: { read: async () => ({ title: source.title, revision: "r2", canonicalUrl: source.canonicalUrl, blocks }) },
+    embeddings: { embed }, now: () => new Date(),
+  });
+  expect(embed.mock.calls[0]![0].texts[0]).toContain("报销政策 / 住宿费 / 北京上海");
+  expect(embed.mock.calls[0]![0].texts[0]).toContain("每晚 600 元");
+  expect(stageSnapshot.mock.calls[0]![0].chunks[0].content).toBe("每晚 600 元");
 });
 
 it("retains the active snapshot when embedding fails", async () => {

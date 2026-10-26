@@ -5,7 +5,7 @@ import type { AgentContext } from "@/src/application/build-agent-context";
 import { parseAgentProposal, type AgentProposalField, type AgentProposalInput } from "@/src/domain/agent-proposal";
 import type { ValidationIssue } from "@/src/domain/claim-validation";
 import type { ChatModel } from "@/src/infrastructure/model/chat-model";
-import type { PolicyCitation } from "@/src/application/search-policy-knowledge";
+import type { PolicyCitation, PolicySearchResult } from "@/src/application/search-policy-knowledge";
 
 const decisionSchema = z.object({ reply: z.string().trim().min(1).max(2_000), proposals: z.array(z.unknown()).default([]) }).strict();
 
@@ -26,7 +26,7 @@ export type RunAgentTurnDeps = {
   getContext(actorId: string, claimId: string): Promise<AgentContext>;
   createProposal(input: AgentProposalInput & { actorId: string; claimId: string; claimVersion: number; expenseItemId?: string }): Promise<AgentProposalDto>;
   audit: AuditEventWriter;
-  searchPolicy?: (query: string) => Promise<PolicyCitation[]>;
+  searchPolicy?: (query: string) => Promise<PolicySearchResult>;
 };
 
 export async function runAgentTurn(input: { actorId: string; claimId: string; message: string }, deps: RunAgentTurnDeps): Promise<AgentTurnResult> {
@@ -37,9 +37,11 @@ export async function runAgentTurn(input: { actorId: string; claimId: string; me
   const modelClassifiesPolicy = !hasPolicyKeywords && deps.searchPolicy && await isPolicyQuery(message, deps.model);
   if (deps.searchPolicy && (hasPolicyKeywords || modelClassifiesPolicy)) {
     try {
-      const citations = await deps.searchPolicy(message);
+      const result = await deps.searchPolicy(message);
+      const { citations } = result;
       if (!citations.length) return { reply: "当前没有可供引用的已同步报销政策，请以公司财务制度为准。", clarifications: [], proposals: [], citations: [] };
-      return { reply: await answerPolicyQuestion(message, citations, deps.model), clarifications: [], proposals: [], citations };
+      if (result.incomplete || !result.evidence.length) return { reply: "检索到相关制度，但无法读取完整章节，请查看引用原文；我暂不能据此给出完整规则。", clarifications: [], proposals: [], citations };
+      return { reply: await answerPolicyQuestion(message, result.evidence, deps.model), clarifications: [], proposals: [], citations };
     }
     catch { return { reply: "政策检索暂不可用，请稍后重试或查阅公司财务制度。", clarifications: [], proposals: [], citations: [] }; }
   }
@@ -68,11 +70,11 @@ async function isPolicyQuery(message: string, model: ChatModel): Promise<boolean
   try { return await model.classifyIntent?.(message) === "POLICY_QUERY"; } catch { return false; }
 }
 
-async function answerPolicyQuestion(message: string, citations: PolicyCitation[], model: ChatModel): Promise<string> {
+async function answerPolicyQuestion(message: string, evidence: PolicySearchResult["evidence"], model: ChatModel): Promise<string> {
   try {
     const answer = await model.answerPolicy?.({
       question: message,
-      sources: citations.map(({ title, excerpt, headingPath }) => ({ title, excerpt, headingPath })),
+      sources: evidence.map(({ title, text, headingPath }) => ({ title, excerpt: text, headingPath })),
     });
     if (answer?.trim()) return answer.trim().slice(0, 1_000);
   } catch {

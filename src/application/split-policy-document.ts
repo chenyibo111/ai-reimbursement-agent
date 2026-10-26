@@ -1,18 +1,24 @@
-import type { PolicyDocumentBlock } from "@/src/infrastructure/feishu/feishu-policy-document-client";
+import type { PolicySectionDraft } from "@/src/application/build-policy-sections";
 
-export function splitPolicyDocument(blocks: PolicyDocumentBlock[], options: { maxLength: number; minLength: number }) {
-  const headingPath: string[] = [];
-  const chunks: Array<{ content: string; headingPath: string[] }> = [];
-  let buffer = "";
-  const flush = () => { if (buffer.trim()) chunks.push({ content: buffer.trim(), headingPath: [...headingPath] }); buffer = ""; };
-  for (const block of blocks) {
-    if (block.kind === "heading") { flush(); headingPath.splice(0, headingPath.length, block.text.trim()); continue; }
-    const text = block.text.trim();
-    if (!text) continue;
-    if (buffer && buffer.length + text.length + 1 > options.maxLength) flush();
-    buffer = buffer ? `${buffer}\n${text}` : text;
-    if (buffer.length >= options.minLength) flush();
+export type PolicyChunkDraft = { sequence: number; sectionSequence: number; headingPath: string[]; content: string; sourceAnchor: string | null };
+
+export function splitPolicyDocument(sections: PolicySectionDraft[], options: { targetLength: number; maxLength: number }): PolicyChunkDraft[] {
+  const chunks: PolicyChunkDraft[] = [];
+  for (const section of sections) {
+    let buffer = "";
+    const flush = () => {
+      if (!buffer.trim()) return;
+      chunks.push({ sequence: chunks.length, sectionSequence: section.sequence, headingPath: section.headingPath, content: buffer.trim(), sourceAnchor: section.sourceAnchor });
+      buffer = "";
+    };
+    for (const line of section.content.split("\n")) {
+      const text = line.trim();
+      if (!text) continue;
+      if (buffer && buffer.length + text.length + 1 > options.maxLength) flush();
+      buffer = buffer ? `${buffer}\n${text}` : text;
+      if (buffer.length >= options.targetLength) flush();
+    }
+    flush();
   }
-  flush();
   return chunks;
 }
