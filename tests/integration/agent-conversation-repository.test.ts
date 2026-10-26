@@ -26,6 +26,17 @@ async function createEmployee() {
 }
 
 describe("AgentConversationRepository", () => {
+  it("persists a bounded search page independently of the active intake", async () => {
+    const employee = await createEmployee();
+    const conversation = await repository.getOrCreatePrivate(employee.id);
+    const intake = await repository.createIntake({ employeeId: employee.id, conversationId: conversation.id, claimId: "active-claim" });
+    const state = { query: { status: "DRAFT" as const }, remaining: 2, cursor: "cursor", totalCount: 12, expiresAt: new Date(Date.now()+600_000).toISOString(), lastPage: [{ ordinal: 1, id: "old-claim", claimNumber: "BX20261026-0001" }] };
+    await repository.setSearchState({ conversationId: conversation.id, state });
+    await expect(repository.getConversationByIdOrThrow(conversation.id)).resolves.toMatchObject({ searchState: state });
+    await expect(repository.getCurrentIntake(employee.id)).resolves.toMatchObject({ id: intake.id, claimId: "active-claim" });
+    await repository.setSearchState({ conversationId: conversation.id, state: null });
+    await expect(repository.getConversationByIdOrThrow(conversation.id)).resolves.toMatchObject({ searchState: null });
+  });
   it("persists a private read selection separately from active intake and group chat", async () => {
     const employee = await createEmployee();
     const conversation = await repository.getOrCreatePrivate(employee.id);

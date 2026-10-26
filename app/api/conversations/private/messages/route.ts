@@ -43,6 +43,7 @@ export async function POST(request: Request) {
         updateFields: ({ claimId, fields }) => tools.updateFields(context, claimId, fields),
         readWorkbench: ({ claimId }) => tools.readWorkbench(context, claimId),
         listOwnedClaims: ({ limit }) => tools.listOwnedClaims(context, limit),
+        searchOwnedClaims: ({ query }) => tools.searchOwnedClaims(context, query),
         findOwnedClaimByNumber: ({ claimNumber }) => tools.findOwnedClaimByNumber(context, claimNumber),
         readValidation: ({ claimId }) => tools.readValidation(context, claimId),
         prepareSubmission: async ({ claimId }) => { const confirmation = await tools.prepareSubmission(context, claimId); return { token: confirmation.confirmationToken, claimId: confirmation.claimId, claimVersion: confirmation.claimVersion, workbench: confirmation.workbench }; },

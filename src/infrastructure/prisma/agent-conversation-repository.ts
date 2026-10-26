@@ -164,6 +164,13 @@ export class AgentConversationRepository {
     });
   }
 
+  async setSearchState(input: { conversationId: string; state: import("@/src/application/claim-search").ClaimSearchState | null }): Promise<void> {
+    await this.prisma.agentConversation.update({
+      where: { id: input.conversationId },
+      data: { searchState: input.state === null ? Prisma.JsonNull : input.state as Prisma.InputJsonValue },
+    });
+  }
+
   async getCurrentIntake(employeeId: string): Promise<ReimbursementIntake | null> {
     return this.prisma.reimbursementIntake.findFirst({
       where: { employeeId, status: { in: ["COLLECTING", "READY_TO_SUBMIT"] } },

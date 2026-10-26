@@ -328,6 +328,7 @@ model AgentConversation {
   kind                   AgentConversationKind
   latestFeishuChatId     String?
   selectedReadClaimId    String?
+  searchState            Json?
   summary                String                @default("")
   summaryThroughSequence Int                   @default(0)
   nextSequence           Int                   @default(1)

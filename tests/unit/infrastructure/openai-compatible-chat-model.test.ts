@@ -189,6 +189,13 @@ describe("OpenAiCompatibleChatModel", () => {
     await expect(model.decideConversation({ summary: { text: "", throughSequence: 0 }, messages: [], intake: null, policyCitations: [], allowedFields: [] })).resolves.toMatchObject({ action: "READ_CLAIM", claimNumber: "BX20261009-0026" });
   });
 
+  it("accepts structured search conditions but rejects unapproved owner overrides", async () => {
+    const makeModel = (decision: unknown) => new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "secret", fetchImpl: vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(decision) } }] }), { status: 200 })) });
+    const context = { summary: { text: "", throughSequence: 0 }, messages: [], intake: null, policyCitations: [], allowedFields: [] };
+    await expect(makeModel({ action: "SEARCH_CLAIMS", reply: "查询", search: { status: "DRAFT", requestedCount: 12, period: "LAST_MONTH" } }).decideConversation(context)).resolves.toMatchObject({ action: "SEARCH_CLAIMS", search: { requestedCount: 12 } });
+    await expect(makeModel({ action: "SEARCH_CLAIMS", reply: "查询", search: { ownerId: "other", requestedCount: 12 } }).decideConversation(context)).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  });
+
   it.each([
     ["unauthorized", new Response("provider detail", { status: 401 })],
     ["empty choices", new Response(JSON.stringify({ choices: [] }), { status: 200 })],

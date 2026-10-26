@@ -98,6 +98,7 @@ function createProcessDeps(input: {
         updateFields: ({ claimId, fields }) => tools.updateFields(context, claimId, fields),
         readWorkbench: ({ claimId }) => tools.readWorkbench(context, claimId),
         listOwnedClaims: ({ limit }) => tools.listOwnedClaims(context, limit),
+        searchOwnedClaims: ({ query }) => tools.searchOwnedClaims(context, query),
         findOwnedClaimByNumber: ({ claimNumber }) => tools.findOwnedClaimByNumber(context, claimNumber),
         readValidation: ({ claimId }) => tools.readValidation(context, claimId),
         prepareSubmission: async ({ claimId }) => {

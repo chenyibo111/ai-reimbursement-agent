@@ -5,8 +5,10 @@ import type { PolicyCitation, PolicySearchResult } from "@/src/application/searc
 import { formatClaimFacts, type ClaimFactKind } from "@/src/application/format-claim-facts";
 import type { ClaimFieldPatch, ClaimSnapshot, ReceiptSnapshot, ValidationSnapshot } from "@/services/agent/src/ports/reimbursement-port";
 import { ReimbursementApiHttpError } from "@/services/agent/src/adapters/reimbursement-api-client";
+import { formatClaimSearchPage, normalizeClaimSearch, readClaimSearchState } from "@/src/application/claim-search";
+import type { OwnedClaimSearchPage, OwnedClaimSearchQuery } from "@/services/agent/src/ports/reimbursement-port";
 
-type ConversationRecord = { id: string; summary: string; summaryThroughSequence: number; selectedReadClaimId?: string | null };
+type ConversationRecord = { id: string; summary: string; summaryThroughSequence: number; selectedReadClaimId?: string | null; searchState?: unknown };
 type ConversationMessage = { id?: string; sequence: number; role: AgentMessageRole; channel: AgentMessageChannel; text: string; citations?: unknown; result?: unknown };
 type IntakeRecord = {
   id: string;
@@ -33,6 +35,7 @@ export type ConversationStore = {
   updateIntake(input: { id: string; status?: ReimbursementIntakeStatus; claimId?: string | null; collectedFields?: Record<string, unknown>; pendingFields?: string[]; submissionToken?: string | null; submissionPreview?: Record<string, unknown> | null; restartRequestedAt?: Date | null; lastUserConfirmationAt?: Date | null }): Promise<IntakeRecord>;
   restartIntake(input: { employeeId: string; conversationId: string; intakeId: string; requestedAfter: Date }): Promise<IntakeRecord>;
   setSelectedReadClaimId?(input: { conversationId: string; claimId: string | null }): Promise<void>;
+  setSearchState?(input: { conversationId: string; state: import("@/src/application/claim-search").ClaimSearchState | null }): Promise<void>;
 };
 
 export type RunConversationTurnDeps = {
@@ -47,6 +50,7 @@ export type RunConversationTurnDeps = {
   updateFields?: (input: { actorId: string; claimId: string; fields: ClaimFieldPatch }) => Promise<ClaimSnapshot>;
   readWorkbench?: (input: { actorId: string; claimId: string }) => Promise<{ claim: ClaimSnapshot; receipts: ReceiptSnapshot[] }>;
   listOwnedClaims?: (input: { actorId: string; limit: number }) => Promise<ClaimSnapshot[]>;
+  searchOwnedClaims?: (input: { actorId: string; query: OwnedClaimSearchQuery }) => Promise<OwnedClaimSearchPage>;
   findOwnedClaimByNumber?: (input: { actorId: string; claimNumber: string }) => Promise<ClaimSnapshot | null>;
   readValidation?: (input: { actorId: string; claimId: string }) => Promise<ValidationSnapshot>;
   prepareSubmission?: (input: { actorId: string; claimId: string }) => Promise<{ token: string; claimId: string; claimVersion: number; workbench: { claim: ClaimSnapshot; receipts: ReceiptSnapshot[] } }>;
@@ -105,7 +109,7 @@ export async function runConversationTurn(
     active = await deps.conversations.updateIntake({ id: active.id, restartRequestedAt: null });
   }
   if (decision.action === "POLICY_QUERY") return answerPolicyQuestion(input, active, message, deps);
-  return applyDecision(input, active, decision, deps, conversation.selectedReadClaimId ?? null);
+  return applyDecision(input, active, decision, deps, conversation.selectedReadClaimId ?? null, conversation.searchState);
 }
 
 async function reconcileIntakeFields(
@@ -245,14 +249,37 @@ async function applyDecision(
   decision: ConversationDecision,
   deps: RunConversationTurnDeps,
   selectedReadClaimId: string | null,
+  rawSearchState: unknown,
 ): Promise<ConversationTurnResult> {
-  if (input.channel === "FEISHU" && input.chatType !== "p2p" && ["START_INTAKE", "COLLECT_FIELDS", "LIST_CLAIMS", "READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPARE_SUBMISSION"].includes(decision.action)) {
+  if (input.channel === "FEISHU" && input.chatType !== "p2p" && ["START_INTAKE", "COLLECT_FIELDS", "LIST_CLAIMS", "SEARCH_CLAIMS", "NEXT_CLAIMS_PAGE", "READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPARE_SUBMISSION"].includes(decision.action)) {
     return persistReply(input, null, "为保护报销信息，请私聊机器人或在 Web 工作台办理、查询与提交。", [], deps.conversations);
   }
   if (decision.action === "START_INTAKE") return startIntake(input, intake, deps);
   if (decision.action === "CLARIFY") return persistReply(input, intake, clarificationReply(decision.clarificationReason), [], deps.conversations);
   if (decision.action === "OUT_OF_SCOPE") return persistReply(input, intake, "我目前只能协助报销政策问答、票据和报销单办理；其他事项请使用相应服务。", [], deps.conversations);
   if (decision.action === "HELP") return persistReply(input, intake, helpReply(), [], deps.conversations);
+  if (decision.action === "SEARCH_CLAIMS") {
+    await deps.conversations.setSearchState?.({ conversationId: input.conversationId, state: null });
+    if (!deps.searchOwnedClaims || !deps.conversations.setSearchState) return persistReply(input, intake, "报销查询暂不可用，请稍后重试。", [], deps.conversations);
+    try {
+      const { query, requestedCount } = normalizeClaimSearch(decision.search, new Date());
+      const page = await deps.searchOwnedClaims({ actorId: input.actorId, query: { ...query, limit: query.countOnly ? 1 : Math.min(10, requestedCount) } });
+      if (query.countOnly) return persistReply(input, intake, `查询时共 ${page.totalCount} 张本人报销单。`, [], deps.conversations);
+      const formatted = formatClaimSearchPage(page, query, requestedCount, new Date());
+      await deps.conversations.setSearchState({ conversationId: input.conversationId, state: formatted.state });
+      return persistReply(input, intake, formatted.reply, [], deps.conversations);
+    } catch { return persistReply(input, intake, "查询条件无效或报销服务暂不可用，请调整条件后重试。", [], deps.conversations); }
+  }
+  if (decision.action === "NEXT_CLAIMS_PAGE") {
+    const state = readClaimSearchState(rawSearchState, new Date());
+    if (!state?.cursor || !state.remaining || !deps.searchOwnedClaims || !deps.conversations.setSearchState) return persistReply(input, intake, "当前没有可继续查看的查询页，请重新描述查询条件。", [], deps.conversations);
+    try {
+      const page = await deps.searchOwnedClaims({ actorId: input.actorId, query: { ...state.query, limit: Math.min(10, state.remaining), cursor: state.cursor } });
+      const formatted = formatClaimSearchPage(page, state.query, state.remaining, new Date());
+      await deps.conversations.setSearchState({ conversationId: input.conversationId, state: formatted.state });
+      return persistReply(input, intake, formatted.reply, [], deps.conversations);
+    } catch { await deps.conversations.setSearchState({ conversationId: input.conversationId, state: null }); return persistReply(input, intake, "查询页已失效，请重新查询。", [], deps.conversations); }
+  }
   if (decision.action === "LIST_CLAIMS") {
     if (!deps.listOwnedClaims) return persistReply(input, intake, "报销数据暂时无法查询，请稍后重试。", [], deps.conversations);
     try {
@@ -265,6 +292,13 @@ async function applyDecision(
     if (!deps.readWorkbench || (decision.action === "READ_SUBMISSION_SUMMARY" && !deps.readValidation)) return persistReply(input, intake, "报销数据暂时无法查询，请稍后重试。", [], deps.conversations);
     try {
       let claimId = selectedReadClaimId ?? intake?.claimId ?? null;
+      if (decision.claimOrdinal !== undefined) {
+        const state = readClaimSearchState(rawSearchState, new Date());
+        const selected = state?.lastPage.find((item) => item.ordinal === decision.claimOrdinal);
+        if (!selected) return persistReply(input, intake, "当前列表已过期或序号无效，请重新查询后选择。", [], deps.conversations);
+        claimId = selected.id;
+        await deps.conversations.setSelectedReadClaimId?.({ conversationId: input.conversationId, claimId });
+      }
       if (decision.claimNumber) {
         const number = decision.claimNumber.toUpperCase();
         if (!/^BX[0-9]{8}-[0-9]{4,}$/.test(number)) {

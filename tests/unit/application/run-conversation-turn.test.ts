@@ -4,6 +4,51 @@ import { runConversationTurn, type ConversationStore } from "@/src/application/r
 import { ReimbursementApiHttpError } from "@/services/agent/src/adapters/reimbursement-api-client";
 import type { ClaimFieldPatch } from "@/services/agent/src/ports/reimbursement-port";
 
+it("searches twelve owned drafts in two private pages and selects only the current page ordinal", async () => {
+  const setup = createDeps();
+  let searchState: unknown = null;
+  const setSearchState = vi.fn(async ({ state }: { state: unknown }) => { searchState = state; });
+  const setSelectedReadClaimId = vi.fn(async () => undefined);
+  const conversations = { ...setup.deps.conversations,
+    getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0, searchState }),
+    setSearchState, setSelectedReadClaimId,
+  };
+  const claims = Array.from({ length: 12 }, (_, index) => ({ id: `claim-${index+1}`, claimNumber: `BX20261026-${String(index+1).padStart(4,"0")}`, status: "DRAFT", purpose: `出差${index+1}`, version: 1, currency: "CNY" as const, totalAmountCent: null, requestedAmountCent: null }));
+  const searchOwnedClaims = vi.fn(async ({ query }: { query: { cursor?: string; limit: number } }) => ({ items: query.cursor ? claims.slice(10) : claims.slice(0, 10), totalCount: 12, nextCursor: query.cursor ? null : "next-page" }));
+  const decisions = [
+    { action: "SEARCH_CLAIMS" as const, reply: "查询", search: { status: "DRAFT" as const, period: "LAST_MONTH" as const, requestedCount: 12 } },
+    { action: "NEXT_CLAIMS_PAGE" as const, reply: "翻页" },
+    { action: "READ_CLAIM" as const, reply: "读取", claimOrdinal: 2 },
+  ];
+  const model = { decideConversation: vi.fn(async () => decisions.shift()!) };
+  const readWorkbench = vi.fn(async () => ({ claim: claims[11], receipts: [] }));
+  const deps = { ...setup.deps, conversations, model, searchOwnedClaims, readWorkbench };
+  const first = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "上月草稿列 12 张" }, deps);
+  expect(first.reply).toContain("共 12 张");
+  expect(first.reply).toContain("BX20261026-0010");
+  expect(first.reply).not.toContain("BX20261026-0011");
+  expect(first.reply.length).toBeLessThanOrEqual(1000);
+  const next = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "下一页" }, deps);
+  expect(next.reply).toContain("BX20261026-0012");
+  expect(searchOwnedClaims).toHaveBeenCalledTimes(2);
+  await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "第二张" }, deps);
+  expect(readWorkbench).toHaveBeenCalledWith({ actorId: "employee-1", claimId: "claim-12" });
+  expect(setSelectedReadClaimId).toHaveBeenCalledWith({ conversationId: "conversation-1", claimId: "claim-12" });
+});
+
+it("answers an owned count from Go without exposing any claim list", async () => {
+  const setup = createDeps();
+  const searchOwnedClaims = vi.fn(async () => ({ items: [], totalCount: 37, nextCursor: null }));
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "上月交通费一共几张" }, {
+    ...setup.deps,
+    conversations: { ...setup.deps.conversations, setSearchState: vi.fn(async () => undefined) },
+    model: { decideConversation: async () => ({ action: "SEARCH_CLAIMS" as const, reply: "无关", search: { period: "LAST_MONTH" as const, expenseCategory: "交通费", countOnly: true } }) },
+    searchOwnedClaims,
+  });
+  expect(result.reply).toBe("查询时共 37 张本人报销单。");
+  expect(searchOwnedClaims).toHaveBeenCalledWith(expect.objectContaining({ actorId: "employee-1", query: expect.objectContaining({ countOnly: true, limit: 1 }) }));
+});
+
 type Intake = {
   id: string;
   employeeId: string;
