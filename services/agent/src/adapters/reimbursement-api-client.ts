@@ -36,6 +36,9 @@ export class ReimbursementApiClient implements ReimbursementPort {
   async deleteOwnedReceipt(input: ToolCallContext & { claimId: string; receiptId: string; expectedClaimVersion: number }): Promise<void> {
     await this.request(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}/receipts/${encodeURIComponent(input.receiptId)}?expectedClaimVersion=${input.expectedClaimVersion}`, "DELETE");
   }
+  async deleteOwnedDraft(input: ToolCallContext & { claimId: string; expectedClaimVersion: number }): Promise<void> {
+    await this.request(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}?expectedVersion=${input.expectedClaimVersion}`, "DELETE");
+  }
   async getClaimWorkbench(input: ToolCallContext & { claimId: string }) {
     const path = `/api/v1/claims/${encodeURIComponent(input.claimId)}`;
     const [claim, receipts] = await Promise.all([this.request<ClaimSnapshot>(input, path, "GET"), this.request<{ items: ReceiptSnapshot[] }>(input, `${path}/receipts`, "GET")]);

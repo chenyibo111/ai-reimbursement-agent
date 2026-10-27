@@ -55,6 +55,7 @@ export type RunConversationTurnDeps = {
   updateFields?: (input: { actorId: string; claimId: string; fields: ClaimFieldPatch }) => Promise<ClaimSnapshot>;
   readWorkbench?: (input: { actorId: string; claimId: string }) => Promise<{ claim: ClaimSnapshot; receipts: ReceiptSnapshot[] }>;
   deleteReceipt?: (input: { actorId: string; claimId: string; receiptId: string; expectedClaimVersion: number }) => Promise<void>;
+  deleteDraft?: (input: { actorId: string; claimId: string; expectedClaimVersion: number }) => Promise<void>;
   listOwnedClaims?: (input: { actorId: string; limit: number }) => Promise<ClaimSnapshot[]>;
   searchOwnedClaims?: (input: { actorId: string; query: OwnedClaimSearchQuery }) => Promise<OwnedClaimSearchPage>;
   findOwnedClaimByNumber?: (input: { actorId: string; claimNumber: string }) => Promise<ClaimSnapshot | null>;
@@ -102,6 +103,10 @@ export async function runConversationTurn(
   if (message === "确认删除票据") {
     if (input.channel === "FEISHU" && input.chatType !== "p2p") return persistReply(input, null, "请私聊机器人办理票据删除。", [], deps.conversations);
     return confirmReceiptDeletion(input, active, conversation.pendingAction, deps);
+  }
+  if (message === "确认删除报销单") {
+    if (input.channel === "FEISHU" && input.chatType !== "p2p") return persistReply(input, null, "请私聊机器人办理草稿删除。", [], deps.conversations);
+    return confirmDraftDeletion(input, active, conversation, deps);
   }
   if (conversation.pendingAction) await deps.conversations.setPendingAction?.({ conversationId: input.conversationId, action: null });
   if (attachment) return handleAttachment({ ...input, attachment }, active, deps, conversation.selectedReadClaimId ?? null, conversation.selectedEditClaimId ?? null);
@@ -280,7 +285,7 @@ async function applyDecision(
   selectedEditClaimId: string | null,
   rawSearchState: unknown,
 ): Promise<ConversationTurnResult> {
-  if (input.channel === "FEISHU" && input.chatType !== "p2p" && ["START_INTAKE", "COLLECT_FIELDS", "LIST_CLAIMS", "SEARCH_CLAIMS", "NEXT_CLAIMS_PAGE", "SELECT_EDIT_CLAIM", "DELETE_RECEIPT", "READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPARE_SUBMISSION"].includes(decision.action)) {
+  if (input.channel === "FEISHU" && input.chatType !== "p2p" && ["START_INTAKE", "COLLECT_FIELDS", "LIST_CLAIMS", "SEARCH_CLAIMS", "NEXT_CLAIMS_PAGE", "SELECT_EDIT_CLAIM", "DELETE_RECEIPT", "DELETE_DRAFT", "READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPARE_SUBMISSION"].includes(decision.action)) {
     return persistReply(input, null, "为保护报销信息，请私聊机器人或在 Web 工作台办理、查询与提交。", [], deps.conversations);
   }
   if (decision.action === "START_INTAKE") return startIntake(input, intake, deps);
@@ -299,6 +304,20 @@ async function applyDecision(
       const safe = intake ? await clearSubmissionPreparation(intake, deps.conversations) : null;
       return persistReply(input, safe, `即将从 ${workbench.claim.claimNumber} 删除第 ${ordinal} 张票据：${receipt.filename}（票据 ID：${receipt.id}，发票号码：${receipt.invoiceNumber || "未识别"}）。请在 5 分钟内回复“确认删除票据”。`, [], deps.conversations, undefined, selectedEditClaimId);
     } catch { return persistReply(input, intake, "无法核验选中的票据，本次未删除。请重新选择后重试。", [], deps.conversations); }
+  }
+  if (decision.action === "DELETE_DRAFT") {
+    if (!deps.readWorkbench || !deps.conversations.setPendingAction || !deps.deleteDraft) return persistReply(input, intake, "草稿删除暂不可用，请稍后重试。", [], deps.conversations);
+    try {
+      const target = decision.claimNumber || decision.claimOrdinal
+        ? await selectOwnedEditClaim({ actorId: input.actorId, reference: { claimNumber: decision.claimNumber, claimOrdinal: decision.claimOrdinal }, searchState: rawSearchState, findOwnedClaimByNumber: deps.findOwnedClaimByNumber, readWorkbench: deps.readWorkbench })
+        : selectedEditClaimId ? await resolveSelectedDraft({ actorId: input.actorId, claimId: selectedEditClaimId, readWorkbench: deps.readWorkbench }) : null;
+      if (!target) return persistReply(input, intake, "请先明确选中本人草稿，或提供完整报销单号；已提交的单据不能删除。", [], deps.conversations);
+      const current = await deps.readWorkbench({ actorId: input.actorId, claimId: target.id });
+      if (current.claim.id !== target.id || current.claim.status !== "DRAFT") return persistReply(input, intake, "该单据无法删除，请重新核对。", [], deps.conversations);
+      await deps.conversations.setPendingAction({ conversationId: input.conversationId, action: { kind: "DELETE_DRAFT", claimId: target.id, claimVersion: current.claim.version, expiresAt: new Date(Date.now() + 5 * 60_000).toISOString() } });
+      const safe = intake ? await clearSubmissionPreparation(intake, deps.conversations) : null;
+      return persistReply(input, safe, `即将删除本人草稿 ${current.claim.claimNumber}（${current.receipts.length} 张票据）。此操作会移除草稿记录，附件对象随后由后台清理。请在 5 分钟内回复“确认删除报销单”。`, [], deps.conversations, undefined, target.id);
+    } catch { return persistReply(input, intake, "无法核验要删除的草稿，本次未删除。", [], deps.conversations); }
   }
   if (decision.action === "SEARCH_CLAIMS") {
     await deps.conversations.setSearchState?.({ conversationId: input.conversationId, state: null });
@@ -498,7 +517,7 @@ async function confirmReceiptDeletion(
   } else {
     await deps.conversations.setPendingAction?.({ conversationId: input.conversationId, action: null });
   }
-  if (!pending || !deps.readWorkbench || !deps.deleteReceipt) return persistReply(input, intake, "当前没有有效的票据删除确认。请重新指定报销单和票据。", [], deps.conversations);
+  if (!pending || pending.kind !== "DELETE_RECEIPT" || !deps.readWorkbench || !deps.deleteReceipt) return persistReply(input, intake, "当前没有有效的票据删除确认。请重新指定报销单和票据。", [], deps.conversations);
   try {
     const current = await deps.readWorkbench({ actorId: input.actorId, claimId: pending.claimId });
     if (current.claim.status !== "DRAFT" || current.claim.version !== pending.claimVersion || !current.receipts.some((item) => item.id === pending.receiptId)) return persistReply(input, intake, "单据或票据已变化，删除确认已失效。请重新核对。", [], deps.conversations);
@@ -506,6 +525,37 @@ async function confirmReceiptDeletion(
     const safe = intake ? await clearSubmissionPreparation(intake, deps.conversations) : null;
     return persistReply(input, safe, `已从 ${current.claim.claimNumber} 删除票据 ${pending.receiptId}。附件对象将由后台清理。`, [], deps.conversations, undefined, pending.claimId);
   } catch { return persistReply(input, intake, "删除未确认完成，或单据已变化。请在工作台核对后重新发起。", [], deps.conversations); }
+}
+
+async function confirmDraftDeletion(
+  input: { actorId: string; conversationId: string; channel: AgentMessageChannel; channelMessageId?: string },
+  intake: IntakeRecord | null,
+  conversation: ConversationRecord,
+  deps: RunConversationTurnDeps,
+): Promise<ConversationTurnResult> {
+  const pending = readPendingAction(conversation.pendingAction);
+  if (pending?.kind !== "DELETE_DRAFT") {
+    await deps.conversations.setPendingAction?.({ conversationId: input.conversationId, action: null });
+    return persistReply(input, intake, "当前没有有效的草稿删除确认。请重新选中草稿并发起删除。", [], deps.conversations);
+  }
+  if (deps.conversations.consumePendingAction) {
+    if (!await deps.conversations.consumePendingAction({ conversationId: input.conversationId, action: pending })) return persistReply(input, intake, "草稿删除确认已经使用或已失效，请重新核对。", [], deps.conversations);
+  } else await deps.conversations.setPendingAction?.({ conversationId: input.conversationId, action: null });
+  if (!deps.readWorkbench || !deps.deleteDraft) return persistReply(input, intake, "草稿删除暂不可用，请稍后重试。", [], deps.conversations);
+  try {
+    const current = await deps.readWorkbench({ actorId: input.actorId, claimId: pending.claimId });
+    if (current.claim.id !== pending.claimId || current.claim.status !== "DRAFT" || current.claim.version !== pending.claimVersion) return persistReply(input, intake, "报销单已变化，删除确认已失效。请重新核对。", [], deps.conversations);
+    await deps.deleteDraft({ actorId: input.actorId, claimId: pending.claimId, expectedClaimVersion: pending.claimVersion });
+      const cleanup = await Promise.allSettled([
+        conversation.selectedReadClaimId === pending.claimId ? deps.conversations.setSelectedReadClaimId?.({ conversationId: input.conversationId, claimId: null }) : undefined,
+        conversation.selectedEditClaimId === pending.claimId ? deps.conversations.setSelectedEditClaimId?.({ conversationId: input.conversationId, claimId: null }) : undefined,
+        deps.conversations.setSearchState?.({ conversationId: input.conversationId, state: null }),
+        intake?.claimId === pending.claimId ? deps.conversations.updateIntake({ id: intake.id, status: "ABANDONED", claimId: null, submissionToken: null, submissionPreview: null }) : undefined,
+      ]);
+      const safe = cleanup[3].status === "fulfilled" && cleanup[3].value ? cleanup[3].value : intake;
+      const cleanupWarning = cleanup.some((result) => result.status === "rejected") ? "会话状态未完全刷新，请重新查询后再办理其他单据。" : "";
+      return persistReply(input, safe, `已删除草稿 ${current.claim.claimNumber}。附件对象已加入后台清理队列。${cleanupWarning}`, [], deps.conversations);
+  } catch { return persistReply(input, intake, "删除未确认完成，或报销单已变化。请在工作台核对后重新发起。", [], deps.conversations); }
 }
 
 async function confirmSubmission(

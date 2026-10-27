@@ -45,6 +45,7 @@ export interface ReimbursementPort {
   createUploadSession(input: ToolCallContext & { claimId: string; filename: string; contentType: string; sizeBytes: number }): Promise<{ receiptId: string; uploadUrl: string }>;
   finalizeReceiptUpload(input: ToolCallContext & { claimId: string; receiptId: string }): Promise<{ receiptId: string; status: string }>;
   deleteOwnedReceipt(input: ToolCallContext & { claimId: string; receiptId: string; expectedClaimVersion: number }): Promise<void>;
+  deleteOwnedDraft(input: ToolCallContext & { claimId: string; expectedClaimVersion: number }): Promise<void>;
   getClaimWorkbench(input: ToolCallContext & { claimId: string }): Promise<{ claim: ClaimSnapshot; receipts: ReceiptSnapshot[] }>;
   listOwnedClaims(input: ToolCallContext & { limit: number }): Promise<ClaimSnapshot[]>;
   searchOwnedClaims(input: ToolCallContext & { query: OwnedClaimSearchQuery }): Promise<OwnedClaimSearchPage>;

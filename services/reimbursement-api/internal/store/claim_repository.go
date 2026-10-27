@@ -347,23 +347,101 @@ func (repository *PostgresClaimRepository) Delete(ctx context.Context, claimID s
 		return fmt.Errorf("begin claim deletion: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	result, err := tx.Exec(ctx, `
-		DELETE FROM reimbursement.claims
-		WHERE id = $1 AND owner_id = $2 AND status = 'DRAFT' AND version = $3
-	`, claimID, actorID, expectedVersion)
-	if err != nil {
-		return fmt.Errorf("delete claim: %w", err)
-	}
-	if result.RowsAffected() != 1 {
-		return application.ErrClaimVersionConflict
-	}
-	if err = writeClaimAuditAndEvent(ctx, tx, audit, event); err != nil {
+	if err = deleteClaimInTx(ctx, tx, claimID, actorID, expectedVersion, audit, event); err != nil {
 		return err
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit claim deletion: %w", err)
 	}
 	return nil
+}
+
+func (repository *PostgresClaimRepository) DeleteIdempotent(ctx context.Context, claimID string, actorID string, expectedVersion int64, key string, audit application.ClaimAudit, event application.ClaimOutboxEvent) error {
+	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin idempotent claim deletion: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	hash := fmt.Sprintf("%s:%d", claimID, expectedVersion)
+	if _, err = tx.Exec(ctx, `
+		INSERT INTO reimbursement.idempotency_records (actor_id, operation, idempotency_key, request_hash)
+		VALUES ($1, 'claim.delete', $2, $3) ON CONFLICT DO NOTHING
+	`, actorID, key, hash); err != nil {
+		return fmt.Errorf("record claim deletion key: %w", err)
+	}
+	var storedHash string
+	var completedStatus *int
+	if err = tx.QueryRow(ctx, `
+		SELECT request_hash, status_code FROM reimbursement.idempotency_records
+		WHERE actor_id=$1 AND operation='claim.delete' AND idempotency_key=$2 FOR UPDATE
+	`, actorID, key).Scan(&storedHash, &completedStatus); err != nil {
+		return fmt.Errorf("lock claim deletion key: %w", err)
+	}
+	if storedHash != hash {
+		return application.ErrClaimVersionConflict
+	}
+	if completedStatus != nil && *completedStatus == 204 {
+		return tx.Commit(ctx)
+	}
+	if err = deleteClaimInTx(ctx, tx, claimID, actorID, expectedVersion, audit, event); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE reimbursement.idempotency_records SET status_code=204, response_body='', completed_at=now() WHERE actor_id=$1 AND operation='claim.delete' AND idempotency_key=$2`, actorID, key); err != nil {
+		return fmt.Errorf("complete claim deletion key: %w", err)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit idempotent claim deletion: %w", err)
+	}
+	return nil
+}
+
+func deleteClaimInTx(ctx context.Context, tx pgx.Tx, claimID string, actorID string, expectedVersion int64, audit application.ClaimAudit, event application.ClaimOutboxEvent) error {
+	var status domain.ClaimStatus
+	var version int64
+	err := tx.QueryRow(ctx, `SELECT status, version FROM reimbursement.claims WHERE id=$1 AND owner_id=$2 FOR UPDATE`, claimID, actorID).Scan(&status, &version)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return application.ErrClaimNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("lock claim for deletion: %w", err)
+	}
+	if status != domain.ClaimStatusDraft {
+		return domain.ErrClaimNotDraft
+	}
+	if version != expectedVersion {
+		return application.ErrClaimVersionConflict
+	}
+	if _, err = tx.Exec(ctx, `
+		INSERT INTO reimbursement.object_cleanup_jobs (object_key)
+		SELECT object_key FROM reimbursement.receipts WHERE claim_id=$1
+		ON CONFLICT (object_key) DO NOTHING
+	`, claimID); err != nil {
+		return fmt.Errorf("queue claim objects for cleanup: %w", err)
+	}
+	if _, err = tx.Exec(ctx, `
+		WITH closed AS (
+			UPDATE reimbursement.review_cases
+			SET claim_id=NULL, receipt_id=NULL,
+			    status=CASE WHEN status IN ('OPEN','CLAIMED') THEN 'CLOSED' ELSE status END,
+			    resolution=CASE WHEN status IN ('OPEN','CLAIMED') THEN 'CLAIM_DELETED' ELSE resolution END,
+			    resolved_by=CASE WHEN status IN ('OPEN','CLAIMED') THEN $2 ELSE resolved_by END,
+			    resolved_at=CASE WHEN status IN ('OPEN','CLAIMED') THEN now() ELSE resolved_at END,
+			    updated_at=now(), version=version+1
+			WHERE claim_id=$1 RETURNING id
+		)
+		INSERT INTO reimbursement.review_case_audits (review_case_id, actor_id, action)
+		SELECT id, $2, 'CLAIM_DELETED_BY_EMPLOYEE' FROM closed
+	`, claimID, actorID); err != nil {
+		return fmt.Errorf("close claim review cases: %w", err)
+	}
+	result, err := tx.Exec(ctx, `DELETE FROM reimbursement.claims WHERE id=$1 AND owner_id=$2 AND status='DRAFT' AND version=$3`, claimID, actorID, expectedVersion)
+	if err != nil {
+		return fmt.Errorf("delete claim: %w", err)
+	}
+	if result.RowsAffected() != 1 {
+		return application.ErrClaimVersionConflict
+	}
+	return writeClaimAuditAndEvent(ctx, tx, audit, event)
 }
 
 func writeClaimAuditAndEvent(ctx context.Context, tx pgx.Tx, audit application.ClaimAudit, event application.ClaimOutboxEvent) error {

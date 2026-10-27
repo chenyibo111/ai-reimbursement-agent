@@ -66,6 +66,9 @@ export function createConversationReimbursementTools(gateway: ReimbursementToolG
     async deleteReceipt(context: ConversationReimbursementContext, claimId: string, receiptId: string, expectedClaimVersion: number): Promise<void> {
       await execute(context, "delete_owned_receipt", { claimId, receiptId, expectedClaimVersion }, `delete_owned_receipt:${claimId}:${receiptId}:${expectedClaimVersion}`);
     },
+    async deleteDraft(context: ConversationReimbursementContext, claimId: string, expectedClaimVersion: number): Promise<void> {
+      await execute(context, "delete_owned_draft", { claimId, expectedClaimVersion }, `delete_owned_draft:${claimId}:${expectedClaimVersion}`);
+    },
     async updatePurpose(context: ConversationReimbursementContext, claimId: string, purpose: string) {
       const workbench = (await execute(context, "get_claim_workbench", { claimId })).workbench as { claim: { version: number } };
       const result = await execute(context, "update_claim_fields", { claimId, version: workbench.claim.version, purpose });

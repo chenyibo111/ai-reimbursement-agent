@@ -255,6 +255,26 @@ paths:
                 $ref: "#/components/schemas/Claim"
         default:
           $ref: "#/components/responses/Error"
+    delete:
+      operationId: deleteOwnedDraftClaim
+      summary: Delete only the actor-owned draft at its confirmed version
+      parameters:
+        - $ref: "#/components/parameters/ClaimId"
+        - $ref: "#/components/parameters/Idempotency-Key"
+        - name: expectedVersion
+          in: query
+          required: true
+          schema: { type: integer, format: int64, minimum: 1 }
+      responses:
+        "204":
+          description: Draft removed; attachment object cleanup durably queued
+        "409":
+          description: Claim changed or is no longer a draft
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/claims/{claimId}/uploads:
     post:
       operationId: createUploadSession

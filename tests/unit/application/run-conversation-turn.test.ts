@@ -299,6 +299,59 @@ it("rejects a receipt deletion confirmation after the claim version changes", as
   expect(setPendingAction).toHaveBeenCalledWith({ conversationId: "conversation-1", action: null });
 });
 
+it("previews and confirms deletion of the selected owned draft once, clearing its selections", async () => {
+  const setup = createDeps();
+  let pendingAction: unknown = null;
+  let selectedEditClaimId: string | null = "older-draft";
+  const setSelectedReadClaimId = vi.fn(async () => undefined);
+  const setSelectedEditClaimId = vi.fn(async ({ claimId }: { claimId: string | null }) => { selectedEditClaimId = claimId; });
+  const setSearchState = vi.fn(async () => undefined);
+  const deleteDraft = vi.fn(async () => undefined);
+  const claim = { id: "older-draft", claimNumber: "BX20261026-0007", version: 3, status: "DRAFT", purpose: "差旅", totalAmountCent: 1000, currency: "CNY" as const };
+  const deps = { ...setup.deps, deleteDraft,
+    conversations: { ...setup.deps.conversations,
+      getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0, selectedReadClaimId: "older-draft", selectedEditClaimId, pendingAction }),
+      setPendingAction: vi.fn(async ({ action }: { action: unknown }) => { pendingAction = action; }),
+      setSelectedReadClaimId, setSelectedEditClaimId, setSearchState,
+    },
+    model: { decideConversation: async () => ({ action: "DELETE_DRAFT" as const, reply: "" }) },
+    readWorkbench: vi.fn(async () => ({ claim, receipts: [{ id: "receipt-1", claimId: "older-draft", filename: "a.pdf", status: "EXTRACTED", invoiceNumber: "1", ocrConfidence: 0.9, totalAmountCent: 1000 }] })),
+  };
+  const preview = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "删除这张草稿" }, deps);
+  expect(preview.reply).toContain("BX20261026-0007");
+  expect(preview.reply).toContain("1 张票据");
+  expect(deleteDraft).not.toHaveBeenCalled();
+  const confirmed = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "确认删除报销单" }, deps);
+  expect(confirmed.reply).toContain("已删除");
+  expect(deleteDraft).toHaveBeenCalledWith({ actorId: "employee-1", claimId: "older-draft", expectedClaimVersion: 3 });
+  expect(setSelectedReadClaimId).toHaveBeenCalledWith({ conversationId: "conversation-1", claimId: null });
+  expect(setSelectedEditClaimId).toHaveBeenCalledWith({ conversationId: "conversation-1", claimId: null });
+  expect(setSearchState).toHaveBeenCalledWith({ conversationId: "conversation-1", state: null });
+  await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "确认删除报销单" }, deps);
+  expect(deleteDraft).toHaveBeenCalledTimes(1);
+});
+
+  it("reports a completed draft deletion even if clearing the old search page fails", async () => {
+    const setup = createDeps();
+    let pendingAction: unknown = null;
+    const deleteDraft = vi.fn(async () => undefined);
+    const claim = { id: "older-draft", claimNumber: "BX20261026-0007", version: 3, status: "DRAFT", purpose: "差旅", totalAmountCent: 1000, currency: "CNY" as const };
+    const deps = { ...setup.deps, deleteDraft,
+      conversations: { ...setup.deps.conversations,
+        getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0, selectedReadClaimId: null, selectedEditClaimId: "older-draft", pendingAction }),
+        setPendingAction: vi.fn(async ({ action }: { action: unknown }) => { pendingAction = action; }),
+        setSelectedEditClaimId: vi.fn(async () => undefined),
+        setSearchState: vi.fn(async () => { throw new Error("search state unavailable"); }),
+      },
+      model: { decideConversation: async () => ({ action: "DELETE_DRAFT" as const, reply: "" }) },
+      readWorkbench: vi.fn(async () => ({ claim, receipts: [] })),
+    };
+    await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "删除这张草稿" }, deps);
+    const confirmed = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "确认删除报销单" }, deps);
+    expect(deleteDraft).toHaveBeenCalledTimes(1);
+    expect(confirmed.reply).toContain("已删除草稿 BX20261026-0007");
+  });
+
 it("passes an OCR notification target only for a Feishu attachment with a verified chat target", async () => {
   const { deps, uploadReceipt } = createDeps();
   const attachment = { filename: "invoice.png", mimeType: "image/png", bytes: new Uint8Array([1, 2, 3]) };

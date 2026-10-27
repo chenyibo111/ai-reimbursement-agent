@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -194,6 +195,23 @@ func (service *ClaimService) DeleteClaim(ctx context.Context, actorID string, cl
 		return fmt.Errorf("delete draft claim: %w", err)
 	}
 	return nil
+}
+
+// DeleteClaimIdempotent is the Agent/Web confirmation entry point. The
+// repository stores the idempotency result in the same transaction as deletion.
+func (service *ClaimService) DeleteClaimIdempotent(ctx context.Context, actorID string, claimID string, expectedVersion int64, key string) error {
+	if expectedVersion < 1 || strings.TrimSpace(key) == "" {
+		return domain.ErrInvalidClaim
+	}
+	deleter, ok := service.repository.(interface {
+		DeleteIdempotent(context.Context, string, string, int64, string, ClaimAudit, ClaimOutboxEvent) error
+	})
+	if !ok {
+		return fmt.Errorf("idempotent claim deletion unavailable")
+	}
+	audit := ClaimAudit{ClaimID: claimID, ActorID: actorID, Action: "CLAIM_DRAFT_DELETED", Version: expectedVersion}
+	event := ClaimOutboxEvent{ClaimID: claimID, Type: "ClaimDraftDeleted", Version: expectedVersion}
+	return deleter.DeleteIdempotent(ctx, claimID, actorID, expectedVersion, key, audit, event)
 }
 
 type MemoryClaimRepository struct {

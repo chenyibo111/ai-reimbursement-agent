@@ -578,6 +578,35 @@ func TestDeleteReceiptPassesExpectedVersionForAgentConfirmation(t *testing.T) {
 	}
 }
 
+func TestDeleteClaimRequiresVersionAndIdempotencyKey(t *testing.T) {
+	claims := &deletingFakeClaims{}
+	handler := NewRouter(Dependencies{Claims: claims, Auth: StaticActorResolver{}})
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/claims/claim-1?expectedVersion=3", nil)
+	request.Header.Set("Authorization", "Bearer employee-1")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("missing key status=%d", response.Code)
+	}
+	request.Header.Set("Idempotency-Key", "delete-turn-1")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent || claims.actorID != "employee-1" || claims.claimID != "claim-1" || claims.version != 3 || claims.key != "delete-turn-1" {
+		t.Fatalf("delete result=%d, %#v", response.Code, claims)
+	}
+}
+
+type deletingFakeClaims struct {
+	fakeClaims
+	actorID, claimID, key string
+	version               int64
+}
+
+func (service *deletingFakeClaims) DeleteClaimIdempotent(_ context.Context, actorID, claimID string, version int64, key string) error {
+	service.actorID, service.claimID, service.version, service.key = actorID, claimID, version, key
+	return nil
+}
+
 func TestReceiptResponseKeepsMissingMetadataNull(t *testing.T) {
 	encoded, err := json.Marshal(receiptResponse(application.ReceiptView{ID: "receipt-1", ClaimID: "claim-1", Filename: "pending.pdf", ClosedByReview: true}))
 	if err != nil {

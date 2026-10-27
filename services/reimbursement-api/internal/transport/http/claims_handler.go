@@ -321,6 +321,28 @@ func (handler *claimsHandler) getClaim(response http.ResponseWriter, request *ht
 	writeJSON(response, http.StatusOK, claimResponse(claim))
 }
 
+func (handler *claimsHandler) deleteClaim(response http.ResponseWriter, request *http.Request) {
+	actor, _ := ActorFromContext(request.Context())
+	version, err := strconv.ParseInt(request.URL.Query().Get("expectedVersion"), 10, 64)
+	key := strings.TrimSpace(request.Header.Get("Idempotency-Key"))
+	if err != nil || version < 1 || key == "" || len(key) > 200 {
+		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "请提供有效版本和幂等键")
+		return
+	}
+	deleter, ok := handler.claims.(interface {
+		DeleteClaimIdempotent(context.Context, string, string, int64, string) error
+	})
+	if !ok {
+		writeError(response, http.StatusNotImplemented, "NOT_IMPLEMENTED", "草稿删除暂不可用")
+		return
+	}
+	if err := deleter.DeleteClaimIdempotent(request.Context(), actor.ID, pathClaimID(request), version, key); err != nil {
+		writeMappedError(response, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
 func (handler *claimsHandler) patchClaim(response http.ResponseWriter, request *http.Request) {
 	actor, _ := ActorFromContext(request.Context())
 	var raw map[string]json.RawMessage

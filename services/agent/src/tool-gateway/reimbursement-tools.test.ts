@@ -3,6 +3,15 @@ import { describe, expect, it, vi } from "vitest";
 import { ReimbursementToolGateway, type ToolCallResultStore } from "./reimbursement-tools";
 
 describe("ReimbursementToolGateway", () => {
+  it("passes a draft deletion only with the actor context and expected version", async () => {
+    const port = { deleteOwnedDraft: vi.fn().mockResolvedValue(undefined) };
+    const store: ToolCallResultStore = { findCompleted: vi.fn().mockResolvedValue(null), saveCompleted: vi.fn() };
+    const gateway = new ReimbursementToolGateway(port as never, store);
+    const call = { actorEmployeeId: "employee-1", actorRole: "EMPLOYEE" as const, channel: "FEISHU" as const, conversationId: "conversation-1", toolCallId: "delete-draft-1", idempotencyKey: "delete-draft-1", name: "delete_owned_draft" as const, arguments: { claimId: "claim-1", expectedClaimVersion: 3 } };
+    await gateway.execute(call);
+    expect(port.deleteOwnedDraft).toHaveBeenCalledWith(expect.objectContaining({ actorEmployeeId: "employee-1", claimId: "claim-1", expectedClaimVersion: 3 }));
+    await expect(gateway.execute({ ...call, arguments: { ...call.arguments, ownerId: "other" } })).rejects.toThrow();
+  });
   it("deletes only a stable receipt ID at the confirmed claim version", async () => {
     const port = { deleteOwnedReceipt: vi.fn().mockResolvedValue(undefined) };
     const store: ToolCallResultStore = { findCompleted: vi.fn().mockResolvedValue(null), saveCompleted: vi.fn() };

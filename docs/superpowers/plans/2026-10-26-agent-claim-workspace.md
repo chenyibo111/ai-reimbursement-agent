@@ -43,11 +43,11 @@
 
 **Interfaces:** `SearchClaimsQuery{Status,CreatedFrom,CreatedBefore,PurposeContains,ExpenseCategory,MinRequestedAmountCent,MaxRequestedAmountCent,Sort,Limit,Cursor,CountOnly}`；`SearchClaimsPage{Items,TotalCount,NextCursor}`；`ClaimService.SearchClaims(ctx,actorID,query)`；扩展 `GET /api/v1/claims`，保留精确 `claimNumber` 语义。
 
-- [ ] **Step 1: 写失败测试。** 建 12 条本人匹配单、若干他人单；`limit=10` 返回 10/总数 12，下一页 2；相同排序值无重复；金额为空不匹配区间；无效状态、范围和游标返回 400。
-- [ ] **Step 2: 验证红灯。** 在 `services/reimbursement-api` 执行 `go test ./internal/application ./internal/store ./internal/transport/http`，新增测试因搜索接口缺失而失败。
-- [ ] **Step 3: 实现最小代码。** SQL 先 `owner_id` 过滤再过滤/计数/稳定游标分页；请求数限 1–100；日期按业务时区解释；使用参数化 SQL，并更新 OpenAPI。
-- [ ] **Step 4: 验证绿灯。** 同一测试命令及 `go test ./...` 通过。
-- [ ] **Step 5: 提交。** 只提交本任务文件，消息 `feat(go): search owned claims with filters and cursor`。
+- [x] **Step 1: 写失败测试。** 建 12 条本人匹配单、若干他人单；`limit=10` 返回 10/总数 12，下一页 2；相同排序值无重复；金额为空不匹配区间；无效状态、范围和游标返回 400。
+- [x] **Step 2: 验证红灯。** 在 `services/reimbursement-api` 执行 `go test ./internal/application ./internal/store ./internal/transport/http`，新增测试因搜索接口缺失而失败。
+- [x] **Step 3: 实现最小代码。** SQL 先 `owner_id` 过滤再过滤/计数/稳定游标分页；请求数限 1–100；日期按业务时区解释；使用参数化 SQL，并更新 OpenAPI。
+- [x] **Step 4: 验证绿灯。** 同一测试命令及 `go test ./...` 通过。
+- [x] **Step 5: 提交。** 只提交本任务文件，消息 `feat(go): search owned claims with filters and cursor`。
 
 ### Task 2: 类型化 Agent 搜索工具
 
@@ -55,11 +55,11 @@
 
 **Interfaces:** `OwnedClaimSearchQuery` 对应 Task 1 查询字段；`OwnedClaimSearchPage{items:ClaimSnapshot[],totalCount:number,nextCursor:string|null}`；网关工具 `search_owned_claims`。
 
-- [ ] **Step 1: 写失败测试。** 条件、排序、游标正确 URL 编码；`ownerId`、非法数量和未知字段被拒绝；`null` 金额保持 `null`；同一调用重放不再次请求 Go。
-- [ ] **Step 2: 验证红灯。** 在 `services/agent` 执行 `npm test -- src/adapters/reimbursement-api-client.test.ts src/tool-gateway/reimbursement-tools.test.ts`，新增测试失败。
-- [ ] **Step 3: 实现最小代码。** 扩展 port/client/gateway/adapter，严格校验 Go 响应，复用既有 Agent JWT、服务密钥和调用账本。
-- [ ] **Step 4: 验证绿灯。** 定向测试及 `npm test` 通过。
-- [ ] **Step 5: 提交。** `feat(agent): add typed owned-claim search tool`。
+- [x] **Step 1: 写失败测试。** 条件、排序、游标正确 URL 编码；`ownerId`、非法数量和未知字段被拒绝；`null` 金额保持 `null`；同一调用重放不再次请求 Go。
+- [x] **Step 2: 验证红灯。** 在 `services/agent` 执行 `npm test -- src/adapters/reimbursement-api-client.test.ts src/tool-gateway/reimbursement-tools.test.ts`，新增测试失败。
+- [x] **Step 3: 实现最小代码。** 扩展 port/client/gateway/adapter，严格校验 Go 响应，复用既有 Agent JWT、服务密钥和调用账本。
+- [x] **Step 4: 验证绿灯。** 定向测试及 `npm test` 通过。
+- [x] **Step 5: 提交。** `feat(agent): add typed owned-claim search tool`。
 
 ### Task 3: 对话搜索、指定数量与翻页
 
@@ -67,11 +67,11 @@
 
 **Interfaces:** 模型动作 `SEARCH_CLAIMS` 输出类型化筛选、请求数或 `countOnly`；`searchState` 保存条件、游标、剩余数、过期时间和最近展示页序号→Go ID/单号映射。`runClaimSearch(decision,state,searchOwnedClaims)` 产出回复和下一状态。
 
-- [ ] **Step 1: 写失败测试。** “上月草稿列 12 张”在飞书首条最多 10 张，下一页剩余 2；“一共几张”返回 Go 总数；“第二张”选当前页 ID；新搜索/过期页/无效条件不能引用旧页或退化成无条件查询。
-- [ ] **Step 2: 验证红灯。** `npx vitest run tests/unit/application/run-conversation-turn.test.ts tests/unit/infrastructure/openai-compatible-chat-model.test.ts` 失败。
-- [ ] **Step 3: 实现最小代码。** 严格解析模型结果，服务端规范化条件及 `Asia/Shanghai` 自然日期，持久化有限搜索状态；接线 Web 与飞书；回复截断时保持游标/总数一致。
-- [ ] **Step 4: 验证绿灯。** 定向测试、测试库 Prisma 迁移与仓储集成测试通过。
-- [ ] **Step 5: 提交。** `feat(agent): search and page owned claims in conversation`。
+- [x] **Step 1: 写失败测试。** “上月草稿列 12 张”在飞书首条最多 10 张，下一页剩余 2；“一共几张”返回 Go 总数；“第二张”选当前页 ID；新搜索/过期页/无效条件不能引用旧页或退化成无条件查询。
+- [x] **Step 2: 验证红灯。** `npx vitest run tests/unit/application/run-conversation-turn.test.ts tests/unit/infrastructure/openai-compatible-chat-model.test.ts` 失败。
+- [x] **Step 3: 实现最小代码。** 严格解析模型结果，服务端规范化条件及 `Asia/Shanghai` 自然日期，持久化有限搜索状态；接线 Web 与飞书；回复截断时保持游标/总数一致。
+- [x] **Step 4: 验证绿灯。** 定向测试、测试库 Prisma 迁移与仓储集成测试通过。
+- [x] **Step 5: 提交。** `feat(agent): search and page owned claims in conversation`。
 
 ### Task 4: 明确选择可办理草稿
 
@@ -79,11 +79,11 @@
 
 **Interfaces:** `selectedEditClaimId` 独立于 `selectedReadClaimId` 与 `ReimbursementIntake.claimId`；动作 `SELECT_EDIT_CLAIM` 接完整单号或有效列表序号；`resolveWriteTarget(...)` 只返回 Go 核验的本人 `DRAFT` 或澄清。
 
-- [ ] **Step 1: 写失败测试。** 只读 A、活动 Intake B 并存时不会误写；“编辑 A”选本人草稿 A 且保留 B；他人/已提交 A 不能选；“改这张”指代不明时澄清。
-- [ ] **Step 2: 验证红灯。** `npx vitest run tests/unit/application/run-conversation-turn.test.ts` 失败。
-- [ ] **Step 3: 实现最小代码。** 独立持久化办理目标；每次操作前回读 Go 验证；明确回显单号，切换或新建 Intake 时按规格清理选择。
-- [ ] **Step 4: 验证绿灯。** 定向测试和 `npx tsc --noEmit` 通过。
-- [ ] **Step 5: 提交。** `feat(agent): select an owned draft for editing`。
+- [x] **Step 1: 写失败测试。** 只读 A、活动 Intake B 并存时不会误写；“编辑 A”选本人草稿 A 且保留 B；他人/已提交 A 不能选；“改这张”指代不明时澄清。
+- [x] **Step 2: 验证红灯。** `npx vitest run tests/unit/application/run-conversation-turn.test.ts` 失败。
+- [x] **Step 3: 实现最小代码。** 独立持久化办理目标；每次操作前回读 Go 验证；明确回显单号，切换或新建 Intake 时按规格清理选择。
+- [x] **Step 4: 验证绿灯。** 定向测试和 `npx tsc --noEmit` 通过。
+- [x] **Step 5: 提交。** `feat(agent): select an owned draft for editing`。
 
 ### Task 5: 指定草稿补字段与票据管理
 
@@ -103,11 +103,11 @@
 
 **Interfaces:** `DELETE /api/v1/claims/{claimId}` 带预期版本与幂等键，调用已有 `ClaimService.DeleteClaim`；Agent 工具 `delete_owned_draft`；`pendingAction.kind='DELETE_DRAFT'`。
 
-- [ ] **Step 1: 写失败测试。** 预览完整单号和票据数；只有本人 `DRAFT` 且版本未变时一次性确认可删除；他人/已提交/并发 Web 改动不可删除；对象清理失败可重试且不回复全部清理成功。
-- [ ] **Step 2: 验证红灯。** Go handler/store 与 Agent 确认测试失败。
-- [ ] **Step 3: 实现最小代码。** 暴露 Go 删除用例、审计/Outbox；删除前在同一事务中保存被级联删除票据的对象键到 Task 5 的清理队列，供幂等重试。确认后清除会话中指向该单的搜索/读/办目标和待确认动作。
-- [ ] **Step 4: 验证绿灯。** `go test ./...`、Agent 定向测试通过。
-- [ ] **Step 5: 提交。** `feat(reimbursement): confirm and delete owned draft`。
+- [x] **Step 1: 写失败测试。** 预览完整单号和票据数；只有本人 `DRAFT` 且版本未变时一次性确认可删除；他人/已提交/并发 Web 改动不可删除；对象清理失败可重试且不回复全部清理成功。
+- [x] **Step 2: 验证红灯。** Go handler/store 与 Agent 确认测试失败。
+- [x] **Step 3: 实现最小代码。** 暴露 Go 删除用例、审计/Outbox；删除前在同一事务中保存被级联删除票据的对象键到 Task 5 的清理队列，供幂等重试。确认后清除会话中指向该单的搜索/读/办目标和待确认动作。
+- [x] **Step 4: 验证绿灯。** `go test ./...`、Agent 定向测试通过。
+- [x] **Step 5: 提交。** `feat(reimbursement): confirm and delete owned draft`。
 
 ### Task 7: 指定草稿两阶段提交
 

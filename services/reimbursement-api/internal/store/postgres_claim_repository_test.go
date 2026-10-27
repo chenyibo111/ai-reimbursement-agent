@@ -13,6 +13,74 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+func TestPostgresClaimDeleteQueuesAttachmentsAndReplaysOneIdempotencyKey(t *testing.T) {
+	databaseURL := os.Getenv("TEST_REIMBURSEMENT_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_REIMBURSEMENT_DATABASE_URL is not configured")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	suffix := time.Now().UTC().Format("20060102150405.000000000")
+	ownerID, claimID, receiptID := "delete-owner-"+suffix, "delete-claim-"+suffix, "delete-receipt-"+suffix
+	if _, err := pool.Exec(ctx, `INSERT INTO reimbursement.employees (id, display_name) VALUES ($1, 'Delete Test')`, ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO reimbursement.claims (id, owner_id, purpose) VALUES ($1, $2, 'Delete test')`, claimID, ownerID); err != nil {
+		t.Fatal(err)
+	}
+	objectKey := "test/" + receiptID
+	if _, err := pool.Exec(ctx, `INSERT INTO reimbursement.receipts (id, claim_id, owner_id, filename, content_type, expected_size, object_key, status) VALUES ($1,$2,$3,'invoice.pdf','application/pdf',100,$4,'UPLOAD_PENDING')`, receiptID, claimID, ownerID, objectKey); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO reimbursement.review_cases (id, claim_id, receipt_id, kind, status) VALUES ($1,$2,$3,'RECEIPT_OCR','OPEN')`, "delete-review-"+suffix, claimID, receiptID); err != nil {
+		t.Fatal(err)
+	}
+	repository := NewPostgresClaimRepository(pool)
+	audit := application.ClaimAudit{ClaimID: claimID, ActorID: ownerID, Action: "CLAIM_DRAFT_DELETED", Version: 1}
+	event := application.ClaimOutboxEvent{ClaimID: claimID, Type: "ClaimDraftDeleted", Version: 1}
+	if err := repository.DeleteIdempotent(ctx, claimID, ownerID, 2, "stale", audit, event); !errors.Is(err, application.ErrClaimVersionConflict) {
+		t.Fatalf("stale delete=%v", err)
+	}
+	if err := repository.DeleteIdempotent(ctx, claimID, "another-employee", 1, "other-key", audit, event); !errors.Is(err, application.ErrClaimNotFound) {
+		t.Fatalf("other actor delete=%v", err)
+	}
+	submittedID := "submitted-claim-" + suffix
+	if _, err := pool.Exec(ctx, `INSERT INTO reimbursement.claims (id, owner_id, purpose, status) VALUES ($1,$2,'Submitted','SUBMITTED')`, submittedID, ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.DeleteIdempotent(ctx, submittedID, ownerID, 1, "submitted-key", audit, event); !errors.Is(err, domain.ErrClaimNotDraft) {
+		t.Fatalf("submitted delete=%v", err)
+	}
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM reimbursement.object_cleanup_jobs WHERE object_key=$1`, objectKey).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("premature cleanup rows=%d, %v", count, err)
+	}
+	if err := repository.DeleteIdempotent(ctx, claimID, ownerID, 1, "delete-once", audit, event); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.DeleteIdempotent(ctx, claimID, ownerID, 1, "delete-once", audit, event); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM reimbursement.object_cleanup_jobs WHERE object_key=$1 AND completed_at IS NULL`, objectKey).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("cleanup rows=%d, %v", count, err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM reimbursement.claims WHERE id=$1`, claimID).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("claims rows=%d, %v", count, err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM reimbursement.claim_audits WHERE claim_id=$1 AND action='CLAIM_DRAFT_DELETED'`, claimID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("deletion audits=%d, %v", count, err)
+	}
+	var reviewStatus string
+	var reviewClaimID, reviewReceiptID *string
+	if err := pool.QueryRow(ctx, `SELECT status, claim_id, receipt_id FROM reimbursement.review_cases WHERE id=$1`, "delete-review-"+suffix).Scan(&reviewStatus, &reviewClaimID, &reviewReceiptID); err != nil || reviewStatus != "CLOSED" || reviewClaimID != nil || reviewReceiptID != nil {
+		t.Fatalf("review=%s %#v %#v %v", reviewStatus, reviewClaimID, reviewReceiptID, err)
+	}
+}
+
 func TestPostgresClaimNumberLookupScopesByOwner(t *testing.T) {
 	databaseURL := os.Getenv("TEST_REIMBURSEMENT_DATABASE_URL")
 	if databaseURL == "" {
