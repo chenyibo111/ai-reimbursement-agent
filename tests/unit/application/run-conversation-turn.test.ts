@@ -260,6 +260,51 @@ it("writes fields and uploads attachments to the selected older draft without ch
   expect(setup.getIntake()?.collectedFields.purpose).toBe("新单事由");
 });
 
+it("does not write or upload when the last read claim differs from the selected edit draft", async () => {
+  const setup = createDeps();
+  await setup.deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "new-intake" });
+  const updateFields = vi.fn();
+  const deps = { ...setup.deps, updateFields,
+    conversations: { ...setup.deps.conversations, getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0, selectedReadClaimId: "read-only-a", selectedEditClaimId: "older-draft-b" }) },
+    model: { decideConversation: async () => ({ action: "COLLECT_FIELDS" as const, reply: "", fields: { purpose: "客户拜访" } }) },
+  };
+  const edit = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "改这张的事由" }, deps);
+  expect(edit.reply).toContain("请明确");
+  expect(updateFields).not.toHaveBeenCalled();
+  const upload = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "把这张票据上传到刚看的单", attachment: { filename: "a.png", mimeType: "image/png", bytes: new Uint8Array([1]) } }, deps);
+  expect(upload.reply).toContain("请明确");
+  expect(setup.uploadReceipt).not.toHaveBeenCalled();
+});
+
+it("uploads an attachment only to the owned draft explicitly named in its caption", async () => {
+  const setup = createDeps();
+  const target = { id: "claim-a", claimNumber: "BX20261026-0007", status: "DRAFT" as const, version: 3, purpose: "客户拜访", totalAmountCent: null, currency: "CNY" as const };
+  const deps = { ...setup.deps,
+    conversations: { ...setup.deps.conversations, getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0, selectedReadClaimId: "claim-a", selectedEditClaimId: "claim-b" }) },
+    findOwnedClaimByNumber: vi.fn(async () => target),
+    readWorkbench: vi.fn(async () => ({ claim: target, receipts: [] })),
+  };
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", chatId: "chat-1", message: "把这张发票放到 BX20261026-0007", attachment: { filename: "a.png", mimeType: "image/png", bytes: new Uint8Array([1]) } }, deps);
+  expect(result.targetClaimId).toBe("claim-a");
+  expect(setup.uploadReceipt).toHaveBeenCalledWith(expect.objectContaining({ claimId: "claim-a" }));
+  expect(setup.uploadReceipt).not.toHaveBeenCalledWith(expect.objectContaining({ claimId: "claim-b" }));
+});
+
+it("does not stage receipt or draft deletion against a different last-read claim", async () => {
+  const setup = createDeps();
+  const setPendingAction = vi.fn();
+  const decisions = [{ action: "DELETE_RECEIPT" as const, reply: "", receiptOrdinal: 1 }, { action: "DELETE_DRAFT" as const, reply: "" }];
+  const deps = { ...setup.deps,
+    conversations: { ...setup.deps.conversations, getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0, selectedReadClaimId: "claim-a", selectedEditClaimId: "claim-b" }), setPendingAction },
+    model: { decideConversation: async () => decisions.shift()! },
+  };
+  const receipt = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "删除这张票据" }, deps);
+  const draft = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "删除这张草稿" }, deps);
+  expect(receipt.reply).toContain("请先明确选择");
+  expect(draft.reply).toContain("完整报销单号");
+  expect(setPendingAction).not.toHaveBeenCalled();
+});
+
 it("previews the exact second same-name receipt and deletes it once after confirmation", async () => {
   const setup = createDeps();
   let pendingAction: unknown = null;
@@ -306,7 +351,7 @@ it("does not upload to the Intake when only a different claim was read", async (
     ...setup.deps,
     conversations: { ...setup.deps.conversations, getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0, selectedReadClaimId: "older-draft" }) },
   });
-  expect(result.reply).toContain("请先明确选择");
+  expect(result.reply).toContain("请明确票据要上传到的完整报销单号");
   expect(setup.uploadReceipt).not.toHaveBeenCalled();
   expect(setup.getIntake()?.claimId).toBe("new-intake");
 });
@@ -596,6 +641,7 @@ it("selects an explicit owned draft as an edit target without replacing an activ
   await setup.deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "current-draft" });
   const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "编辑 BX20261026-0007" }, setup.deps);
   expect(result.reply).toContain("BX20261026-0007");
+  expect(result.targetClaimId).toBe("older-draft");
   expect(setSelectedEditClaimId).toHaveBeenCalledWith({ conversationId: "conversation-1", claimId: "older-draft" });
   expect(setup.getIntake()?.claimId).toBe("current-draft");
 });

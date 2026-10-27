@@ -107,6 +107,17 @@ func (repository *PostgresReviewCaseRepository) ResolveReceiptCase(ctx context.C
 	}
 	defer tx.Rollback(ctx)
 
+	var targetReceiptID string
+	if err := tx.QueryRow(ctx, `SELECT receipt_id FROM reimbursement.review_cases WHERE id = $1 AND receipt_id IS NOT NULL`, command.CaseID).Scan(&targetReceiptID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return application.ReviewCase{}, application.ErrReviewCaseConflict
+		}
+		return application.ReviewCase{}, fmt.Errorf("find review receipt: %w", err)
+	}
+	_, lockedClaimID, err := lockDraftClaimForReceipt(ctx, tx, targetReceiptID)
+	if err != nil {
+		return application.ReviewCase{}, err
+	}
 	var receiptID, claimID, currentInvoice string
 	if err := tx.QueryRow(ctx, `
 		SELECT review_case.receipt_id, review_case.claim_id, COALESCE(receipt.invoice_number, '')
@@ -120,6 +131,9 @@ func (repository *PostgresReviewCaseRepository) ResolveReceiptCase(ctx context.C
 			return application.ReviewCase{}, application.ErrReviewCaseConflict
 		}
 		return application.ReviewCase{}, fmt.Errorf("lock receipt review case: %w", err)
+	}
+	if receiptID != targetReceiptID || claimID != lockedClaimID {
+		return application.ReviewCase{}, application.ErrReviewCaseConflict
 	}
 
 	invoiceNumber := currentInvoice
@@ -175,6 +189,9 @@ func (repository *PostgresReviewCaseRepository) ResolveReceiptCase(ctx context.C
 		VALUES ($1::uuid, 'ReceiptReviewResolved', $2::text, jsonb_build_object('receiptId', $2::text, 'claimId', $3::text))
 	`, randomUUID(), receiptID, claimID); err != nil {
 		return application.ReviewCase{}, fmt.Errorf("insert receipt review resolution event: %w", err)
+	}
+	if err := advanceClaimVersionForReceipt(ctx, tx, claimID); err != nil {
+		return application.ReviewCase{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return application.ReviewCase{}, fmt.Errorf("commit review case resolution: %w", err)

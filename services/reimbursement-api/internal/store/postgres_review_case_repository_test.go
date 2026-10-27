@@ -91,6 +91,10 @@ func TestPostgresReviewCaseRepositoryClaimAndResolveAreVersioned(t *testing.T) {
 	if reviewEventCount != 1 {
 		t.Fatalf("review resolution events = %d, want 1", reviewEventCount)
 	}
+	var claimVersion int64
+	if err := pool.QueryRow(ctx, `SELECT version FROM reimbursement.claims WHERE id = $1`, claimID).Scan(&claimVersion); err != nil || claimVersion != 2 {
+		t.Fatalf("claim version after review resolution = %d, %v", claimVersion, err)
+	}
 
 	var audits int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM reimbursement.review_case_audits WHERE review_case_id = $1`, caseID).Scan(&audits); err != nil {

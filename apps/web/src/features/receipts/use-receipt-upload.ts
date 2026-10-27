@@ -16,6 +16,6 @@ export function useReceiptUpload(claimId: string) {
       if (!uploadResponse.ok) throw new Error("附件上传未完成，请检查网络后重试。");
       await reimbursementApi.finalizeReceipt(claimId, session.receiptId);
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: claimKeys.receipts(claimId) }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: claimKeys.all }),
   });
 }

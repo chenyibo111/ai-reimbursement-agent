@@ -32,8 +32,8 @@ export function writeTargetIsAmbiguous(input: {
   targetReference?: "CURRENT_INTAKE";
 }): boolean {
   if (input.targetReference === "CURRENT_INTAKE") return false;
-  if (input.selectedEditClaimId) return false;
-  return Boolean(input.selectedReadClaimId && input.intakeClaimId && input.selectedReadClaimId !== input.intakeClaimId);
+  const writeClaimId = input.selectedEditClaimId ?? input.intakeClaimId;
+  return Boolean(input.selectedReadClaimId && writeClaimId && input.selectedReadClaimId !== writeClaimId);
 }
 
 export async function resolveSelectedDraft(input: {
