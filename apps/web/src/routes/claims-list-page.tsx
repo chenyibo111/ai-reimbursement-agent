@@ -37,7 +37,7 @@ function amountInCent(value: string): number | null {
 
 function toQuery(filters: Filters): Omit<ClaimSearchQuery, "cursor"> {
   return {
-    limit: 20, sort: filters.sort,
+    limit: 10, sort: filters.sort,
     ...(filters.status ? { status: filters.status } : {}),
     ...(filters.purposeContains.trim() ? { purposeContains: filters.purposeContains.trim() } : {}),
     ...(filters.expenseCategory.trim() ? { expenseCategory: filters.expenseCategory.trim() } : {}),

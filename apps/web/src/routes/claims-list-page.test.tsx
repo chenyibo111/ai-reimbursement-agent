@@ -82,7 +82,7 @@ describe("ClaimListPage", () => {
     await userEvent.type(screen.getByLabelText("申请金额下限（元）"), "100.50");
     await userEvent.type(screen.getByLabelText("申请金额上限（元）"), "500");
     await userEvent.click(screen.getByRole("button", { name: "筛选单据" }));
-    expect(search).toHaveBeenLastCalledWith(expect.objectContaining({ status: "DRAFT", purposeContains: "客户拜访", minRequestedAmountCent: 10050, maxRequestedAmountCent: 50000, limit: 20 }));
+    expect(search).toHaveBeenLastCalledWith(expect.objectContaining({ status: "DRAFT", purposeContains: "客户拜访", minRequestedAmountCent: 10050, maxRequestedAmountCent: 50000, limit: 10 }));
     const called = search.mock.calls.length;
     await userEvent.clear(screen.getByLabelText("申请金额下限（元）"));
     await userEvent.type(screen.getByLabelText("申请金额下限（元）"), "600");
