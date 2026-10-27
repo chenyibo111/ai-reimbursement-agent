@@ -3,7 +3,7 @@ import { expect, it } from "vitest";
 import { processFeishuEvent, type ProcessFeishuEventDeps } from "@/src/application/process-feishu-event";
 
 function fixture(overrides: Partial<ProcessFeishuEventDeps> = {}) {
-  const calls = { ensureEmployee: 0, private: 0, group: 0, deliveryTargets: [] as Array<{ conversationId: string; chatId: string }>, turn: [] as Array<Record<string, unknown>>, download: 0 };
+  const calls = { ensureEmployee: 0, private: 0, group: 0, deliveryTargets: [] as Array<{ conversationId: string; chatId: string }>, claimTargets: [] as Array<{ employeeId: string; conversationId: string; chatId: string; claimId: string }>, turn: [] as Array<Record<string, unknown>>, download: 0 };
   const deps: ProcessFeishuEventDeps = {
     botOpenId: "ou-bot",
     publicAppUrl: "https://reimbursement.example.test",
@@ -26,6 +26,7 @@ function fixture(overrides: Partial<ProcessFeishuEventDeps> = {}) {
         return { id: "group-employee-1-oc-1" };
       },
       recordFeishuDeliveryTarget: async (input) => { calls.deliveryTargets.push(input); },
+      subscribeClaimNotifications: async (input) => { calls.claimTargets.push(input); },
     },
     client: {
       getMessage: async () => ({ messageId: "om-1", chatId: "oc-1", chatType: "p2p", senderOpenId: "ou-employee", messageType: "text", text: "住宿报销规则是什么", mentions: [], attachments: [] }),
@@ -49,6 +50,21 @@ function fixture(overrides: Partial<ProcessFeishuEventDeps> = {}) {
   };
   return { deps, calls };
 }
+
+it("subscribes a verified private claim even when it is an older selected draft", async () => {
+  const { deps, calls } = fixture({ runConversationTurn: async () => ({ reply: "票据已接收", citations: [], intake: null, targetClaimId: "older-claim" }) });
+  await processFeishuEvent({ eventId: "event-1" }, deps);
+  expect(calls.claimTargets).toEqual([{ employeeId: "employee-1", conversationId: "private-employee-1", chatId: "oc-1", claimId: "older-claim" }]);
+});
+
+it("never registers group chats as private claim notification targets", async () => {
+  const { deps, calls } = fixture({
+    events: { findInboundByEventId: async () => ({ eventId: "event-1", messageId: "om-1", messageType: "text", chatId: "oc-1", senderOpenId: "ou-employee", chatType: "group", mentionedOpenIds: ["ou-bot"] }) },
+    runConversationTurn: async () => ({ reply: "已找到单据", citations: [], intake: null, targetClaimId: "claim-1" }),
+  });
+  await processFeishuEvent({ eventId: "event-1" }, deps);
+  expect(calls.claimTargets).toEqual([]);
+});
 
 it("ignores a group message that does not mention the bot before looking up an employee", async () => {
   const { deps, calls } = fixture({

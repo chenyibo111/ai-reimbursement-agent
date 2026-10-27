@@ -139,11 +139,11 @@
 
 **Interfaces:** 订阅已验证的员工私聊与 `claimId`；消费 OCR 完成/失败、复核需要/解决、提交完成事件；按 `event_id` 去重。现有 OCR durable 不重置，新增事件使用新 durable。
 
-- [ ] **Step 1: 写失败测试。** 选中旧草稿上传也能关联通知目标；事件重投只发送一次；无可信私聊目标或 Go 当前读取失败不泄漏数据；复核与提交通知来自 Go 最新状态。
-- [ ] **Step 2: 验证红灯。** Agent events、worker 测试失败。
-- [ ] **Step 3: 实现最小代码。** 扩展目标登记与事件消费者，让 Go review resolution 发 `ReceiptReviewResolved` Outbox；另建通知 durable 而不重置现有 OCR durable，按现有投递账本重试和去重，不把未接入审批/付款阶段伪装成通知。
-- [ ] **Step 4: 验证绿灯。** Agent、根目录通知测试与 Go 事件测试通过。
-- [ ] **Step 5: 提交。** `feat(agent): notify employee of verified claim progress`。
+- [x] **Step 1: 写失败测试。** 选中旧草稿上传也能关联通知目标；事件重投只发送一次；无可信私聊目标或 Go 当前读取失败不泄漏数据；复核与提交通知来自 Go 最新状态。
+- [x] **Step 2: 验证红灯。** Agent events、worker 测试失败。
+- [x] **Step 3: 实现最小代码。** 扩展目标登记与事件消费者，让 Go review resolution 发 `ReceiptReviewResolved` Outbox；另建通知 durable 而不重置现有 OCR durable，按现有投递账本重试和去重，不把未接入审批/付款阶段伪装成通知。
+- [x] **Step 4: 验证绿灯。** Agent、根目录通知测试与 Go 事件测试通过。
+- [x] **Step 5: 提交。** `feat(agent): notify employee of verified claim progress`。
 
 ### Task 10: React 对齐与整体验收
 

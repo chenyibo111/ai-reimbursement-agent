@@ -1,6 +1,7 @@
 import type { ReimbursementPort } from "../../services/agent/src/ports/reimbursement-port";
 import { createReimbursementEventConsumer } from "../../services/agent/src/events/reimbursement-consumer";
 import { formatReceiptExtractionEventNotification } from "../../services/agent/src/events/receipt-notification";
+import { formatClaimProgress } from "@/src/application/claim-progress";
 
 /** Connects an Agent-owned event ledger and channel target to the tool-only reimbursement boundary. */
 export function createAgentEventNotificationHandler(deps: {
@@ -12,16 +13,19 @@ export function createAgentEventNotificationHandler(deps: {
   };
   client: { sendText(chatId: string, text: string, uuid: string): Promise<void> };
   publicAppUrl: string;
+  acceptedEventTypes?: readonly string[];
 }) {
   return createReimbursementEventConsumer({
     port: deps.port,
+    acceptedEventTypes: deps.acceptedEventTypes,
     wasProcessed: (eventId) => deps.processedEvents.wasProcessed(eventId),
     markProcessed: (eventId) => deps.processedEvents.markProcessed(eventId),
     findNotificationTarget: (claimId) => deps.conversations.findNotificationTargetByClaimId(claimId),
-    notify: async ({ eventId, claimId, conversationId, chatId, workbench }) => {
-      const text = formatReceiptExtractionEventNotification({
+    notify: async ({ eventId, eventType, claimId, receiptId, conversationId, chatId, workbench, progress }) => {
+      const text = progress ? `${eventType === "ClaimSubmitted" ? "报销单已提交。" : eventType === "ReceiptReviewRequired" ? "票据需要人工复核。" : "票据复核已处理。"}\n${formatClaimProgress(progress)}\n报销工作台：${deps.publicAppUrl.replace(/\/$/, "")}/claims/${encodeURIComponent(claimId)}` : formatReceiptExtractionEventNotification({
         publicAppUrl: deps.publicAppUrl,
         claimId,
+        receiptId,
         workbench: workbench as { receipts: Array<{ id: string; filename: string; status: string; invoiceNumber: string; ocrConfidence: number }> },
       });
       await deps.client.sendText(chatId, text, eventId);

@@ -71,8 +71,17 @@ export class AgentConversationRepository {
   }
 
   async findNotificationTargetByClaimId(claimId: string): Promise<{ employeeId: string; conversationId: string; chatId: string } | null> {
+    const subscribed = await this.prisma.agentClaimNotificationTarget.findUnique({
+      where: { claimId },
+      select: { employeeId: true, conversationId: true, chatId: true, conversation: { select: { kind: true, employeeId: true } } },
+    });
+    if (subscribed) {
+      if (subscribed.conversation.kind !== "PRIVATE" || subscribed.conversation.employeeId !== subscribed.employeeId) return null;
+      const chatId = subscribed.chatId.trim();
+      return chatId ? { employeeId: subscribed.employeeId, conversationId: subscribed.conversationId, chatId } : null;
+    }
     const intake = await this.prisma.reimbursementIntake.findFirst({
-      where: { claimId, conversation: { latestFeishuChatId: { not: null } } },
+      where: { claimId, conversation: { kind: "PRIVATE", latestFeishuChatId: { not: null } } },
       orderBy: { updatedAt: "desc" },
       select: {
         employeeId: true,
@@ -82,6 +91,22 @@ export class AgentConversationRepository {
     });
     const chatId = intake?.conversation.latestFeishuChatId?.trim();
     return intake && chatId ? { employeeId: intake.employeeId, conversationId: intake.conversationId, chatId } : null;
+  }
+
+  async subscribeClaimNotifications(input: { employeeId: string; conversationId: string; chatId: string; claimId: string }): Promise<void> {
+    const chatId = input.chatId.trim();
+    const claimId = input.claimId.trim();
+    if (!chatId || !claimId) throw new Error("private claim notification target is required");
+    const conversation = await this.prisma.agentConversation.findFirst({
+      where: { id: input.conversationId, employeeId: input.employeeId, kind: "PRIVATE", latestFeishuChatId: chatId },
+      select: { id: true },
+    });
+    if (!conversation) throw new Error("private conversation target is not verified");
+    await this.prisma.agentClaimNotificationTarget.upsert({
+      where: { claimId },
+      create: { claimId, employeeId: input.employeeId, conversationId: input.conversationId, chatId },
+      update: { employeeId: input.employeeId, conversationId: input.conversationId, chatId },
+    });
   }
 
   async appendMessage(input: AppendAgentMessageInput): Promise<AgentMessage> {

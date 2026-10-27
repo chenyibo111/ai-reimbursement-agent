@@ -26,6 +26,18 @@ async function createEmployee() {
 }
 
 describe("AgentConversationRepository", () => {
+  it("persists an old claim's private Feishu notification target and rejects group targets", async () => {
+    const employee = await createEmployee();
+    const privateChat = await repository.getOrCreatePrivate(employee.id);
+    const group = await repository.getOrCreateGroup(employee.id, `oc-group-${employee.id}`);
+    const claimId = `old-go-claim-${employee.id}`;
+    await repository.recordFeishuDeliveryTarget({ conversationId: privateChat.id, chatId: `oc-private-${employee.id}` });
+    await repository.subscribeClaimNotifications({ employeeId: employee.id, conversationId: privateChat.id, chatId: `oc-private-${employee.id}`, claimId });
+    await expect(repository.findNotificationTargetByClaimId(claimId)).resolves.toEqual({ employeeId: employee.id, conversationId: privateChat.id, chatId: `oc-private-${employee.id}` });
+    await repository.recordFeishuDeliveryTarget({ conversationId: group.id, chatId: `oc-group-${employee.id}` });
+    await expect(repository.subscribeClaimNotifications({ employeeId: employee.id, conversationId: group.id, chatId: `oc-group-${employee.id}`, claimId })).rejects.toThrow("not verified");
+    await expect(repository.findNotificationTargetByClaimId(claimId)).resolves.toEqual({ employeeId: employee.id, conversationId: privateChat.id, chatId: `oc-private-${employee.id}` });
+  });
   it("consumes a pending receipt deletion at most once", async () => {
     const employee = await createEmployee();
     const conversation = await repository.getOrCreatePrivate(employee.id);

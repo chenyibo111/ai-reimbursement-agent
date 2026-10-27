@@ -45,6 +45,7 @@ it("resolves an OCR notification target from agent-owned conversation state", as
     conversation: { latestFeishuChatId: "oc-1" },
   });
   const repository = new AgentConversationRepository({
+    agentClaimNotificationTarget: { findUnique: vi.fn().mockResolvedValue(null) },
     reimbursementIntake: { findFirst },
   } as never);
 

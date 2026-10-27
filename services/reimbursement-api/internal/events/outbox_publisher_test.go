@@ -61,6 +61,12 @@ func TestOutboxPublisherPublishesEventEnvelopeToDomainSubject(t *testing.T) {
 	}
 }
 
+func TestReviewResolutionUsesDedicatedNotificationSubject(t *testing.T) {
+	if got := subject("ReceiptReviewResolved"); got != "reimbursement.receipt.review_resolved.v1" {
+		t.Fatalf("review resolution subject = %q", got)
+	}
+}
+
 type fakeOutboxStore struct {
 	events                       []OutboxEvent
 	published, failed            int

@@ -4,10 +4,11 @@ type Receipt = { id: string; filename: string; status: string; invoiceNumber: st
 export function formatReceiptExtractionEventNotification(input: {
   publicAppUrl: string;
   claimId: string;
+  receiptId?: string;
   workbench: { receipts: Receipt[] };
 }): string {
   const workspace = `${input.publicAppUrl.replace(/\/$/, "")}/claims/${encodeURIComponent(input.claimId)}`;
-  const receipt = input.workbench.receipts.at(-1);
+  const receipt = input.receiptId ? input.workbench.receipts.find((item) => item.id === input.receiptId) : input.workbench.receipts.at(-1);
   if (!receipt || receipt.status === "FAILED") {
     return `票据识别未完成，请在工作台补充信息或重新上传票据。\n\n报销工作台：${workspace}`;
   }

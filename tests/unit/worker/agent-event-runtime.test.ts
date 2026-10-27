@@ -33,3 +33,19 @@ it("delivers a refetched OCR result once and records it in the Agent conversatio
   }));
   expect(markProcessed).toHaveBeenCalledWith("event-1");
 });
+
+it("notifies submission from the owner's fresh Go progress, without event-payload facts", async () => {
+  const progress = { claimId: "claim-1", claimNumber: "BX-9", status: "SUBMITTED", version: 3, submissionNumber: "SUB-9", submittedAt: "2026-10-27T00:00:00Z", receipts: [], issues: [], approval: "NOT_CONNECTED", payment: "NOT_CONNECTED" };
+  const getOwnedClaimProgress = vi.fn().mockResolvedValue(progress);
+  const sendText = vi.fn();
+  const handler = createAgentEventNotificationHandler({
+    port: { getOwnedClaimProgress } as never,
+    processedEvents: { wasProcessed: async () => false, markProcessed: vi.fn() },
+    conversations: { findNotificationTargetByClaimId: async () => ({ employeeId: "employee-1", conversationId: "conversation-1", chatId: "oc-private" }), appendMessage: vi.fn() },
+    client: { sendText }, publicAppUrl: "https://reimbursement.example.test", acceptedEventTypes: ["ClaimSubmitted"],
+  });
+  await handler.handle({ event_id: "event-submitted", event_type: "ClaimSubmitted", aggregate_id: "claim-1", payload: { claimId: "claim-1" } });
+  expect(getOwnedClaimProgress).toHaveBeenCalledWith(expect.objectContaining({ actorEmployeeId: "employee-1", actorRole: "EMPLOYEE" }));
+  expect(sendText).toHaveBeenCalledWith("oc-private", expect.stringContaining("BX-9：已提交"), "event-submitted");
+  expect(sendText.mock.calls[0][1]).toContain("当前系统未接入审批/付款进度");
+});

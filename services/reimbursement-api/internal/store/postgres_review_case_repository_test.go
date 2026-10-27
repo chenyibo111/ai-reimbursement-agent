@@ -32,6 +32,7 @@ func TestPostgresReviewCaseRepositoryClaimAndResolveAreVersioned(t *testing.T) {
 	receiptID := "review-receipt-" + suffix
 	caseID := "review-case-" + suffix
 	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM reimbursement.outbox_events WHERE event_type = 'ReceiptReviewResolved' AND aggregate_id = $1`, receiptID)
 		_, _ = pool.Exec(ctx, `DELETE FROM reimbursement.review_case_audits WHERE review_case_id = $1`, caseID)
 		_, _ = pool.Exec(ctx, `DELETE FROM reimbursement.review_cases WHERE id = $1`, caseID)
 		_, _ = pool.Exec(ctx, `DELETE FROM reimbursement.receipts WHERE id = $1`, receiptID)
@@ -82,6 +83,13 @@ func TestPostgresReviewCaseRepositoryClaimAndResolveAreVersioned(t *testing.T) {
 	}
 	if resolved.Status != application.ReviewCaseResolved || resolved.ResolvedBy != reviewerOneID || resolved.Version != 3 {
 		t.Fatalf("resolved case = %#v", resolved)
+	}
+	var reviewEventCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM reimbursement.outbox_events WHERE event_type = 'ReceiptReviewResolved' AND aggregate_id = $1 AND payload->>'claimId' = $2`, receiptID, claimID).Scan(&reviewEventCount); err != nil {
+		t.Fatalf("count review resolution events: %v", err)
+	}
+	if reviewEventCount != 1 {
+		t.Fatalf("review resolution events = %d, want 1", reviewEventCount)
 	}
 
 	var audits int

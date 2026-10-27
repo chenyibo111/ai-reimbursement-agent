@@ -33,6 +33,7 @@ export type ProcessFeishuEventDeps = {
     getOrCreatePrivate(employeeId: string): Promise<Conversation>;
     getOrCreateGroup(employeeId: string, chatId: string): Promise<Conversation>;
     recordFeishuDeliveryTarget(input: { conversationId: string; chatId: string }): Promise<void>;
+    subscribeClaimNotifications?(input: { employeeId: string; conversationId: string; chatId: string; claimId: string }): Promise<void>;
   };
   client: FeishuBotClient;
   runConversationTurn(input: {
@@ -90,9 +91,13 @@ export async function processFeishuEvent(
       message: normalizeMessage(message.text, Boolean(attachment)),
       ...(attachment ? { attachment } : {}),
     });
+    const targetClaimId = result.targetClaimId ?? result.intake?.claimId;
+    if (message.chatType === "p2p" && targetClaimId) {
+      await deps.conversations.subscribeClaimNotifications?.({ employeeId: employee.id, conversationId: conversation.id, chatId: message.chatId, claimId: targetClaimId });
+    }
     return {
       kind: "AGENT_REPLIED",
-      claimId: result.targetClaimId ?? result.intake?.claimId ?? null,
+      claimId: targetClaimId ?? null,
       replyText: formatReply(result, deps.publicAppUrl, message.chatType),
     };
   } catch (error) {
