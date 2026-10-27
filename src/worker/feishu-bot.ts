@@ -103,6 +103,7 @@ function createProcessDeps(input: {
         searchOwnedClaims: ({ query }) => tools.searchOwnedClaims(context, query),
         findOwnedClaimByNumber: ({ claimNumber }) => tools.findOwnedClaimByNumber(context, claimNumber),
         readValidation: ({ claimId }) => tools.readValidation(context, claimId),
+        readProgress: ({ claimId }) => tools.readProgress(context, claimId),
         prepareSubmission: async ({ claimId }) => {
           const confirmation = await tools.prepareSubmission(context, claimId);
           return { token: confirmation.confirmationToken, claimId: confirmation.claimId, claimVersion: confirmation.claimVersion, workbench: confirmation.workbench };

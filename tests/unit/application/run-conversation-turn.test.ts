@@ -49,6 +49,23 @@ it("answers an owned count from Go without exposing any claim list", async () =>
   expect(searchOwnedClaims).toHaveBeenCalledWith(expect.objectContaining({ actorId: "employee-1", query: expect.objectContaining({ countOnly: true, limit: 1 }) }));
 });
 
+it("answers progress from Go facts and blocks the same query in a Feishu group", async () => {
+  const setup = createDeps();
+  const readProgress = vi.fn(async () => ({ claimId: "claim-1", claimNumber: "BX20261027-0001", status: "DRAFT" as const, version: 2, submissionNumber: null, submittedAt: null, receipts: [{ receiptId: "r1", filename: "invoice.pdf", status: "REVIEW_REQUIRED", reviewStatus: "PENDING" as const }], issues: [{ code: "PURPOSE_REQUIRED", message: "报销事由不能为空", severity: "BLOCKING" as const }], approval: "NOT_CONNECTED" as const, payment: "NOT_CONNECTED" as const }));
+  const deps = { ...setup.deps, readProgress,
+    conversations: { ...setup.deps.conversations, getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0, selectedReadClaimId: "claim-1" }) },
+    model: { decideConversation: async () => ({ action: "READ_CLAIM_PROGRESS" as const, reply: "模型说已付款" }) },
+  };
+  const privateReply = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "这张单进度如何" }, deps);
+  expect(privateReply.reply).toContain("等待人工复核");
+  expect(privateReply.reply).toContain("报销事由不能为空");
+  expect(privateReply.reply).not.toContain("已付款");
+  expect(readProgress).toHaveBeenCalledWith({ actorId: "employee-1", claimId: "claim-1" });
+  const groupReply = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "group", message: "这张单进度如何" }, deps);
+  expect(groupReply.reply).toContain("私聊机器人");
+  expect(readProgress).toHaveBeenCalledTimes(1);
+});
+
 type Intake = {
   id: string;
   employeeId: string;

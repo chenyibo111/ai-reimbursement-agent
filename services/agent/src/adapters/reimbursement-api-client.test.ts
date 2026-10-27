@@ -2,6 +2,16 @@ import { expect, it, vi } from "vitest";
 
 import { ReimbursementApiClient, ReimbursementApiHttpError } from "./reimbursement-api-client";
 
+it("reads employee-safe progress through the actor-scoped Go endpoint", async () => {
+  const progress = { claimId: "claim-1", claimNumber: "BX20261027-0001", status: "DRAFT", version: 2, submissionNumber: null, submittedAt: null, receipts: [], issues: [], approval: "NOT_CONNECTED", payment: "NOT_CONNECTED" };
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json(progress));
+  const client = new ReimbursementApiClient({ baseUrl: "http://go.test", serviceKey: "key", signingSecret: "secret", fetcher });
+  const context = { actorEmployeeId: "employee-1", actorRole: "EMPLOYEE" as const, channel: "FEISHU" as const, conversationId: "conversation-1", toolCallId: "progress-1", idempotencyKey: "progress-1" };
+  await expect(client.getOwnedClaimProgress({ ...context, claimId: "claim-1" })).resolves.toEqual(progress);
+  expect(fetcher.mock.calls[0][0]).toBe("http://go.test/api/v1/claims/claim-1/progress");
+  expect(fetcher.mock.calls[0][1]?.method).toBe("GET");
+});
+
 it("sends a versioned receipt deletion and accepts a 204 response", async () => {
   const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
   const client = new ReimbursementApiClient({ baseUrl: "http://go.test", serviceKey: "key", signingSecret: "secret", fetcher });

@@ -20,7 +20,22 @@ var claimNumberPattern = regexp.MustCompile(`^BX[0-9]{8}-[0-9]{4,}$`)
 type claimsHandler struct {
 	claims      ClaimService
 	submissions SubmissionService
+	progress    ClaimProgressService
 	receipts    ReceiptService
+}
+
+func (handler *claimsHandler) getClaimProgress(response http.ResponseWriter, request *http.Request) {
+	actor, _ := ActorFromContext(request.Context())
+	if handler.progress == nil {
+		writeError(response, http.StatusNotImplemented, "NOT_IMPLEMENTED", "进度服务暂不可用")
+		return
+	}
+	progress, err := handler.progress.GetClaimProgress(request.Context(), actor.ID, pathClaimID(request))
+	if err != nil {
+		writeMappedError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, progress)
 }
 
 func (handler *claimsHandler) listClaims(response http.ResponseWriter, request *http.Request) {

@@ -127,11 +127,11 @@
 
 **Interfaces:** `GET /api/v1/claims/{claimId}/progress` 返回本人单据状态、票据/OCR、员工可见复核摘要、提交记录和校验问题；`approval`/`payment` 为 `NOT_CONNECTED` 扩展槽。Agent `get_owned_claim_progress` 只读。
 
-- [ ] **Step 1: 写失败测试。** 草稿缺项、OCR 中、待复核、复核已处理、已提交分别输出准确下一步；财务内部意见不外泄；他人单号安全拒绝；未接入审批/付款明确说明而不虚构状态。
-- [ ] **Step 2: 验证红灯。** Go handler 和 Agent 对话定向测试失败。
-- [ ] **Step 3: 实现最小代码。** Go 组合真实记录并裁剪员工安全字段；Agent 将阻断项映射为对话可补或目标 Web 链接，时间线不取聊天摘要当事实。
-- [ ] **Step 4: 验证绿灯。** `go test ./...`、Agent/Node 定向测试通过。
-- [ ] **Step 5: 提交。** `feat(reimbursement): expose employee-safe claim progress`。
+- [x] **Step 1: 写失败测试。** 草稿缺项、OCR 中、待复核、复核已处理、已提交分别输出准确下一步；财务内部意见不外泄；他人单号安全拒绝；未接入审批/付款明确说明而不虚构状态。
+- [x] **Step 2: 验证红灯。** Go handler 和 Agent 对话定向测试失败。
+- [x] **Step 3: 实现最小代码。** Go 组合真实记录并裁剪员工安全字段；Agent 将阻断项映射为对话可补或目标 Web 链接，时间线不取聊天摘要当事实。
+- [x] **Step 4: 验证绿灯。** `go test ./...`、Agent/Node 定向测试通过。
+- [x] **Step 5: 提交。** `feat(reimbursement): expose employee-safe claim progress`。
 
 ### Task 9: 进度通知与目标订阅
 

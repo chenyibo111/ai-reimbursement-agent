@@ -175,7 +175,6 @@ describe("OpenAiCompatibleChatModel", () => {
     { action: "COLLECT_FIELDS", reply: "ok", fields: { amount: "100" } },
     { action: "COLLECT_FIELDS", reply: "ok", fields: { participants: Array.from({ length: 21 }, (_, index) => `员工${index}`) } },
     { action: "COLLECT_FIELDS", reply: "ok", fields: { participants: "张三" } },
-    { action: "PREPARE_SUBMISSION", reply: "ok", claimNumber: "BX20261009-0026" },
     { action: "READ_CLAIM", reply: "ok", claimNumber: "invalid" },
   ])("rejects unsafe structured decision %#", async (decision) => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(decision) } }] }), { status: 200 }));
@@ -187,6 +186,18 @@ describe("OpenAiCompatibleChatModel", () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: '{"action":"READ_CLAIM","reply":"查询","claimNumber":"bx20261009-0026"}' } }] }), { status: 200 }));
     const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "secret", fetchImpl });
     await expect(model.decideConversation({ summary: { text: "", throughSequence: 0 }, messages: [], intake: null, policyCitations: [], allowedFields: [] })).resolves.toMatchObject({ action: "READ_CLAIM", claimNumber: "BX20261009-0026" });
+  });
+
+  it("accepts an explicit owned draft number for submission preparation", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: '{"action":"PREPARE_SUBMISSION","reply":"准备提交","claimNumber":"bx20261009-0026"}' } }] }), { status: 200 }));
+    const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "secret", fetchImpl });
+    await expect(model.decideConversation({ summary: { text: "", throughSequence: 0 }, messages: [], intake: null, policyCitations: [], allowedFields: [] })).resolves.toMatchObject({ action: "PREPARE_SUBMISSION", claimNumber: "BX20261009-0026" });
+  });
+
+  it("accepts a read-only progress question with an owned claim number", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: '{"action":"READ_CLAIM_PROGRESS","reply":"查询进度","claimNumber":"bx20261027-0001"}' } }] }), { status: 200 }));
+    const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "secret", fetchImpl });
+    await expect(model.decideConversation({ summary: { text: "", throughSequence: 0 }, messages: [], intake: null, policyCitations: [], allowedFields: [] })).resolves.toMatchObject({ action: "READ_CLAIM_PROGRESS", claimNumber: "BX20261027-0001" });
   });
 
   it("accepts structured search conditions but rejects unapproved owner overrides", async () => {

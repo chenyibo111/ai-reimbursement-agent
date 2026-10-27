@@ -22,6 +22,10 @@ type SubmissionService interface {
 	SubmitClaim(ctx context.Context, actorID string, claimID string, confirmationToken string, idempotencyKey string) (application.SubmissionSnapshot, error)
 }
 
+type ClaimProgressService interface {
+	GetClaimProgress(ctx context.Context, actorID string, claimID string) (application.ClaimProgress, error)
+}
+
 type ReceiptService interface {
 	CreateUploadSession(ctx context.Context, actorID string, claimID string, command application.CreateUploadSessionCommand) (application.UploadSession, error)
 	FinalizeReceiptUpload(ctx context.Context, actorID string, claimID string, receiptID string) error
@@ -32,6 +36,7 @@ type ReceiptService interface {
 type Dependencies struct {
 	Claims             ClaimService
 	Submissions        SubmissionService
+	Progress           ClaimProgressService
 	Receipts           ReceiptService
 	Auth               ActorResolver
 	Admin              AdminServices
@@ -41,13 +46,14 @@ type Dependencies struct {
 
 func NewRouter(dependencies Dependencies) http.Handler {
 	mux := http.NewServeMux()
-	handler := &claimsHandler{claims: dependencies.Claims, submissions: dependencies.Submissions, receipts: dependencies.Receipts}
+	handler := &claimsHandler{claims: dependencies.Claims, submissions: dependencies.Submissions, progress: dependencies.Progress, receipts: dependencies.Receipts}
 	mux.HandleFunc("POST /api/v1/claims", handler.createClaim)
 	mux.HandleFunc("GET /api/v1/claims", handler.listClaims)
 	mux.HandleFunc("GET /api/v1/claims/{claimId}", handler.getClaim)
 	mux.HandleFunc("PATCH /api/v1/claims/{claimId}", handler.patchClaim)
 	mux.HandleFunc("DELETE /api/v1/claims/{claimId}", handler.deleteClaim)
 	mux.HandleFunc("GET /api/v1/claims/{claimId}/validation", handler.validateClaim)
+	mux.HandleFunc("GET /api/v1/claims/{claimId}/progress", handler.getClaimProgress)
 	mux.HandleFunc("POST /api/v1/claims/{claimId}/uploads", handler.createUploadSession)
 	mux.HandleFunc("GET /api/v1/claims/{claimId}/receipts", handler.listReceipts)
 	mux.HandleFunc("POST /api/v1/claims/{claimId}/receipts", handler.finalizeReceiptUpload)

@@ -39,6 +39,13 @@ export type OwnedClaimSearchQuery = {
 export type OwnedClaimSearchPage = { items: ClaimSnapshot[]; totalCount: number; nextCursor: string | null };
 export type ReceiptSnapshot = { id: string; claimId: string; filename: string; status: string; invoiceNumber: string; ocrConfidence: number; totalAmountCent: number | null };
 export type ValidationSnapshot = { claimId: string; claimVersion: number; policyVersion: string; issues: Array<{ code: string; severity: "BLOCKING" | "WARNING"; message: string }> };
+export type ClaimProgressSnapshot = {
+  claimId: string; claimNumber: string; status: "DRAFT" | "SUBMITTED"; version: number;
+  submissionNumber: string | null; submittedAt: string | null;
+  receipts: Array<{ receiptId: string; filename: string; status: string; reviewStatus: "NONE" | "PENDING" | "RESOLVED" | "REUPLOAD_REQUIRED" | "CLOSED" }>;
+  issues: Array<{ code: string; message: string; severity: "BLOCKING" | "WARNING" }>;
+  approval: "NOT_CONNECTED"; payment: "NOT_CONNECTED";
+};
 
 export interface ReimbursementPort {
   createClaimDraft(input: ToolCallContext & { purpose: string }): Promise<ClaimSnapshot>;
@@ -52,6 +59,7 @@ export interface ReimbursementPort {
   findOwnedClaimByNumber(input: ToolCallContext & { claimNumber: string }): Promise<ClaimSnapshot | null>;
   updateClaimFields(input: ToolCallContext & { claimId: string; version: number; fields: ClaimFieldPatch }): Promise<ClaimSnapshot>;
   getClaimValidation(input: ToolCallContext & { claimId: string }): Promise<ValidationSnapshot>;
+  getOwnedClaimProgress(input: ToolCallContext & { claimId: string }): Promise<ClaimProgressSnapshot>;
   requestSubmissionConfirmation(input: ToolCallContext & { claimId: string; version: number }): Promise<{ confirmationToken: string; claimId: string; claimVersion: number }>;
   submitClaim(input: ToolCallContext & { claimId: string; confirmationToken: string }): Promise<{ claimId: string; submissionNumber: string }>;
 }

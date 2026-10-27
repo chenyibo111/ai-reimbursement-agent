@@ -542,6 +542,41 @@ func TestListReceiptsReturnsOnlyReceiptsBelongingToTheAuthenticatedClaim(t *test
 	}
 }
 
+type progressFixture struct{ actorID string }
+
+func (fixture *progressFixture) GetClaimProgress(_ context.Context, actorID, claimID string) (application.ClaimProgress, error) {
+	fixture.actorID = actorID
+	if actorID != "employee-1" || claimID != "claim-1" {
+		return application.ClaimProgress{}, application.ErrClaimNotFound
+	}
+	return application.ClaimProgress{ClaimID: claimID, ClaimNumber: "BX20261027-0001", Status: "DRAFT", Version: 2,
+		Receipts: []application.ReceiptProgress{{ReceiptID: "receipt-1", Filename: "invoice.pdf", Status: "REVIEW_REQUIRED", ReviewStatus: "PENDING"}},
+		Approval: "NOT_CONNECTED", Payment: "NOT_CONNECTED"}, nil
+}
+
+func TestClaimProgressIsOwnerScopedAndHidesFinanceNotes(t *testing.T) {
+	fixture := &progressFixture{}
+	handler := NewRouter(Dependencies{Progress: fixture, Auth: StaticActorResolver{}})
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/claims/claim-1/progress", nil)
+	request.Header.Set("Authorization", "Bearer employee-1")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || fixture.actorID != "employee-1" || strings.Contains(response.Body.String(), "internalNote") {
+		t.Fatalf("progress response=%d %s actor=%s", response.Code, response.Body.String(), fixture.actorID)
+	}
+	for _, value := range []string{"REVIEW_REQUIRED", "PENDING", "NOT_CONNECTED"} {
+		if !strings.Contains(response.Body.String(), value) {
+			t.Fatalf("missing %s: %s", value, response.Body.String())
+		}
+	}
+	request.Header.Set("Authorization", "Bearer employee-2")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound || strings.Contains(response.Body.String(), "BX20261027-0001") {
+		t.Fatalf("foreign progress=%d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestDeleteReceiptDeletesOwnedDraftReceipt(t *testing.T) {
 	receipts := &deletingFakeReceipts{}
 	handler := NewRouter(Dependencies{Claims: fakeClaims{}, Receipts: receipts, Auth: StaticActorResolver{}})

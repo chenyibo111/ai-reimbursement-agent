@@ -1,6 +1,6 @@
 import { ReimbursementToolGateway, type ReimbursementToolName } from "./reimbursement-tools";
 import { ReimbursementApiHttpError } from "../adapters/reimbursement-api-client";
-import type { ClaimFieldPatch, ClaimSnapshot, OwnedClaimSearchPage, OwnedClaimSearchQuery, ReceiptSnapshot, ValidationSnapshot } from "../ports/reimbursement-port";
+import type { ClaimFieldPatch, ClaimProgressSnapshot, ClaimSnapshot, OwnedClaimSearchPage, OwnedClaimSearchQuery, ReceiptSnapshot, ValidationSnapshot } from "../ports/reimbursement-port";
 
 export type ConversationReimbursementContext = { actorId: string; actorRole: "EMPLOYEE" | "FINANCE_REVIEWER" | "ADMIN"; channel: "WEB" | "FEISHU"; conversationId: string; turnId: string };
 type Attachment = { filename: string; mimeType: string; bytes: Uint8Array };
@@ -45,6 +45,9 @@ export function createConversationReimbursementTools(gateway: ReimbursementToolG
     },
     async readValidation(context: ConversationReimbursementContext, claimId: string) {
       return (await execute(context, "get_claim_validation", { claimId })).validation as ValidationSnapshot;
+    },
+    async readProgress(context: ConversationReimbursementContext, claimId: string): Promise<ClaimProgressSnapshot> {
+      return (await execute(context, "get_owned_claim_progress", { claimId }, `get_owned_claim_progress:${claimId}`)).progress as ClaimProgressSnapshot;
     },
     async prepareSubmission(context: ConversationReimbursementContext, claimId: string) {
       const workbench = (await execute(context, "get_claim_workbench", { claimId })).workbench as { claim: ClaimSnapshot; receipts: ReceiptSnapshot[] };

@@ -1,6 +1,6 @@
 import type { ClaimFieldPatch, OwnedClaimSearchQuery, ReimbursementPort, ToolCallContext } from "../ports/reimbursement-port";
 
-export type ReimbursementToolName = "create_claim_draft" | "create_upload_session" | "finalize_receipt_upload" | "delete_owned_receipt" | "delete_owned_draft" | "get_claim_workbench" | "list_owned_claims" | "search_owned_claims" | "find_owned_claim_by_number" | "update_claim_fields" | "get_claim_validation" | "request_submission_confirmation" | "submit_claim";
+export type ReimbursementToolName = "create_claim_draft" | "create_upload_session" | "finalize_receipt_upload" | "delete_owned_receipt" | "delete_owned_draft" | "get_claim_workbench" | "list_owned_claims" | "search_owned_claims" | "find_owned_claim_by_number" | "update_claim_fields" | "get_claim_validation" | "get_owned_claim_progress" | "request_submission_confirmation" | "submit_claim";
 export type ToolCall = ToolCallContext & { name: ReimbursementToolName; arguments: Record<string, unknown> };
 
 export interface ToolCallResultStore {
@@ -42,6 +42,7 @@ export class ReimbursementToolGateway {
       case "find_owned_claim_by_number": result = { claim: await this.port.findOwnedClaimByNumber({ ...context, claimNumber: requiredString(call.arguments, "claimNumber") }) }; break;
       case "update_claim_fields": result = { claim: await this.port.updateClaimFields({ ...context, claimId: requiredString(call.arguments, "claimId"), version: requiredNumber(call.arguments, "version"), fields: claimFieldPatch(call.arguments) }) }; break;
       case "get_claim_validation": result = { validation: await this.port.getClaimValidation({ ...context, claimId: requiredString(call.arguments, "claimId") }) }; break;
+      case "get_owned_claim_progress": assertOnlyFields(call.arguments, ["claimId"]); result = { progress: await this.port.getOwnedClaimProgress({ ...context, claimId: requiredString(call.arguments, "claimId") }) }; break;
       case "request_submission_confirmation": result = { confirmation: await this.port.requestSubmissionConfirmation({ ...context, claimId: requiredString(call.arguments, "claimId"), version: requiredNumber(call.arguments, "version") }) }; break;
       case "submit_claim": result = { submission: await this.port.submitClaim({ ...context, claimId: requiredString(call.arguments, "claimId"), confirmationToken: requiredString(call.arguments, "confirmationToken") }) }; break;
       }

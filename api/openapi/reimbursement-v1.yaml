@@ -379,6 +379,47 @@ paths:
                       $ref: "#/components/schemas/ValidationIssue"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/claims/{claimId}/progress:
+    get:
+      operationId: getOwnedClaimProgress
+      summary: Read employee-safe claim, OCR, review and submission progress
+      parameters:
+        - $ref: "#/components/parameters/ClaimId"
+      responses:
+        "200":
+          description: Current progress for the authenticated owner
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [claimId, claimNumber, status, version, receipts, issues, approval, payment]
+                properties:
+                  claimId: { type: string }
+                  claimNumber: { type: string }
+                  status: { type: string, enum: [DRAFT, SUBMITTED] }
+                  version: { type: integer, minimum: 1 }
+                  submissionNumber: { type: string, nullable: true }
+                  submittedAt: { type: string, format: date-time, nullable: true }
+                  approval: { type: string, enum: [NOT_CONNECTED] }
+                  payment: { type: string, enum: [NOT_CONNECTED] }
+                  receipts:
+                    type: array
+                    items:
+                      type: object
+                      required: [receiptId, filename, status, reviewStatus]
+                      properties:
+                        receiptId: { type: string }
+                        filename: { type: string }
+                        status: { type: string }
+                        reviewStatus: { type: string, enum: [NONE, PENDING, RESOLVED, REUPLOAD_REQUIRED, CLOSED] }
+                  issues:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ValidationIssue"
+        "404":
+          description: Claim not found or inaccessible
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/claims/{claimId}/submission-requests:
     post:
       operationId: requestSubmission

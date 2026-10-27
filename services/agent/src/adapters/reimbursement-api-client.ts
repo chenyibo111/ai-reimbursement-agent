@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 
-import type { ClaimFieldPatch, ClaimSnapshot, OwnedClaimSearchPage, OwnedClaimSearchQuery, ReimbursementPort, ReceiptSnapshot, ToolCallContext, ValidationSnapshot } from "../ports/reimbursement-port";
+import type { ClaimFieldPatch, ClaimProgressSnapshot, ClaimSnapshot, OwnedClaimSearchPage, OwnedClaimSearchQuery, ReimbursementPort, ReceiptSnapshot, ToolCallContext, ValidationSnapshot } from "../ports/reimbursement-port";
 
 type ApiClientOptions = {
   baseUrl: string;
@@ -71,6 +71,7 @@ export class ReimbursementApiClient implements ReimbursementPort {
   }
   updateClaimFields(input: ToolCallContext & { claimId: string; version: number; fields: ClaimFieldPatch }) { return this.request<ClaimSnapshot>(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}`, "PATCH", { version: input.version, ...input.fields }); }
   getClaimValidation(input: ToolCallContext & { claimId: string }) { return this.request<ValidationSnapshot>(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}/validation`, "GET"); }
+  getOwnedClaimProgress(input: ToolCallContext & { claimId: string }) { return this.request<ClaimProgressSnapshot>(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}/progress`, "GET"); }
   requestSubmissionConfirmation(input: ToolCallContext & { claimId: string; version: number }) { return this.request<{ confirmationToken: string; claimId: string; claimVersion: number }>(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}/submission-requests`, "POST", { version: input.version }); }
   submitClaim(input: ToolCallContext & { claimId: string; confirmationToken: string }) { return this.request<{ claimId: string; submissionNumber: string }>(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}/submit`, "POST", { confirmationToken: input.confirmationToken }); }
 

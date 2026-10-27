@@ -3,6 +3,14 @@ import { describe, expect, it, vi } from "vitest";
 import { ReimbursementToolGateway, type ToolCallResultStore } from "./reimbursement-tools";
 
 describe("ReimbursementToolGateway", () => {
+  it("rejects owner overrides on progress reads", async () => {
+    const port = { getOwnedClaimProgress: vi.fn().mockResolvedValue({ claimId: "claim-1" }) };
+    const store: ToolCallResultStore = { findCompleted: vi.fn().mockResolvedValue(null), saveCompleted: vi.fn() };
+    const gateway = new ReimbursementToolGateway(port as never, store);
+    const call = { actorEmployeeId: "employee-1", actorRole: "EMPLOYEE" as const, channel: "WEB" as const, conversationId: "conversation-1", toolCallId: "progress-1", idempotencyKey: "progress-1", name: "get_owned_claim_progress" as const, arguments: { claimId: "claim-1" } };
+    await expect(gateway.execute(call)).resolves.toMatchObject({ progress: { claimId: "claim-1" } });
+    await expect(gateway.execute({ ...call, arguments: { claimId: "claim-1", ownerId: "other" } })).rejects.toThrow();
+  });
   it("passes a draft deletion only with the actor context and expected version", async () => {
     const port = { deleteOwnedDraft: vi.fn().mockResolvedValue(undefined) };
     const store: ToolCallResultStore = { findCompleted: vi.fn().mockResolvedValue(null), saveCompleted: vi.fn() };

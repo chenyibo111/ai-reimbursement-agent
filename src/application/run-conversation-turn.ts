@@ -9,6 +9,8 @@ import { formatClaimSearchPage, normalizeClaimSearch, readClaimSearchState } fro
 import type { OwnedClaimSearchPage, OwnedClaimSearchQuery } from "@/services/agent/src/ports/reimbursement-port";
 import { resolveSelectedDraft, selectOwnedEditClaim, writeTargetIsAmbiguous } from "@/src/application/claim-target";
 import { readPendingAction, type PendingAction } from "@/src/application/pending-action";
+import { formatClaimProgress } from "@/src/application/claim-progress";
+import type { ClaimProgressSnapshot } from "@/services/agent/src/ports/reimbursement-port";
 
 type ConversationRecord = { id: string; summary: string; summaryThroughSequence: number; selectedReadClaimId?: string | null; selectedEditClaimId?: string | null; searchState?: unknown; pendingAction?: unknown };
 type ConversationMessage = { id?: string; sequence: number; role: AgentMessageRole; channel: AgentMessageChannel; text: string; citations?: unknown; result?: unknown };
@@ -60,6 +62,7 @@ export type RunConversationTurnDeps = {
   searchOwnedClaims?: (input: { actorId: string; query: OwnedClaimSearchQuery }) => Promise<OwnedClaimSearchPage>;
   findOwnedClaimByNumber?: (input: { actorId: string; claimNumber: string }) => Promise<ClaimSnapshot | null>;
   readValidation?: (input: { actorId: string; claimId: string }) => Promise<ValidationSnapshot>;
+  readProgress?: (input: { actorId: string; claimId: string }) => Promise<ClaimProgressSnapshot>;
   prepareSubmission?: (input: { actorId: string; claimId: string }) => Promise<{ token: string; claimId: string; claimVersion: number; workbench: { claim: ClaimSnapshot; receipts: ReceiptSnapshot[] } }>;
   submitClaim?: (input: { actorId: string; claimId: string; confirmationToken: string }) => Promise<{ submissionNumber: string }>;
 };
@@ -288,7 +291,7 @@ async function applyDecision(
   selectedEditClaimId: string | null,
   rawSearchState: unknown,
 ): Promise<ConversationTurnResult> {
-  if (input.channel === "FEISHU" && input.chatType !== "p2p" && ["START_INTAKE", "COLLECT_FIELDS", "LIST_CLAIMS", "SEARCH_CLAIMS", "NEXT_CLAIMS_PAGE", "SELECT_EDIT_CLAIM", "DELETE_RECEIPT", "DELETE_DRAFT", "READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "PREPARE_SUBMISSION"].includes(decision.action)) {
+  if (input.channel === "FEISHU" && input.chatType !== "p2p" && ["START_INTAKE", "COLLECT_FIELDS", "LIST_CLAIMS", "SEARCH_CLAIMS", "NEXT_CLAIMS_PAGE", "SELECT_EDIT_CLAIM", "DELETE_RECEIPT", "DELETE_DRAFT", "READ_CLAIM", "READ_RECEIPT_AMOUNT", "READ_SUBMISSION_SUMMARY", "READ_CLAIM_PROGRESS", "PREPARE_SUBMISSION"].includes(decision.action)) {
     return persistReply(input, null, "为保护报销信息，请私聊机器人或在 Web 工作台办理、查询与提交。", [], deps.conversations);
   }
   if (decision.action === "START_INTAKE") return startIntake(input, intake, deps);
@@ -364,10 +367,10 @@ async function applyDecision(
       return persistReply(input, intake, reply, [], deps.conversations);
     } catch { return persistReply(input, intake, "报销数据暂时无法查询，请稍后重试。", [], deps.conversations); }
   }
-  if (decision.action === "READ_CLAIM" || decision.action === "READ_RECEIPT_AMOUNT" || decision.action === "READ_SUBMISSION_SUMMARY") {
-    if (!deps.readWorkbench || (decision.action === "READ_SUBMISSION_SUMMARY" && !deps.readValidation)) return persistReply(input, intake, "报销数据暂时无法查询，请稍后重试。", [], deps.conversations);
+  if (decision.action === "READ_CLAIM" || decision.action === "READ_RECEIPT_AMOUNT" || decision.action === "READ_SUBMISSION_SUMMARY" || decision.action === "READ_CLAIM_PROGRESS") {
+    if ((decision.action === "READ_CLAIM_PROGRESS" && !deps.readProgress) || (decision.action !== "READ_CLAIM_PROGRESS" && !deps.readWorkbench) || (decision.action === "READ_SUBMISSION_SUMMARY" && !deps.readValidation)) return persistReply(input, intake, "报销数据暂时无法查询，请稍后重试。", [], deps.conversations);
     try {
-      let claimId = selectedReadClaimId ?? intake?.claimId ?? null;
+      let claimId = selectedReadClaimId ?? selectedEditClaimId ?? intake?.claimId ?? null;
       if (decision.claimOrdinal !== undefined) {
         const state = readClaimSearchState(rawSearchState, new Date());
         const selected = state?.lastPage.find((item) => item.ordinal === decision.claimOrdinal);
@@ -398,7 +401,12 @@ async function applyDecision(
         } else if (candidates.length > 1) return persistReply(input, intake, "你有多张报销单，请提供要查询的报销单号。", [], deps.conversations);
       }
       if (!claimId) return persistReply(input, intake, "当前会话没有绑定报销单。请提供已有报销单号，或输入“开始报销”，也可在 Web 工作台查看。", [], deps.conversations);
-      const workbench = await deps.readWorkbench({ actorId: input.actorId, claimId });
+      if (decision.action === "READ_CLAIM_PROGRESS") {
+        const progress = await deps.readProgress!({ actorId: input.actorId, claimId });
+        if (progress.claimId !== claimId) throw new Error("progress claim mismatch");
+        return persistReply(input, intake, formatClaimProgress(progress), [], deps.conversations, undefined, claimId);
+      }
+      const workbench = await deps.readWorkbench!({ actorId: input.actorId, claimId });
       const validation = decision.action === "READ_SUBMISSION_SUMMARY" ? await deps.readValidation!({ actorId: input.actorId, claimId }) : undefined;
       return persistReply(input, intake, formatClaimFacts(decision.action as ClaimFactKind, workbench, validation), [], deps.conversations);
     } catch (error) {
