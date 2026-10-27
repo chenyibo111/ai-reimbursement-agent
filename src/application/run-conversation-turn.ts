@@ -108,12 +108,15 @@ export async function runConversationTurn(
     if (input.channel === "FEISHU" && input.chatType !== "p2p") return persistReply(input, null, "请私聊机器人办理草稿删除。", [], deps.conversations);
     return confirmDraftDeletion(input, active, conversation, deps);
   }
-  if (conversation.pendingAction) await deps.conversations.setPendingAction?.({ conversationId: input.conversationId, action: null });
-  if (attachment) return handleAttachment({ ...input, attachment }, active, deps, conversation.selectedReadClaimId ?? null, conversation.selectedEditClaimId ?? null);
   if (message === "确认提交" && input.channel === "FEISHU" && input.chatType !== "p2p") {
     return persistReply(input, null, "为保护报销信息，请私聊机器人或在 Web 工作台发起并确认提交。", [], deps.conversations);
   }
-  if (message === "确认提交") return confirmSubmission(input, active, deps);
+  if (message === "确认提交") return confirmSubmission(input, active, conversation, deps);
+  if (conversation.pendingAction) {
+    await deps.conversations.setPendingAction?.({ conversationId: input.conversationId, action: null });
+    if (active) active = await clearSubmissionPreparation(active, deps.conversations);
+  }
+  if (attachment) return handleAttachment({ ...input, attachment }, active, deps, conversation.selectedReadClaimId ?? null, conversation.selectedEditClaimId ?? null);
   const context = await getContext(conversation, active, deps.conversations);
   let decision: ConversationDecision;
   try {
@@ -451,37 +454,59 @@ async function applyDecision(
   }
 
   if (decision.action === "PREPARE_SUBMISSION") {
-    if (writeTargetIsAmbiguous({ intakeClaimId: intake?.claimId, selectedReadClaimId, selectedEditClaimId, targetReference: decision.targetReference })) return persistReply(input, intake, "当前查询的单据与正在办理的草稿不同。请明确要提交的报销单号，或说明“提交当前草稿”。", [], deps.conversations);
-    if (!intake?.claimId) return persistReply(input, intake, "当前会话没有绑定报销单，请先输入“开始报销”并上传票据。", [], deps.conversations);
-    if (!deps.readValidation || !deps.prepareSubmission) return persistReply(input, intake, "报销服务暂时无法准备提交，请稍后重试。", [], deps.conversations);
+    if (decision.targetReference === "CURRENT_INTAKE" && (decision.claimNumber || decision.claimOrdinal)) return persistReply(input, intake, "提交目标有冲突。请只指定当前草稿，或提供要提交的完整单号。", [], deps.conversations);
+    const explicitTarget = Boolean(decision.claimNumber || decision.claimOrdinal);
+    if (!explicitTarget && (writeTargetIsAmbiguous({ intakeClaimId: intake?.claimId, selectedReadClaimId, selectedEditClaimId, targetReference: decision.targetReference }) ||
+      (selectedReadClaimId && selectedEditClaimId && selectedReadClaimId !== selectedEditClaimId && decision.targetReference !== "CURRENT_INTAKE"))) return persistReply(input, intake, "当前查询的单据与正在办理的草稿不同。请明确要提交的报销单号，或说明“提交当前草稿”。", [], deps.conversations);
+    let targetId = decision.targetReference === "CURRENT_INTAKE" ? intake?.claimId : selectedEditClaimId ?? intake?.claimId;
+    if ((decision.claimNumber || decision.claimOrdinal) && decision.targetReference !== "CURRENT_INTAKE") {
+      try {
+        targetId = (await selectOwnedEditClaim({ actorId: input.actorId, reference: { claimNumber: decision.claimNumber, claimOrdinal: decision.claimOrdinal }, searchState: rawSearchState, findOwnedClaimByNumber: deps.findOwnedClaimByNumber, readWorkbench: deps.readWorkbench }))?.id;
+      } catch { targetId = null; }
+    }
+    if (!targetId) return persistReply(input, intake, "请先明确选中本人草稿，或提供完整报销单号；当前没有可提交的草稿。", [], deps.conversations);
+    if (!deps.readValidation || !deps.prepareSubmission || !deps.readWorkbench || !deps.conversations.setPendingAction || !deps.conversations.consumePendingAction) return persistReply(input, intake, "报销服务暂时无法准备提交，请稍后重试。", [], deps.conversations);
+    let target: ClaimSnapshot;
+    try {
+      const workbench = await deps.readWorkbench({ actorId: input.actorId, claimId: targetId });
+      target = workbench.claim;
+      if (target.id !== targetId || target.status !== "DRAFT") return persistReply(input, intake, "该单据不能提交，请重新核对本人草稿。", [], deps.conversations);
+    } catch (error) { return persistReply(input, intake, submissionErrorReply(error), [], deps.conversations); }
     let validation: ValidationSnapshot;
     try {
-      validation = await deps.readValidation({ actorId: input.actorId, claimId: intake.claimId });
+      validation = await deps.readValidation({ actorId: input.actorId, claimId: targetId });
     } catch (error) {
       return persistReply(input, intake, submissionErrorReply(error), [], deps.conversations);
     }
     const blocking = validation.issues.filter((issue) => issue.severity === "BLOCKING");
     if (blocking.length) {
-      const cleared = await clearSubmissionPreparation(intake, deps.conversations);
+      const cleared = intake ? await clearSubmissionPreparation(intake, deps.conversations) : null;
       return persistReply(input, cleared, `当前报销单暂时不能提交：${blocking.map((issue) => issue.message).join("；")}。请在工作台补齐后重新发起提交。`, [], deps.conversations);
     }
     let prepared: Awaited<ReturnType<NonNullable<RunConversationTurnDeps["prepareSubmission"]>>>;
     try {
-      prepared = await deps.prepareSubmission({ actorId: input.actorId, claimId: intake.claimId });
+      prepared = await deps.prepareSubmission({ actorId: input.actorId, claimId: targetId });
     } catch (error) {
-      const cleared = await clearSubmissionPreparation(intake, deps.conversations);
+      const cleared = intake ? await clearSubmissionPreparation(intake, deps.conversations) : null;
       return persistReply(input, cleared, submissionErrorReply(error), [], deps.conversations);
     }
     const { claim, receipts } = prepared.workbench;
+    if (prepared.claimId !== targetId || claim.id !== targetId || claim.status !== "DRAFT" || prepared.claimVersion !== claim.version || validation.claimVersion !== claim.version) {
+      return persistReply(input, intake, "报销单在提交准备期间发生变化，请重新核对后发起。", [], deps.conversations);
+    }
     const submissionPreview = {
       claimVersion: prepared.claimVersion,
       totalAmountCents: claim.requestedAmountCent ?? null,
       receiptCount: receipts.length,
       purpose: claim.purpose,
     };
-    const updated = await deps.conversations.updateIntake({ id: intake.id, status: "READY_TO_SUBMIT", submissionToken: prepared.token, submissionPreview });
+    const targetScope = explicitTarget ? "EXPLICIT_DRAFT" : targetId === intake?.claimId ? "CURRENT_INTAKE" : "SELECTED_DRAFT";
+    const updated = intake && targetScope === "CURRENT_INTAKE"
+      ? await deps.conversations.updateIntake({ id: intake.id, status: "READY_TO_SUBMIT", submissionToken: null, submissionPreview })
+      : intake ? await clearSubmissionPreparation(intake, deps.conversations) : null;
+    await deps.conversations.setPendingAction({ conversationId: input.conversationId, action: { kind: "SUBMIT", claimId: targetId, claimVersion: prepared.claimVersion, confirmationToken: prepared.token, preview: { claimNumber: claim.claimNumber, purpose: claim.purpose ?? null, requestedAmountCent: claim.requestedAmountCent ?? null, receiptCount: receipts.length }, targetScope, expiresAt: new Date(Date.now() + 5 * 60_000).toISOString() } });
     const amount = typeof claim.requestedAmountCent === "number" ? `¥${(claim.requestedAmountCent / 100).toFixed(2)}` : "未填写";
-    const reply = `提交前请核对：报销事由 ${claim.purpose || "未填写"}；申请金额 ${amount}；票据 ${receipts.length} 张。确认无误后回复“确认提交”。`;
+    const reply = `提交前请核对 ${claim.claimNumber}：报销事由 ${claim.purpose || "未填写"}；申请金额 ${amount}；票据 ${receipts.length} 张。确认无误后在 5 分钟内回复“确认提交”。`;
     return persistReply(input, updated, reply, [], deps.conversations);
   }
 
@@ -561,20 +586,42 @@ async function confirmDraftDeletion(
 async function confirmSubmission(
   input: { actorId: string; conversationId: string; channel: AgentMessageChannel; channelMessageId?: string },
   intake: IntakeRecord | null,
+  conversation: ConversationRecord,
   deps: RunConversationTurnDeps,
 ): Promise<ConversationTurnResult> {
-  if (!intake || intake.status !== "READY_TO_SUBMIT" || !intake.claimId || !intake.submissionToken || !deps.submitClaim) {
-    return persistReply(input, intake, "当前没有有效的提交确认。请先发起提交并核对最新信息，再回复“确认提交”。", [], deps.conversations);
+  const pending = readPendingAction(conversation.pendingAction);
+  if (pending?.kind !== "SUBMIT" || !deps.submitClaim || !deps.readWorkbench || !deps.conversations.consumePendingAction) {
+    const cleared = intake ? await clearSubmissionPreparation(intake, deps.conversations) : null;
+    await deps.conversations.setPendingAction?.({ conversationId: input.conversationId, action: null });
+    return persistReply(input, cleared, "当前没有有效的提交确认。请先发起提交并核对最新信息，再回复“确认提交”。", [], deps.conversations);
   }
+  if (!await deps.conversations.consumePendingAction({ conversationId: input.conversationId, action: pending })) {
+    return persistReply(input, intake, "提交确认已使用或已失效，请重新发起提交并核对。", [], deps.conversations);
+  }
+  const staleTarget = pending.targetScope === "CURRENT_INTAKE" ? intake?.claimId !== pending.claimId
+    : pending.targetScope === "SELECTED_DRAFT" ? conversation.selectedEditClaimId !== pending.claimId
+    : false;
+  if (staleTarget) return persistReply(input, intake, "办理目标已变化，提交确认已失效。请重新发起提交。", [], deps.conversations);
+  try {
+    const current = await deps.readWorkbench({ actorId: input.actorId, claimId: pending.claimId });
+    if (current.claim.id !== pending.claimId || current.claim.status !== "DRAFT" || current.claim.version !== pending.claimVersion) {
+      return persistReply(input, intake, "单据已变化，原确认不再有效。请重新发起提交并核对最新信息。", [], deps.conversations);
+    }
+  } catch (error) { return persistReply(input, intake, submissionErrorReply(error), [], deps.conversations); }
   let submitted: { submissionNumber: string };
   try {
-    submitted = await deps.submitClaim({ actorId: input.actorId, claimId: intake.claimId, confirmationToken: intake.submissionToken });
+    submitted = await deps.submitClaim({ actorId: input.actorId, claimId: pending.claimId, confirmationToken: pending.confirmationToken });
   } catch (error) {
-    const cleared = await clearSubmissionPreparation(intake, deps.conversations);
+    const cleared = intake && intake.claimId === pending.claimId ? await clearSubmissionPreparation(intake, deps.conversations) : intake;
     return persistReply(input, cleared, submissionErrorReply(error), [], deps.conversations);
   }
-  const updated = await deps.conversations.updateIntake({ id: intake.id, status: "SUBMITTED", lastUserConfirmationAt: new Date() });
-  return persistReply(input, updated, `报销单已提交，提交编号：${submitted.submissionNumber}。`, [], deps.conversations, submitted.submissionNumber);
+  const cleanup = await Promise.allSettled([
+    intake?.claimId === pending.claimId ? deps.conversations.updateIntake({ id: intake.id, status: "SUBMITTED", submissionToken: null, lastUserConfirmationAt: new Date() }) : undefined,
+    conversation.selectedEditClaimId === pending.claimId ? deps.conversations.setSelectedEditClaimId?.({ conversationId: input.conversationId, claimId: null }) : undefined,
+  ]);
+  const updated = cleanup[0].status === "fulfilled" && cleanup[0].value ? cleanup[0].value : intake;
+  const warning = cleanup.some((result) => result.status === "rejected") ? "会话状态未完全刷新，请重新查询单据状态。" : "";
+  return persistReply(input, updated, `报销单 ${pending.preview.claimNumber} 已提交，提交编号：${submitted.submissionNumber}。${warning}`, [], deps.conversations, submitted.submissionNumber);
 }
 
 async function clearSubmissionPreparation(intake: IntakeRecord, conversations: ConversationStore): Promise<IntakeRecord> {

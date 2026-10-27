@@ -115,11 +115,11 @@
 
 **Interfaces:** `pendingAction{kind:'SUBMIT',claimId,claimVersion,confirmationToken,preview,expiresAt}` 同时服务当前 Intake 和显式选中旧草稿；旧 Intake-only Token 首次使用时失效并要求重新准备。
 
-- [ ] **Step 1: 写失败测试。** 旧草稿 A 可准备/确认提交，活动 B 不受影响；只读 A 不可提交；目标切换、字段/票据变化、过期或版本冲突使旧确认失效；重投不重复提交。
-- [ ] **Step 2: 验证红灯。** `npx vitest run tests/unit/application/run-conversation-turn.test.ts` 失败。
-- [ ] **Step 3: 实现最小代码。** 准备阶段从 Go 读取最新校验、金额、版本；精确“确认提交”只消费当前有效动作，成功/失败均清理状态，保留既有 Intake 路径。
-- [ ] **Step 4: 验证绿灯。** 定向测试、根目录 `npm test` 与 `npx tsc --noEmit` 通过。
-- [ ] **Step 5: 提交。** `feat(agent): submit explicitly selected owned draft`。
+- [x] **Step 1: 写失败测试。** 旧草稿 A 可准备/确认提交，活动 B 不受影响；只读 A 不可提交；目标切换、字段/票据变化、过期或版本冲突使旧确认失效；重投不重复提交。
+- [x] **Step 2: 验证红灯。** `npx vitest run tests/unit/application/run-conversation-turn.test.ts` 失败。
+- [x] **Step 3: 实现最小代码。** 准备阶段从 Go 读取最新校验、金额、版本；精确“确认提交”只消费当前有效动作，成功/失败均清理状态，保留既有 Intake 路径。
+- [x] **Step 4: 验证绿灯。** 定向测试、根目录 `npm test` 与 `npx tsc --noEmit` 通过。
+- [x] **Step 5: 提交。** `feat(agent): submit explicitly selected owned draft`。
 
 ### Task 8: 员工可见进度与缺项指引
 

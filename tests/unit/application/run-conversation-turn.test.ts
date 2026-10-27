@@ -64,6 +64,7 @@ type Intake = {
 
 function createDeps(overrides: Partial<Record<string, unknown>> = {}) {
   let intake: Intake | null = null;
+  let pendingAction: unknown = null;
   const appendMessage = vi.fn(async (input: { text: string }) => ({ id: "message-1", sequence: 1, ...input }));
   const createIntake = vi.fn(async ({ employeeId, conversationId, ...patch }: Pick<Intake, "employeeId" | "conversationId"> & Partial<Intake>) => {
     intake = { id: `intake-${createIntake.mock.calls.length}`, employeeId, conversationId, status: "COLLECTING", claimId: null, collectedFields: {}, pendingFields: ["purpose"], submissionToken: null, ...patch };
@@ -80,7 +81,7 @@ function createDeps(overrides: Partial<Record<string, unknown>> = {}) {
   });
   const compareAndSetSummary = vi.fn(async () => true);
   const conversations = {
-    getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0 }),
+    getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0, pendingAction }),
     listMessages: async (): Promise<Array<{ sequence: number; role: "USER" | "ASSISTANT" | "SYSTEM"; channel: "WEB" | "FEISHU"; text: string }>> => [],
     appendMessage,
     getCurrentIntake: async () => intake,
@@ -88,6 +89,13 @@ function createDeps(overrides: Partial<Record<string, unknown>> = {}) {
     updateIntake,
     restartIntake,
     compareAndSetSummary,
+    setPendingAction: vi.fn(async ({ action }: { conversationId: string; action: unknown }) => { pendingAction = action; }),
+    consumePendingAction: vi.fn(async function(this: { getConversationByIdOrThrow: (id: string) => Promise<{ pendingAction?: unknown }>; setPendingAction: (input: { conversationId: string; action: unknown }) => Promise<void> }, { conversationId, action }: { conversationId: string; action: unknown }) {
+      const current = await this.getConversationByIdOrThrow(conversationId);
+      if (JSON.stringify(current.pendingAction) !== JSON.stringify(action)) return false;
+      await this.setPendingAction({ conversationId, action: null });
+      return true;
+    }),
   };
   const createClaim = vi.fn(async () => ({ id: "agent-claim-1", version: 1 }));
   const uploadReceipt = vi.fn(async () => ({ id: "receipt-1", jobId: "ocr-job-1" }));
@@ -95,6 +103,7 @@ function createDeps(overrides: Partial<Record<string, unknown>> = {}) {
   const updateFields = vi.fn(async ({ fields }: { actorId: string; claimId: string; fields: ClaimFieldPatch }) => ({ id: "agent-claim-1", claimNumber: "BX20261009-0026", version: 2, status: "DRAFT", purpose: fields.purpose ?? "", expenseCategory: fields.expenseCategory ?? "", participants: fields.participants ?? [], projectCode: fields.projectCode ?? "", totalAmountCent: null, currency: "CNY" as const }));
   const prepareSubmission = vi.fn(async () => ({ token: "confirmation-token", claimId: "agent-claim-1", claimVersion: 2, workbench: { claim: { id: "agent-claim-1", claimNumber: "BX-001", version: 2, status: "DRAFT", purpose: "客户拜访", requestedAmountCent: 12_345, totalAmountCent: 12_345, currency: "CNY" as const, receiptCount: 2 }, receipts: [{ id: "r1", claimId: "agent-claim-1", filename: "a.pdf", status: "EXTRACTED", invoiceNumber: "1", ocrConfidence: 0.9, totalAmountCent: 5000 }, { id: "r2", claimId: "agent-claim-1", filename: "b.pdf", status: "EXTRACTED", invoiceNumber: "2", ocrConfidence: 0.9, totalAmountCent: 7345 }] } }));
   const readValidation = vi.fn(async () => ({ claimId: "agent-claim-1", claimVersion: 2, policyVersion: "p1", issues: [] }));
+  const readWorkbench = vi.fn(async () => ({ claim: { id: "agent-claim-1", claimNumber: "BX-001", version: 2, status: "DRAFT", purpose: "客户拜访", requestedAmountCent: 12_345, totalAmountCent: 12_345, currency: "CNY" as const }, receipts: [] }));
   const submitClaim = vi.fn(async () => ({ submissionNumber: "RB20260001" }));
   return {
     deps: {
@@ -106,6 +115,7 @@ function createDeps(overrides: Partial<Record<string, unknown>> = {}) {
       updatePurpose,
       updateFields,
       readValidation,
+      readWorkbench,
       prepareSubmission,
       submitClaim,
       ...overrides,
@@ -779,14 +789,126 @@ it("does not request a confirmation token when Go validation blocks submission",
 it("prepares a fresh token and displays Go's current amount before asking confirmation", async () => {
   const workbench = { claim: { id: "agent-claim-1", claimNumber: "BX-001", version: 3, status: "DRAFT", purpose: "客户拜访", requestedAmountCent: 12345, totalAmountCent: 10155, currency: "CNY" as const, receiptCount: 1 }, receipts: [{ id: "receipt-1", claimId: "agent-claim-1", filename: "invoice.pdf", status: "EXTRACTED", invoiceNumber: "123", ocrConfidence: 0.97, totalAmountCent: 10155 }] };
   const prepareSubmission = vi.fn(async () => ({ token: "token-3", claimId: "agent-claim-1", claimVersion: 3, workbench }));
-  const { deps, getIntake } = createDeps({ prepareSubmission, readValidation: async () => ({ claimId: "agent-claim-1", claimVersion: 3, policyVersion: "p1", issues: [] }), model: { decideConversation: async () => ({ action: "PREPARE_SUBMISSION" as const, reply: "金额999元" }) } });
+  const { deps, getIntake } = createDeps({ prepareSubmission, readWorkbench: async () => workbench, readValidation: async () => ({ claimId: "agent-claim-1", claimVersion: 3, policyVersion: "p1", issues: [] }), model: { decideConversation: async () => ({ action: "PREPARE_SUBMISSION" as const, reply: "金额999元" }) } });
   await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1" });
   const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "我要提交" }, deps);
   expect(result.reply).toContain("¥123.45");
   expect(result.reply).toContain("确认提交");
   expect(result.reply).not.toContain("999");
   expect(prepareSubmission).toHaveBeenCalledWith({ actorId: "employee-1", claimId: "agent-claim-1" });
-  expect(getIntake()).toMatchObject({ status: "READY_TO_SUBMIT", submissionToken: "token-3" });
+  expect(getIntake()).toMatchObject({ status: "READY_TO_SUBMIT", submissionToken: null });
+});
+
+it("prepares and confirms an explicitly selected older draft without submitting the active Intake", async () => {
+  const setup = createDeps();
+  await setup.deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "active-b" });
+  let pendingAction: unknown = null;
+  const oldClaim = { id: "old-a", claimNumber: "BX20261026-0007", version: 4, status: "DRAFT", purpose: "出差", requestedAmountCent: 8600, totalAmountCent: 8600, currency: "CNY" as const };
+  const prepareSubmission = vi.fn(async () => ({ token: "old-a-token", claimId: oldClaim.id, claimVersion: oldClaim.version, workbench: { claim: oldClaim, receipts: [{ id: "r-old", claimId: oldClaim.id, filename: "old.pdf", status: "EXTRACTED", invoiceNumber: "INV-OLD", ocrConfidence: 0.98, totalAmountCent: 8600 }] } }));
+  const submitClaim = vi.fn(async () => ({ submissionNumber: "RB-OLD-A" }));
+  const deps = { ...setup.deps, prepareSubmission, submitClaim,
+    conversations: { ...setup.deps.conversations,
+      getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0, selectedEditClaimId: "old-a", pendingAction }),
+      setPendingAction: vi.fn(async ({ action }: { action: unknown }) => { pendingAction = action; }),
+      consumePendingAction: vi.fn(async () => { if (!pendingAction) return false; pendingAction = null; return true; }),
+    },
+    model: { decideConversation: async () => ({ action: "PREPARE_SUBMISSION" as const, reply: "" }) },
+    readWorkbench: vi.fn(async () => ({ claim: oldClaim, receipts: [] })),
+    readValidation: vi.fn(async () => ({ claimId: oldClaim.id, claimVersion: 4, policyVersion: "p1", issues: [] })),
+  };
+  const preview = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "提交选中的草稿" }, deps);
+  expect(preview.reply).toContain("BX20261026-0007");
+  expect(preview.reply).toContain("¥86.00");
+  expect(prepareSubmission).toHaveBeenCalledWith({ actorId: "employee-1", claimId: "old-a" });
+  expect(pendingAction).toMatchObject({ kind: "SUBMIT", claimId: "old-a", claimVersion: 4, confirmationToken: "old-a-token" });
+  const submitted = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "确认提交" }, deps);
+  expect(submitted.reply).toContain("RB-OLD-A");
+  expect(submitClaim).toHaveBeenCalledWith({ actorId: "employee-1", claimId: "old-a", confirmationToken: "old-a-token" });
+  expect(setup.getIntake()).toMatchObject({ claimId: "active-b", status: "COLLECTING" });
+  await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "确认提交" }, deps);
+  expect(submitClaim).toHaveBeenCalledTimes(1);
+});
+
+it("can prepare a named owned draft but refuses a submitted or read-only target", async () => {
+  const setup = createDeps();
+  const claim = { id: "named-a", claimNumber: "BX20261026-0008", version: 2, status: "DRAFT", purpose: "项目", requestedAmountCent: 2000, totalAmountCent: 2000, currency: "CNY" as const };
+  let pendingAction: unknown = null;
+  const prepareSubmission = vi.fn(async () => ({ token: "named-token", claimId: claim.id, claimVersion: 2, workbench: { claim, receipts: [] } }));
+  const deps = { ...setup.deps, prepareSubmission,
+    conversations: { ...setup.deps.conversations,
+      getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0, pendingAction }),
+      setPendingAction: vi.fn(async ({ action }: { action: unknown }) => { pendingAction = action; }),
+    },
+    model: { decideConversation: async () => ({ action: "PREPARE_SUBMISSION" as const, reply: "", claimNumber: claim.claimNumber }) },
+    findOwnedClaimByNumber: vi.fn(async () => claim),
+    readWorkbench: vi.fn(async () => ({ claim, receipts: [] })),
+    readValidation: vi.fn(async () => ({ claimId: claim.id, claimVersion: 2, policyVersion: "p1", issues: [] })),
+  };
+  const preview = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "提交 BX20261026-0008" }, deps);
+  expect(preview.reply).toContain(claim.claimNumber);
+  expect(pendingAction).toMatchObject({ kind: "SUBMIT", targetScope: "EXPLICIT_DRAFT" });
+  const submitted = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "确认提交" }, deps);
+  expect(submitted.reply).toContain("RB20260001");
+  expect(pendingAction).toBeNull();
+  deps.readWorkbench.mockResolvedValue({ claim: { ...claim, status: "SUBMITTED" }, receipts: [] });
+  const refused = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "提交 BX20261026-0008" }, deps);
+  expect(refused.reply).toContain("可提交的草稿");
+  expect(prepareSubmission).toHaveBeenCalledTimes(1);
+});
+
+it("invalidates pending submission after a concurrent Web version change", async () => {
+  const setup = createDeps();
+  await setup.deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1" });
+  await setup.deps.conversations.setPendingAction({ conversationId: "conversation-1", action: { kind: "SUBMIT", claimId: "agent-claim-1", claimVersion: 2, confirmationToken: "token", preview: { claimNumber: "BX-001", purpose: "差旅", requestedAmountCent: 1000, receiptCount: 1 }, targetScope: "CURRENT_INTAKE", expiresAt: new Date(Date.now() + 60_000).toISOString() } });
+  const submitClaim = vi.fn();
+  const deps = { ...setup.deps, submitClaim,
+    readWorkbench: vi.fn(async () => ({ claim: { id: "agent-claim-1", claimNumber: "BX-001", version: 3, status: "DRAFT", purpose: "差旅", requestedAmountCent: 1000, totalAmountCent: 1000, currency: "CNY" as const }, receipts: [] })),
+  };
+  const reply = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "确认提交" }, deps);
+  expect(reply.reply).toContain("单据已变化");
+  expect(submitClaim).not.toHaveBeenCalled();
+  const replay = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "确认提交" }, deps);
+  expect(replay.reply).toContain("先发起提交");
+});
+
+it("rejects expired, switched, and legacy-only submission confirmations", async () => {
+  const setup = createDeps();
+  await setup.deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "active-b", status: "READY_TO_SUBMIT", submissionToken: "legacy-token" });
+  const submitClaim = vi.fn();
+  const makeAction = (expiresAt: string) => ({ kind: "SUBMIT" as const, claimId: "old-a", claimVersion: 2, confirmationToken: "old-token", preview: { claimNumber: "BX20261026-0007", purpose: "差旅", requestedAmountCent: 1000, receiptCount: 1 }, targetScope: "SELECTED_DRAFT" as const, expiresAt });
+  const deps = { ...setup.deps, submitClaim,
+    conversations: { ...setup.deps.conversations, getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0, selectedEditClaimId: "another-draft", pendingAction: await setup.deps.conversations.getConversationByIdOrThrow().then((item) => item.pendingAction) }) },
+  };
+  await setup.deps.conversations.setPendingAction({ conversationId: "conversation-1", action: makeAction(new Date(Date.now() - 1000).toISOString()) });
+  const expired = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "确认提交" }, deps);
+  expect(expired.reply).toContain("先发起提交");
+  await setup.deps.conversations.setPendingAction({ conversationId: "conversation-1", action: makeAction(new Date(Date.now() + 60_000).toISOString()) });
+  const switched = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "确认提交" }, deps);
+  expect(switched.reply).toContain("办理目标已变化");
+  const legacy = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "确认提交" }, deps);
+  expect(legacy.reply).toContain("先发起提交");
+  expect(submitClaim).not.toHaveBeenCalled();
+});
+
+it("clears a selected-draft submission confirmation when its fields are changed", async () => {
+  const setup = createDeps();
+  let pendingAction: unknown = { kind: "SUBMIT", claimId: "old-a", claimVersion: 2, confirmationToken: "old-token", preview: { claimNumber: "BX20261026-0007", purpose: "原事由", requestedAmountCent: 1000, receiptCount: 1 }, targetScope: "SELECTED_DRAFT", expiresAt: new Date(Date.now() + 60_000).toISOString() };
+  const claim = { id: "old-a", claimNumber: "BX20261026-0007", version: 2, status: "DRAFT", purpose: "原事由", requestedAmountCent: 1000, totalAmountCent: 1000, currency: "CNY" as const };
+  const submitClaim = vi.fn();
+  const deps = { ...setup.deps, submitClaim,
+    conversations: { ...setup.deps.conversations,
+      getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0, selectedEditClaimId: "old-a", pendingAction }),
+      setPendingAction: vi.fn(async ({ action }: { action: unknown }) => { pendingAction = action; }),
+    },
+    model: { decideConversation: async () => ({ action: "COLLECT_FIELDS" as const, reply: "", fields: { purpose: "新事由" } }) },
+    readWorkbench: vi.fn(async () => ({ claim: { ...claim, purpose: "新事由" }, receipts: [] })),
+    updateFields: vi.fn(async () => ({ ...claim, purpose: "新事由", version: 3 })),
+  };
+  await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "改事由" }, deps);
+  expect(pendingAction).toBeNull();
+  const confirmed = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "确认提交" }, deps);
+  expect(confirmed.reply).toContain("先发起提交");
+  expect(submitClaim).not.toHaveBeenCalled();
 });
 
 it("guides an unprepared confirmation without throwing or submitting", async () => {
@@ -800,6 +922,7 @@ it.each([["VERSION_CONFLICT", "单据已变化"], ["CONFIRMATION_EXPIRED", "确�
   const submitClaim = vi.fn(async () => { throw new ReimbursementApiHttpError("Go detail", 409, code); });
   const { deps, getIntake } = createDeps({ submitClaim });
   await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: "agent-claim-1", status: "READY_TO_SUBMIT", submissionToken: "old-token" });
+  await deps.conversations.setPendingAction({ conversationId: "conversation-1", action: { kind: "SUBMIT", claimId: "agent-claim-1", claimVersion: 2, confirmationToken: "old-token", preview: { claimNumber: "BX-001", purpose: "客户拜访", requestedAmountCent: 12345, receiptCount: 2 }, targetScope: "CURRENT_INTAKE", expiresAt: new Date(Date.now() + 60_000).toISOString() } });
   const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "确认提交" }, deps);
   expect(result.reply).toContain(expected);
   expect(getIntake()).toMatchObject({ status: "COLLECTING", submissionToken: null });
