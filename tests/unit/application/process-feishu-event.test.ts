@@ -57,6 +57,15 @@ it("subscribes a verified private claim even when it is an older selected draft"
   expect(calls.claimTargets).toEqual([{ employeeId: "employee-1", conversationId: "private-employee-1", chatId: "oc-1", claimId: "older-claim" }]);
 });
 
+it("does not send a localhost workspace link into Feishu when no public address is configured", async () => {
+  const { deps } = fixture({ publicAppUrl: "http://localhost:8088", runConversationTurn: async () => ({ reply: "已找到 BX20261027-0001", citations: [], intake: null, targetClaimId: "claim-1" }) });
+  const result = await processFeishuEvent({ eventId: "event-1" }, deps);
+  expect(result).toMatchObject({ kind: "AGENT_REPLIED", claimId: "claim-1" });
+  if (result.kind !== "AGENT_REPLIED") throw new Error("reply expected");
+  expect(result.replyText).toContain("BX20261027-0001");
+  expect(result.replyText).not.toContain("localhost");
+});
+
 it("never registers group chats as private claim notification targets", async () => {
   const { deps, calls } = fixture({
     events: { findInboundByEventId: async () => ({ eventId: "event-1", messageId: "om-1", messageType: "text", chatId: "oc-1", senderOpenId: "ou-employee", chatType: "group", mentionedOpenIds: ["ou-bot"] }) },

@@ -1,7 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { reimbursementApi } from "../../api/client";
-import type { ClaimPatch } from "../../api/generated/reimbursement";
+import type { ClaimPatch, ClaimSearchQuery } from "../../api/generated/reimbursement";
 
 export const claimKeys = {
   all: ["claims"] as const,
@@ -14,8 +14,13 @@ export function shouldRefreshClaimAfterReceiptTransition(wasPending: boolean, is
   return wasPending && !isPending;
 }
 
-export function useClaims() {
-  return useQuery({ queryKey: claimKeys.all, queryFn: reimbursementApi.listClaims });
+export function useClaims(query: Omit<ClaimSearchQuery, "cursor">) {
+  return useInfiniteQuery({
+    queryKey: [...claimKeys.all, "search", query],
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) => reimbursementApi.searchClaims({ ...query, ...(pageParam ? { cursor: pageParam } : {}) }),
+    getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
+  });
 }
 
 export function useClaim(claimId: string) {

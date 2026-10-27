@@ -2,6 +2,7 @@ import type { ReimbursementPort } from "../../services/agent/src/ports/reimburse
 import { createReimbursementEventConsumer } from "../../services/agent/src/events/reimbursement-consumer";
 import { formatReceiptExtractionEventNotification } from "../../services/agent/src/events/receipt-notification";
 import { formatClaimProgress } from "@/src/application/claim-progress";
+import { publicWorkspaceUrl } from "../../services/agent/src/events/public-workspace-url";
 
 /** Connects an Agent-owned event ledger and channel target to the tool-only reimbursement boundary. */
 export function createAgentEventNotificationHandler(deps: {
@@ -22,7 +23,8 @@ export function createAgentEventNotificationHandler(deps: {
     markProcessed: (eventId) => deps.processedEvents.markProcessed(eventId),
     findNotificationTarget: (claimId) => deps.conversations.findNotificationTargetByClaimId(claimId),
     notify: async ({ eventId, eventType, claimId, receiptId, conversationId, chatId, workbench, progress }) => {
-      const text = progress ? `${eventType === "ClaimSubmitted" ? "报销单已提交。" : eventType === "ReceiptReviewRequired" ? "票据需要人工复核。" : "票据复核已处理。"}\n${formatClaimProgress(progress)}\n报销工作台：${deps.publicAppUrl.replace(/\/$/, "")}/claims/${encodeURIComponent(claimId)}` : formatReceiptExtractionEventNotification({
+      const workspace = publicWorkspaceUrl(deps.publicAppUrl, claimId);
+      const text = progress ? `${eventType === "ClaimSubmitted" ? "报销单已提交。" : eventType === "ReceiptReviewRequired" ? "票据需要人工复核。" : "票据复核已处理。"}\n${formatClaimProgress(progress)}${workspace ? `\n报销工作台：${workspace}` : ""}` : formatReceiptExtractionEventNotification({
         publicAppUrl: deps.publicAppUrl,
         claimId,
         receiptId,

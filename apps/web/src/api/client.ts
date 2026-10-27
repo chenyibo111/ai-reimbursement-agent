@@ -1,4 +1,4 @@
-import type { Claim, ClaimPatch, Receipt, ReceiptPreview, ResolveReviewCaseInput, ReviewCase, SubmissionRequest, SubmissionSnapshot, ValidationResult } from "./generated/reimbursement";
+import type { Claim, ClaimPatch, ClaimSearchPage, ClaimSearchQuery, Receipt, ReceiptPreview, ResolveReviewCaseInput, ReviewCase, SubmissionRequest, SubmissionSnapshot, ValidationResult } from "./generated/reimbursement";
 
 export class ReimbursementApiError extends Error {
   constructor(
@@ -49,6 +49,11 @@ export function createReimbursementApi(tokenProvider: TokenProvider, deps: ApiCl
 
   return {
     listClaims: () => request<{ items: Claim[] }>("/api/v1/claims"),
+    searchClaims: (query: ClaimSearchQuery) => {
+      const params = new URLSearchParams({ search: "true" });
+      for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== "") params.set(key, String(value));
+      return request<ClaimSearchPage>(`/api/v1/claims?${params}`);
+    },
     getClaim: (claimId: string) => request<Claim>(`/api/v1/claims/${encodeURIComponent(claimId)}`),
 		updateClaim: (claimId: string, patch: ClaimPatch) => request<Claim>(`/api/v1/claims/${encodeURIComponent(claimId)}`, { method: "PATCH", body: patch, idempotent: true }),
     listReceipts: (claimId: string) => request<{ items: Receipt[] }>(`/api/v1/claims/${encodeURIComponent(claimId)}/receipts`),

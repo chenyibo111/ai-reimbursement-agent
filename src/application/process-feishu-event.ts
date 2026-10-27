@@ -2,6 +2,7 @@ import type { ConversationTurnResult } from "@/src/application/run-conversation-
 import type { FeishuInboundMessage, FeishuMessageContent } from "@/src/domain/feishu-bot";
 import type { FeishuBotClient } from "@/src/infrastructure/feishu/feishu-bot-client";
 import type { EmployeeRole } from "@/src/server/reimbursement-auth";
+import { publicWorkspaceUrl } from "@/services/agent/src/events/public-workspace-url";
 
 export type FeishuProcessingResult =
   | { kind: "IGNORED" }
@@ -141,9 +142,10 @@ function formatReply(result: ConversationTurnResult, publicAppUrl: string, chatT
     return `政策依据：${citation.title}${section ? `（${section}）` : ""}${excerpt ? `\n证据摘录：${excerpt}` : ""}`;
   }).join("\n");
   const targetClaimId = result.targetClaimId ?? result.intake?.claimId;
-  const workspace = chatType === "group" ? "如需继续办理个人报销，请私聊机器人或打开 Web 工作台。" : targetClaimId
-    ? `请在工作台确认或补充信息：${claimUrl(publicAppUrl, targetClaimId)}`
-    : `可在报销工作台继续办理：${publicAppUrl}/claims`;
+  const url = publicWorkspaceUrl(publicAppUrl, targetClaimId ?? undefined);
+  const workspace = chatType === "group" ? "如需继续办理个人报销，请私聊机器人或打开 Web 工作台。" : !url
+    ? "请在当前环境的报销工作台按上述单号查看和办理。"
+    : targetClaimId ? `请在工作台确认或补充信息：${url}` : `可在报销工作台继续办理：${url}`;
   return [reply, citations, workspace].filter(Boolean).join("\n\n");
 }
 
@@ -169,9 +171,6 @@ function safeFilename(value: string): string {
   return value.replace(/[\\/\u0000-\u001f]/g, "_").slice(0, 180) || "receipt";
 }
 
-function claimUrl(publicAppUrl: string, claimId: string): string {
-  return `${publicAppUrl}/claims/${encodeURIComponent(claimId)}`;
-}
 
 function assertEventMatchesMessage(event: StoredInboundEvent, message: FeishuMessageContent) {
   if (event.messageId !== message.messageId || event.chatId !== message.chatId || event.senderOpenId !== message.senderOpenId) {

@@ -7,9 +7,9 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; background: #f7f9fc; }
-button, input, textarea { font: inherit; }
+button, input, textarea, select { font: inherit; }
 button, .file-input { cursor: pointer; }
-button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visible { outline: 3px solid #3569e8; outline-offset: 3px; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid #3569e8; outline-offset: 3px; }
 button:disabled, .is-disabled { cursor: not-allowed; opacity: .55; }
 a { color: inherit; }
 
@@ -39,7 +39,7 @@ h2 { margin-bottom: 0; font-size: 1.35rem; letter-spacing: -.015em; }
 .create-panel { padding: 24px; margin-bottom: 24px; }
 .create-panel form { display: grid; gap: 8px; margin-top: 18px; }
 label { font-weight: 700; }
-input, textarea { width: 100%; min-height: 46px; padding: 0 13px; border: 1px solid #cbd7e8; border-radius: 10px; color: #13233d; background: #fff; }
+input, textarea, select { width: 100%; min-height: 46px; padding: 0 13px; border: 1px solid #cbd7e8; border-radius: 10px; color: #13233d; background: #fff; }
 textarea { min-height: 96px; padding: 11px 13px; line-height: 1.6; }
 .resize-none { resize: none; }
 input::placeholder, textarea::placeholder { color: #94a3b8; }
@@ -47,6 +47,11 @@ input::placeholder, textarea::placeholder { color: #94a3b8; }
 .field-error { margin: 10px 0 0; color: #c43a4a; line-height: 1.5; }
 .inline-notice { min-height: 1.5em; margin: 0 0 18px; color: #13806a; font-weight: 700; }
 .claim-list { padding: 24px; }
+.claim-search-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-top: 20px; padding: 18px; border: 1px solid #dce4f0; border-radius: 14px; background: #f7f9fc; }
+.claim-search-form label { display: grid; align-content: start; gap: 6px; color: #334155; font-size: .84rem; }
+.claim-search-form input, .claim-search-form select { min-width: 0; background: #fff; }
+.claim-search-actions { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; grid-column: 1 / -1; }
+.claim-list-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; min-height: 44px; }
 .claim-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; margin-top: 20px; }
 .claim-card { display: grid; gap: 13px; min-height: 188px; padding: 18px; border: 1px solid #dce4f0; border-radius: 14px; text-decoration: none; background: #fff; }
 .claim-card:hover { border-color: #3569e8; background: #fafdff; }

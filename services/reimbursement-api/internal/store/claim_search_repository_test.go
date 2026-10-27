@@ -35,9 +35,9 @@ func TestPostgresClaimSearchFiltersOwnerAndPaginatesStableTies(t *testing.T) {
 		_, _ = pool.Exec(ctx, `DELETE FROM reimbursement.employees WHERE id IN ($1,$2)`, owner, other)
 	}()
 	createdAt := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
-	for i := 0; i < 15; i++ {
+	for i := 0; i < 108; i++ {
 		id, claimOwner := fmt.Sprintf("search-%s-%02d", suffix, i), owner
-		if i >= 12 {
+		if i >= 105 {
 			claimOwner = other
 		}
 		var amount any = int64(10000)
@@ -50,26 +50,35 @@ func TestPostgresClaimSearchFiltersOwnerAndPaginatesStableTies(t *testing.T) {
 	}
 	repository := NewPostgresClaimRepository(pool)
 	service := application.NewClaimService(repository, nil, nil, time.Now)
-	query := application.SearchClaimsQuery{PurposeContains: "Travel", Limit: 10, Sort: application.ClaimSearchCreatedDesc}
+	query := application.SearchClaimsQuery{PurposeContains: "Travel", Limit: 20, Sort: application.ClaimSearchCreatedDesc}
 	first, err := service.SearchClaims(ctx, owner, query)
-	if err != nil || first.TotalCount != 12 || len(first.Items) != 10 || first.NextCursor == "" {
+	if err != nil || first.TotalCount != 105 || len(first.Items) != 20 || first.NextCursor == "" {
 		t.Fatalf("first page: %#v %v", first, err)
 	}
-	query.Cursor = first.NextCursor
-	second, err := service.SearchClaims(ctx, owner, query)
-	if err != nil || second.TotalCount != 12 || len(second.Items) != 2 || second.NextCursor != "" {
-		t.Fatalf("second page: %#v %v", second, err)
-	}
 	seen := map[string]bool{}
-	for _, claim := range append(first.Items, second.Items...) {
-		if seen[claim.ID] || claim.OwnerID != owner {
-			t.Fatalf("duplicate or foreign claim: %#v", claim)
+	page := first
+	for {
+		for _, claim := range page.Items {
+			if seen[claim.ID] || claim.OwnerID != owner {
+				t.Fatalf("duplicate or foreign claim: %#v", claim)
+			}
+			seen[claim.ID] = true
 		}
-		seen[claim.ID] = true
+		if page.NextCursor == "" {
+			break
+		}
+		query.Cursor = page.NextCursor
+		page, err = service.SearchClaims(ctx, owner, query)
+		if err != nil || page.TotalCount != 105 {
+			t.Fatalf("next page: %#v %v", page, err)
+		}
+	}
+	if len(seen) != 105 || !seen[fmt.Sprintf("search-%s-%02d", suffix, 0)] {
+		t.Fatalf("older claim lost after 100+ results: %d", len(seen))
 	}
 	minimum := int64(0)
 	amountPage, err := service.SearchClaims(ctx, owner, application.SearchClaimsQuery{Limit: 20, MinRequestedAmountCent: &minimum, Sort: application.ClaimSearchAmountAsc})
-	if err != nil || amountPage.TotalCount != 11 || len(amountPage.Items) != 11 {
+	if err != nil || amountPage.TotalCount != 104 || len(amountPage.Items) != 20 {
 		t.Fatalf("null amount exclusion: %#v %v", amountPage, err)
 	}
 }

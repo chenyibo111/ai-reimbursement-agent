@@ -682,11 +682,12 @@ it("lists the supported Feishu private-chat abilities without promising direct a
 
   const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "你有哪些能力" }, deps);
 
-  for (const capability of ["报销政策", "上传票据", "识别结果", "报销事由", "费用类别", "参与人员", "项目编号", "最近 5 张", "完整单号", "单据状态", "申请报销总额", "票据金额", "提交条件", "提交前摘要", "确认提交"]) {
+  for (const capability of ["报销政策", "上传票据", "识别结果", "删除票据", "状态", "日期", "事由", "费用类别", "申请金额", "指定数量", "排序", "匹配总数", "下一页", "完整单号", "旧单", "明确选中", "报销事由", "参与人员", "项目编号", "删除整张草稿", "单据状态", "申请报销总额", "票据金额", "人工复核进度", "提交条件", "提交前摘要", "确认提交"]) {
     expect(result.reply).toContain(capability);
   }
-  expect(result.reply).toContain("金额、币种和备注请到 Web 工作台填写");
+  expect(result.reply).toContain("金额、币种、备注和票据识别字段的人工修正请到 Web 工作台填写");
   expect(result.reply).toContain("飞书私聊");
+  expect(result.reply).toContain("审批和付款进度尚未接入");
   expect(result.reply).not.toContain("自动填写金额");
   expect(result.reply).not.toContain("提交任何单据");
 });

@@ -27,6 +27,20 @@ export interface Claim {
   updatedAt: string;
 }
 
+export type ClaimSearchQuery = {
+  status?: "DRAFT" | "SUBMITTED";
+  createdFrom?: string;
+  createdBefore?: string;
+  purposeContains?: string;
+  expenseCategory?: string;
+  minRequestedAmountCent?: number;
+  maxRequestedAmountCent?: number;
+  sort?: "created_desc" | "created_asc" | "amount_desc" | "amount_asc";
+  limit: number;
+  cursor?: string;
+};
+export type ClaimSearchPage = { items: Claim[]; totalCount: number; nextCursor: string | null };
+
 export interface ClaimPatch {
   version: number;
   purpose?: string;

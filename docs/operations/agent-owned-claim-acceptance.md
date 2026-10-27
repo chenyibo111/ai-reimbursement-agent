@@ -1,4 +1,4 @@
-# Agent 字段写入与本人单据查询验收
+# Agent 本人单据检索、办理与通知验收
 
 本功能通过现有 Go 工具网关工作。先对目标环境运行已提交的 Prisma 迁移，再重建并启动 Web、Agent/飞书 Worker 与 Go API；确认 Go 报销 API 可用。不要把测试环境的两名员工共用同一飞书 `open_id`。
 
@@ -7,17 +7,18 @@
 ```powershell
 docker compose up -d postgres
 npx prisma migrate deploy --config prisma7.config.ts
-docker compose --profile migration up -d --build web feishu-bot-worker reimbursement-api reimbursement-web reimbursement-edge
-docker compose ps web feishu-bot-worker reimbursement-api reimbursement-web reimbursement-edge
+docker compose --profile migration up -d --build web feishu-bot-worker agent-event-worker reimbursement-api reimbursement-worker reimbursement-web reimbursement-edge
+docker compose ps web feishu-bot-worker agent-event-worker reimbursement-api reimbursement-worker reimbursement-web reimbursement-edge
 ```
 
 React + Go 报销工作台从 `http://localhost:8088/claims` 进入；本轮的 Web 私有 Agent 对话入口仍是旧 Next 界面的 `http://localhost:3000/claims` 悬浮“报销助理”，**React 页面目前没有该聊天悬浮入口**。两者共用同一个 `localhost` 登录 Cookie，但端口和页面不同。确认各服务处于 `Up`，且飞书私聊机器人能回复。若本机只验证 Web 私有会话，可先不启动 `feishu-bot-worker`。不要仅重启旧容器而不重建镜像，否则验收的仍是旧代码。
 
-1. 员工 A 在 Web 私有会话或飞书私聊说“开始报销”，检查仅建立 Intake、未建立 Go 草稿。再明确提供报销事由、费用类别、参与人员和项目编号。回复应为“已保存到报销草稿”，Go 工作台和 Web 页面刷新后字段应完全一致。金额、币种、备注的对话代填请求应引导去 Web，且不得声称已保存。
-2. 员工 A 说“我的报销单”，应最多看到五张本人单据的单号、状态、事由。提供一张较早的完整 `BXYYYYMMDD-序号` 单号，再追问“这单金额/状态”；每次都应以 Go 当前本人数据回答。员工 B 输入同一单号，与不存在的单号得到同样的安全未找到回复。
-3. 保持员工 A 的当前 Intake，显式查询另一张旧单，再补充当前报销事由。旧单应只被读取，补充字段仍写当前 Intake 对应的草稿。任何准备提交及精确的“确认提交”也只能作用于当前 Intake。飞书群聊询问本人列表或单据详情时不得返回私有信息。
-4. 准备提交后再修改允许字段，旧确认令牌应失效，必须重新发起提交准备。另在 Web 先修改同一草稿，模拟版本冲突：若 Go 回读值与 Agent 提案不同，Agent 不得覆盖 Web 更新，也不得回复“已保存”；若 Web 已写入完全相同的值，可回读确认成功。Go 写入后回读失败时应提示“未确认写入”，要求到工作台核对。
-5. 使用同一个飞书事件 ID 或 Web `turnId` 重放一次补字段消息，Go 草稿和 PATCH 不得重复创建/执行。重新发送一条不同的新消息则应按当前 Go 版本处理。
-6. 新建一笔尚未填写参与人员的 Go 草稿，“我的报销单”和按完整单号查询都应正常返回；查询不存在的单号后再说“这单”，不得沿用上一次选择的旧单。对升级前只写在会话、未写进 Go 草稿的字段，首次接触应提示未保存并要求重新确认，而不是当作已保存。
+1. 用员工 A 的飞书私聊说“开始报销”，检查仅建立 Intake。补充事由、费用类别、参与人员、项目编号后，Go Web 工作台刷新应一致。申请金额、币种、备注必须在 Web 表单填写；Agent 不得声称代填成功。
+2. 准备至少 101 张员工 A 单据与一张员工 B 单据。在飞书问“上个月草稿按申请金额从高到低列 12 张”，检查匹配总数、首批序号与“下一页”；翻页后应能找到第 101 张旧单。`http://localhost:8088/claims` 使用同样状态、日期、事由、费用类别、金额和排序筛选，显示同样的 Go 总数，继续加载后能打开旧单。
+3. 员工 A 用完整单号查询旧单 A，再明确说“编辑 BX…”。旧单 A 必须属于本人且为草稿才可设为办理目标；当前 Intake 草稿 B 保留。只读查询 A 后提“改这张”，或读目标与办目标冲突时，必须澄清而不写入任何草稿。员工 B 查询/编辑员工 A 的单号，应得到与不存在单号相同的安全回复；群聊不得透露列表、金额或旧单是否存在。
+4. 在明确选中的旧草稿上传发票，等 OCR 完成或转人工复核；飞书私聊通知应指向旧草稿，不指向活动 Intake。问“这张还缺什么”，应只显示 Go 当前票据、校验、人工复核状态；审批和付款显示“未接入”。财务处理复核后，应收到一次基于 Go 当前状态的通知；重复投递同一事件不重复发送。
+5. 对旧草稿更正事由或其他允许字段，Web 刷新核对。删除票据、删除草稿均需明确单号/票据和一次性确认；非草稿不能删除。删除后，Web 和 Agent 列表都不再显示该草稿。新文件上传失败时不能删除原票。
+6. 对选中的旧草稿请求提交前摘要，检查 Go 最新版本/金额/阻断项，明确回复“确认提交”后再看 Web 状态。改字段、上传/删除票据、切换目标或 Web 并发修改后，旧确认应失效；重新准备后才能提交。飞书群聊、员工 B、已提交单、过期确认均不能提交员工 A 的旧单。
+7. 重放相同飞书事件 ID 或 Web `turnId`，确认不重复写入/通知。若当前 `APP_PUBLIC_URL` 是 `localhost`，飞书只应给单号和文字指引，不应发无法从飞书打开的 localhost 链接；有可访问的 HTTPS 公开地址时才附准确工作台链接。
 
-自动化检查：根目录 `npm test`、`npm run lint`、`npx tsc --noEmit`、`npm run build`；`apps/web` 下 `npm test` 与 `npm run build`；`services/agent` 下 `npm test`；Go 使用**隔离测试库**运行 `go test ./...`。模型真实调用评测可能计费，只有明确允许后才运行 `npm run eval:intent`。浏览器与飞书双员工验收需在具备有效 OAuth、Go API 和机器人长连接的环境中手动执行。
+自动化检查：根目录 `npm test`、`npm run lint`、`npx tsc --noEmit`、`npm run build`；`apps/web` 下 `npm test` 与 `npm run build`；`services/agent` 下 `npm test`；Go 使用**隔离测试库**运行 `go test ./...`。Go 仓储测试覆盖 105 张本人单据、另一个员工、完整游标遍历和旧单保留；React 测试覆盖筛选参数、总数和“加载更多”。模型真实调用评测可能计费，只有明确允许后才运行 `npm run eval:intent`。浏览器 OAuth 和飞书双员工现场验收需在有两名有效员工、机器人长连接与当前公开域名的环境执行，并记录实际单号与事件 ID。

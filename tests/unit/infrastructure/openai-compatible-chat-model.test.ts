@@ -78,6 +78,15 @@ describe("OpenAiCompatibleChatModel", () => {
     expect(String(request.body)).not.toContain("top-secret");
   });
 
+  it("lists draft deletion actions and explicit intake targeting in the model decision format", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: '{"action":"HELP","reply":"可以帮助查询和办理报销单"}' } }] }), { status: 200 }));
+    const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "secret", fetchImpl });
+    await model.decideConversation({ summary: { text: "", throughSequence: 0 }, messages: [], intake: null, policyCitations: [], allowedFields: [] });
+    const prompt = JSON.parse(String(fetchImpl.mock.calls[0][1].body)).messages[0].content as string;
+    expect(prompt).toContain('"SELECT_EDIT_CLAIM" | "DELETE_RECEIPT" | "DELETE_DRAFT" | "READ_CLAIM"');
+    expect(prompt).toContain('targetReference?:"CURRENT_INTAKE"');
+  });
+
   it("rejects conversation decisions containing fields outside the server allowlist", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       choices: [{ message: { content: '{"action":"COLLECT_FIELDS","reply":"已修改金额","fields":{"totalAmountCents":1}}' } }],

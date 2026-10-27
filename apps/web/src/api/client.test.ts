@@ -3,6 +3,18 @@ import { describe, expect, it, vi } from "vitest";
 import { createReimbursementApi } from "./client";
 
 describe("createReimbursementApi", () => {
+  it("queries the same owner-scoped Go filters, total and cursor used by the Agent", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ items: [], totalCount: 101, nextCursor: "next+page" }));
+    const api = createReimbursementApi({ getAccessToken: () => "employee-token", refreshAccessToken: async () => "employee-token" }, { fetcher });
+    await expect(api.searchClaims({ status: "DRAFT", purposeContains: "客户&拜访", minRequestedAmountCent: 10000, sort: "amount_desc", limit: 20, cursor: "page+1" })).resolves.toEqual({ items: [], totalCount: 101, nextCursor: "next+page" });
+    const url = new URL(String(fetcher.mock.calls[0][0]), "http://localhost");
+    expect(url.pathname).toBe("/api/v1/claims");
+    expect(url.searchParams.get("search")).toBe("true");
+    expect(url.searchParams.get("purposeContains")).toBe("客户&拜访");
+    expect(url.searchParams.get("minRequestedAmountCent")).toBe("10000");
+    expect(url.searchParams.get("cursor")).toBe("page+1");
+    expect(url.searchParams.has("ownerId")).toBe(false);
+  });
   it("refreshes once after a mutation 401 and reuses the same idempotency key", async () => {
     const fetcher = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify({ code: "UNAUTHENTICATED" }), { status: 401, headers: { "Content-Type": "application/json" } }))

@@ -151,11 +151,11 @@
 
 **Interfaces:** React 使用 Task 1 查询合同显示筛选、总数与分页；Agent 返回的准确单号和工作台链接保持可打开。本期不增加 React Agent 悬浮入口。
 
-- [ ] **Step 1: 写失败测试。** React 与飞书筛选/总数一致；旧单可在 101+ 数据中检索；群聊不显示私有内容；跨员工越权失败；定向草稿修改/删除/提交与 Web 刷新结果一致。
-- [ ] **Step 2: 验证红灯。** `apps/web` 测试及根目录定向集成测试失败。
-- [ ] **Step 3: 实现最小代码。** 绑定列表筛选和分页，更新 HELP 能力清单、验收文档与部署顺序；检查动态公开域名不可用时只展示单号，不给失效示例链接。
-- [ ] **Step 4: 验证绿灯。** `apps/web` 测试/构建、根目录 `npm test`/lint/build/TS、Go `go test ./...`；完成一条 Web 与一条飞书双员工手工链路。
-- [ ] **Step 5: 提交。** `feat(web): align searchable claim workspace with Agent`。
+- [x] **Step 1: 写失败测试。** React 与飞书筛选/总数一致；旧单可在 101+ 数据中检索；群聊不显示私有内容；跨员工越权失败；定向草稿修改/删除/提交与 Web 刷新结果一致。
+- [x] **Step 2: 验证红灯。** `apps/web` 测试及根目录定向集成测试失败。
+- [x] **Step 3: 实现最小代码。** 绑定列表筛选和分页，更新 HELP 能力清单、验收文档与部署顺序；检查动态公开域名不可用时只展示单号，不给失效示例链接。
+- [ ] **Step 4: 验证绿灯。** `apps/web` 测试/构建、根目录 `npm test`/lint/build/TS、Go `go test ./...`；完成一条 Web 与一条飞书双员工手工链路。自动化与本地模拟浏览器检查已通过；真实飞书双员工链路待在具备两个账号的环境按验收文档执行。
+- [x] **Step 5: 提交。** `feat(web): align searchable claim workspace with Agent`。
 
 ## 完成条件
 

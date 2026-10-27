@@ -14,7 +14,7 @@ The current Next.js application remains the active product while the new archite
 
 Agent 的 Web 对话和飞书机器人统一通过 Go 报销工具网关办理报销。启动这两个入口前，必须配置 `REIMBURSEMENT_API_URL`、`REIMBURSEMENT_AGENT_SERVICE_KEY`、`REIMBURSEMENT_AUTH_HS256_SECRET`；Go API 不可用时会返回服务不可用，不会将报销操作写入旧 Next.js 领域路径。容器内上传票据使用 `REIMBURSEMENT_AGENT_STORAGE_ENDPOINT` 访问 MinIO。
 
-Agent 私有会话可补充报销事由、费用类别、参与人员和项目编号；首次有效补充会创建 Go 草稿，只有版本化写入并按本人身份回读一致后才回复“已保存”。申请金额、币种和备注仍由 Web 表单填写。员工还可列出最近五张本人报销单、按完整单号查询旧单并继续追问；旧单只作为读取目标，不会替换当前办理中的 Intake 或成为提交目标。群聊不提供这些私有数据。上线前需执行新增的 Prisma 迁移；验收步骤见[Agent 字段与本人单据查询](docs/operations/agent-owned-claim-acceptance.md)。
+Agent 私有会话可按状态、日期、事由、费用类别及申请金额搜索本人单据，指定数量、排序并按游标继续翻页；也可按完整单号查找旧单。明确选中本人草稿后，可补充报销事由、费用类别、参与人员和项目编号，上传/删除票据，确认删除草稿，查看 Go 实时进度，并在重新校验后确认提交。当前 Intake 与选中的旧草稿分别保存，不会因只读查询而切换写入目标。申请金额、币种、备注仍由 Web 表单填写，审批和付款进度尚未接入。React `/claims` 列表使用同一 Go 筛选与分页接口；飞书群聊不提供个人单据数据。上线前需执行新增的 Prisma 迁移并重建 Agent 事件 Worker；验收步骤见[Agent 本人单据检索与办理](docs/operations/agent-owned-claim-acceptance.md)。
 
 项目当前提供独立 Web 工作台，并可选接入飞书 OAuth、飞书机器人和以飞书文档为来源的报销政策知识库。
 
