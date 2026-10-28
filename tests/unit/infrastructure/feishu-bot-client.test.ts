@@ -135,6 +135,27 @@ it("sends a new text message to the original chat with a caller-provided idempot
   });
 });
 
+it("passes a stable idempotency key when replying to an inbound message", async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const client = createFeishuBotClient({
+    appId: "cli_test",
+    appSecret: "app-secret",
+    fetch: async (url, init) => {
+      calls.push({ url: url.toString(), init });
+      return calls.length === 1 ? json({ code: 0, tenant_access_token: "tenant-token", expire: 7200 }) : json({ code: 0 });
+    },
+  });
+
+  await client.replyText("om_123", "已保存报销单", "123e4567-e89b-42d3-a456-426614174000");
+  expect(calls[1]).toMatchObject({
+    url: "https://open.feishu.cn/open-apis/im/v1/messages/om_123/reply",
+    init: {
+      method: "POST",
+      body: JSON.stringify({ msg_type: "text", content: JSON.stringify({ text: "已保存报销单" }), uuid: "123e4567-e89b-42d3-a456-426614174000" }),
+    },
+  });
+});
+
 it("preserves a nonzero Feishu business code returned with HTTP 200 as a terminal rejection", async () => {
   let calls = 0;
   const client = createFeishuBotClient({

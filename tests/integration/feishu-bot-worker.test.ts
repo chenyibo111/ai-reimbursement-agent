@@ -41,9 +41,8 @@ it("persists private and group scopes without creating a draft for a policy-only
   const { runtime, turns } = createRuntime(messages, replies);
 
   await runtime.onEvent(rawEvent("event-private", "om-private", "oc-direct", "p2p"));
-  await expect(runtime.drainOnce()).resolves.toBe(true);
   await runtime.onEvent(rawEvent("event-group", "om-group", "oc-group", "group", ["ou-bot"]));
-  await expect(runtime.drainOnce()).resolves.toBe(true);
+  await drainAll(runtime);
 
   expect(await prisma.claimDraft.count()).toBe(0);
   expect(await prisma.agentConversation.findMany({ orderBy: { kind: "asc" } })).toEqual([
@@ -66,6 +65,7 @@ it("deduplicates a redelivered message before it reaches the conversation turn",
   await runtime.onEvent(rawEvent("event-first", "om-first", "oc-direct", "p2p"));
   await expect(runtime.drainOnce()).resolves.toBe(true);
   await runtime.onEvent(rawEvent("event-redelivered", "om-first", "oc-direct", "p2p"));
+  await expect(runtime.drainOnce()).resolves.toBe(true);
   await expect(runtime.drainOnce()).resolves.toBe(false);
 
   expect(turns).toHaveLength(1);
@@ -112,6 +112,13 @@ function createRuntime(messages: Map<string, FeishuInboundMessage>, replies: str
     turns,
     runtime: createFeishuBotRuntime({ repository, processEvent: process, replyText: client.replyText }),
   };
+}
+
+async function drainAll(runtime: ReturnType<typeof createRuntime>["runtime"]) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    if (!await runtime.drainOnce()) return;
+  }
+  throw new Error("Feishu event queue did not drain");
 }
 
 function rawEvent(eventId: string, messageId: string, chatId: string, chatType: "p2p" | "group", mentions: string[] = []) {

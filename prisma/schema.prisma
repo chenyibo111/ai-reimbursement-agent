@@ -85,6 +85,10 @@ enum InboundChannelEventStatus {
   PROCESSING
   PROCESSED
   RETRYABLE
+  REPLY_PENDING
+  REPLY_PROCESSING
+  REPLY_RETRYABLE
+  REPLY_FAILED
 }
 
 enum PolicyVersionStatus {
@@ -295,6 +299,10 @@ model InboundChannelEvent {
   status           InboundChannelEventStatus @default(PENDING)
   failureCode      String?
   attemptCount     Int                       @default(0)
+  replyText        String?
+  deliveryAttemptCount Int                  @default(0)
+  nextDeliveryAttemptAt DateTime?
+  deliveredAt      DateTime?
   claimId          String?
   claim            ClaimDraft?               @relation(fields: [claimId], references: [id], onDelete: SetNull)
   receivedAt       DateTime                  @default(now())

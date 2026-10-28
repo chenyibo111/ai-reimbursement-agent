@@ -26,14 +26,21 @@ async function main() {
   const prisma = createPrismaClient(databaseUrl);
   await prisma.$connect();
   const repository = new FeishuBotRepository(prisma);
-  await repository.recoverProcessingEvents();
+  const recovery = await repository.recoverProcessingEvents();
+  if (recovery.recovered) logger.warn("reply.delivery.recovered", "已恢复未完成的飞书事件", { count: recovery.recovered });
+  if (recovery.uncertainDeliveryFailed) logger.error("reply.delivery.failed", "飞书回复结果无法确认，已停止自动重试", { count: recovery.uncertainDeliveryFailed, failureCode: "DELIVERY_OUTCOME_UNKNOWN" });
   const client = createFeishuBotClient({ appId: bot.appId, appSecret: bot.appSecret });
   let wsClient: lark.WSClient | undefined;
   const processDeps = createProcessDeps({ prisma, botOpenId: bot.botOpenId, publicAppUrl: bot.publicAppUrl, repository, client });
   const runtime = createFeishuBotRuntime({
     repository,
     processEvent: (input) => processFeishuEvent(input, processDeps),
-    replyText: (messageId, text) => client.replyText(messageId, text),
+    replyText: (messageId, text, uuid) => client.replyText(messageId, text, uuid),
+    onReplyDelivery: ({ status, attempt, failureCode }) => {
+      if (status === "delivered") logger.info("reply.delivery.completed", "飞书回复已投递", { attempt });
+      else if (status === "retrying") logger.warn("reply.delivery.retrying", "飞书回复投递失败，等待重试", { attempt, failureCode });
+      else logger.error("reply.delivery.failed", "飞书回复投递已达到终止条件", { attempt, failureCode });
+    },
     closeConnection: async () => wsClient?.close({ force: true }),
   });
   const dispatcher = new lark.EventDispatcher({ loggerLevel: lark.LoggerLevel.error });
@@ -42,8 +49,16 @@ async function main() {
   await wsClient.start({ eventDispatcher: dispatcher });
   logger.info("worker.started", "飞书机器人 Worker 已启动");
   const heartbeat = createWorkerHeartbeat(logger, { message: "飞书机器人 Worker 心跳正常" });
+  let lastRecoveryAt = Date.now();
   const interval = setInterval(() => {
     heartbeat.emitIfDue();
+    if (Date.now() - lastRecoveryAt >= 60_000) {
+      lastRecoveryAt = Date.now();
+      void repository.recoverProcessingEvents(new Date(Date.now() - 2 * 60_000)).then(({ recovered, uncertainDeliveryFailed }) => {
+        if (recovered) logger.warn("reply.delivery.recovered", "已恢复超时的飞书事件", { count: recovered });
+        if (uncertainDeliveryFailed) logger.error("reply.delivery.failed", "飞书回复结果无法确认，已停止自动重试", { count: uncertainDeliveryFailed, failureCode: "DELIVERY_OUTCOME_UNKNOWN" });
+      }).catch(() => logger.error("event.recovery.failed", "飞书事件恢复检查失败", { failureCode: "RECOVERY_FAILED" }));
+    }
     void runtime.drainOnce().catch(() => logger.warn("event.drain.failed", "飞书事件队列处理失败", { failureCode: "event_drain_failed" }));
   }, 800);
   let stopping = false;

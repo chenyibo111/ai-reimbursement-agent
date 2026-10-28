@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 
-import { resolveIntentEvalModelConfig, runIntentEvalCli } from "@/scripts/eval-intent";
+import { checkIntentEvalGate, resolveIntentEvalModelConfig, runIntentEvalCli } from "@/scripts/eval-intent";
 
 it("refuses fixture and incomplete providers for a real-model run", () => {
   expect(() => resolveIntentEvalModelConfig({ MODEL_PROVIDER: "fixture" })).toThrow("openai-compatible");
@@ -27,4 +27,14 @@ it("supports a bounded smoke run without labeling it as the full holdout", async
   const report = await runIntentEvalCli({ datasetText: `${caseText}\n${caseText.replace("sample-1", "sample-2")}`, datasetVersion: "holdout", modelName: "test-model", maxCases: 1, decide: async () => ({ action: "POLICY_QUERY", reply: "ok" }), write: (line) => output.push(line) });
   expect(report.total).toBe(1);
   expect(output.join("\n")).toContain('"sampled":true');
+});
+
+it("fails the current holdout gate for a correct action with a wrong write target", async () => {
+  const report = await runIntentEvalCli({
+    datasetText: '{"id":"target","message":"编辑 BX20261024-0004","history":[],"intakeStatus":null,"channel":"FEISHU","expectedAction":"SELECT_EDIT_CLAIM","expectedDecision":{"claimNumber":"BX20261024-0004"},"riskTags":["wrong_claim"]}',
+    datasetVersion: "holdout-v3", modelName: "fixture-model",
+    decide: async () => ({ action: "SELECT_EDIT_CLAIM", reply: "ok", claimNumber: "BX20261024-0003" }), write: () => {},
+  });
+  expect(checkIntentEvalGate(report).passed).toBe(false);
+  expect(checkIntentEvalGate(report).reasons).toContain("dangerous_write_target_errors");
 });

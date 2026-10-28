@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { FeishuProcessingResult } from "@/src/application/process-feishu-event";
 import type { ClaimedInboundEvent, RecordInboundEvent } from "@/src/infrastructure/prisma/feishu-bot-repository";
 
@@ -25,9 +27,14 @@ export function createFeishuBotRuntime(deps: {
     claimNextPending(): Promise<ClaimedInboundEvent | null>;
     markProcessed(id: string): Promise<void>;
     markRetryableFailure(id: string, code: string): Promise<void>;
+    markReplyPending(id: string, text: string): Promise<void>;
+    markReplyDelivered(id: string): Promise<void>;
+    markReplyRetryableFailure(id: string, code: string): Promise<void>;
+    markReplyFailed(id: string, code: string): Promise<void>;
   };
   processEvent(input: { eventId: string }): Promise<FeishuProcessingResult>;
-  replyText(messageId: string, text: string): Promise<void>;
+  replyText(messageId: string, text: string, uuid: string): Promise<void>;
+  onReplyDelivery?: (result: { status: "delivered" | "retrying" | "failed"; attempt: number; failureCode?: string }) => void;
   closeConnection?: () => Promise<void>;
 }): FeishuBotRuntime {
   let stopped = false;
@@ -65,38 +72,59 @@ async function drain(
   if (isStopped()) return false;
   const inbound = await deps.repository.claimNextPending();
   if (!inbound) return false;
+  if (inbound.status === "REPLY_PROCESSING") {
+    if (!inbound.messageId || !inbound.replyText) {
+      await deps.repository.markReplyFailed(inbound.id, "INVALID_REPLY");
+      deps.onReplyDelivery?.({ status: "failed", attempt: inbound.deliveryAttemptCount, failureCode: "INVALID_REPLY" });
+      return true;
+    }
+    try {
+      await deps.replyText(inbound.messageId, inbound.replyText, replyUuid(inbound.messageId));
+      await deps.repository.markReplyDelivered(inbound.id);
+      deps.onReplyDelivery?.({ status: "delivered", attempt: inbound.deliveryAttemptCount });
+    } catch (error) {
+      const failureCode = providerFailureCode(error);
+      if (inbound.deliveryAttemptCount >= 5) {
+        await deps.repository.markReplyFailed(inbound.id, failureCode);
+        deps.onReplyDelivery?.({ status: "failed", attempt: inbound.deliveryAttemptCount, failureCode });
+      } else {
+        await deps.repository.markReplyRetryableFailure(inbound.id, failureCode);
+        deps.onReplyDelivery?.({ status: "retrying", attempt: inbound.deliveryAttemptCount, failureCode });
+      }
+    }
+    return true;
+  }
   try {
     const result = await deps.processEvent({ eventId: inbound.eventId });
     if (result.kind === "RETRYABLE_FAILURE" && result.retryable) {
       if (inbound.attemptCount >= 3) {
-        await deps.repository.markProcessed(inbound.id);
-        if (inbound.messageId) {
-          try {
-            await deps.replyText(inbound.messageId, result.replyText);
-          } catch {
-            // The terminal business state is durable even if the provider reply fails.
-          }
-        }
+        if (inbound.messageId) await deps.repository.markReplyPending(inbound.id, result.replyText);
+        else await deps.repository.markProcessed(inbound.id);
         return true;
       }
       await deps.repository.markRetryableFailure(inbound.id, "RETRYABLE_FAILURE");
       return true;
     }
 
-    await deps.repository.markProcessed(inbound.id);
     const reply = replyFor(result);
-    if (reply && inbound.messageId) {
-      try {
-        await deps.replyText(inbound.messageId, reply);
-      } catch {
-        // Business state is already durable. Do not replay the event merely because a reply failed.
-      }
-    }
+    if (reply && inbound.messageId) await deps.repository.markReplyPending(inbound.id, reply);
+    else await deps.repository.markProcessed(inbound.id);
     return true;
   } catch {
-    await deps.repository.markRetryableFailure(inbound.id, "PROCESSING_FAILED");
+    if (inbound.attemptCount >= 3 && inbound.messageId) await deps.repository.markReplyPending(inbound.id, "消息暂未处理完成，请稍后重试或在工作台继续。");
+    else await deps.repository.markRetryableFailure(inbound.id, "PROCESSING_FAILED");
     return true;
   }
+}
+
+function replyUuid(messageId: string): string {
+  const hex = createHash("sha256").update(`feishu-reply:${messageId}`).digest("hex").slice(0, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20)}`;
+}
+
+function providerFailureCode(error: unknown): string {
+  if (error && typeof error === "object" && "code" in error && typeof error.code === "string") return error.code.slice(0, 80);
+  return "DELIVERY_UNAVAILABLE";
 }
 
 function normalizeInbound(event: RawFeishuMessageEvent): RecordInboundEvent | null {
