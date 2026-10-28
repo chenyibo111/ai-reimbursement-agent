@@ -223,6 +223,31 @@ describe("OpenAiCompatibleChatModel", () => {
     await expect(makeModel({ action: "READ_CLAIM", reply: "查询", receiptOrdinal: 2 }).decideConversation(context)).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
   });
 
+  it("preserves a claim number supplied with a receipt deletion for server-side target verification", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: '{"action":"DELETE_RECEIPT","reply":"预览","claimNumber":"bx20261024-0008","receiptOrdinal":3}' } }] }), { status: 200 }));
+    const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "secret", fetchImpl });
+    await expect(model.decideConversation({ summary: { text: "", throughSequence: 0 }, messages: [], intake: null, policyCitations: [], allowedFields: [] })).resolves.toMatchObject({ action: "DELETE_RECEIPT", claimNumber: "BX20261024-0008", receiptOrdinal: 3 });
+  });
+
+  it.each([
+    ['{action:"START_INTAKE",reply:"新建"}', '{"action":"START_INTAKE","reply":"新建"}'],
+    ['{"action":"READ_CLAIM","reply":"查询","targetReference":"CURRENT_INTAKE"}', '{"action":"READ_CLAIM","reply":"查询"}'],
+  ])("retries one invalid conversation response before any tool action", async (first, second) => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: first } }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: second } }] }), { status: 200 }));
+    const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "secret", fetchImpl });
+    await expect(model.decideConversation({ summary: { text: "", throughSequence: 0 }, messages: [], intake: null, policyCitations: [], allowedFields: [] })).resolves.toMatchObject({ action: JSON.parse(second).action });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects a second invalid conversation response without further retries", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: '{action:"HELP"}' } }] }), { status: 200 }));
+    const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "secret", fetchImpl });
+    await expect(model.decideConversation({ summary: { text: "", throughSequence: 0 }, messages: [], intake: null, policyCitations: [], allowedFields: [] })).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     ["unauthorized", new Response("provider detail", { status: 401 })],
     ["empty choices", new Response(JSON.stringify({ choices: [] }), { status: 200 })],

@@ -6,7 +6,7 @@ export type FeishuBotClient = {
   getMessage(messageId: string): Promise<FeishuMessageContent>;
   downloadResource(messageId: string, fileKey: string, type: "image" | "file"): Promise<{ bytes: Uint8Array; filename: string; mimeType: string }>;
   sendText(chatId: string, text: string, uuid: string): Promise<void>;
-  replyText(messageId: string, text: string): Promise<void>;
+  replyText(messageId: string, text: string, uuid?: string): Promise<void>;
   replyCard(messageId: string, card: FeishuReplyCard): Promise<void>;
 };
 
@@ -84,19 +84,19 @@ export function createFeishuBotClient(config: {
       if (!response.ok) throw providerError(response.status);
       if (isProviderFailure(payload)) throw providerRejection(payload);
     },
-    async replyText(messageId, text) {
-      await reply(messageId, "text", JSON.stringify({ text }));
+    async replyText(messageId, text, uuid) {
+      await reply(messageId, "text", JSON.stringify({ text }), uuid);
     },
     async replyCard(messageId, card) {
       await reply(messageId, "interactive", JSON.stringify(card));
     },
   };
 
-  async function reply(messageId: string, msgType: "text" | "interactive", content: string) {
+  async function reply(messageId: string, msgType: "text" | "interactive", content: string, uuid?: string) {
     const response = await authorizedFetch(`/open-apis/im/v1/messages/${encodeURIComponent(messageId)}/reply`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ msg_type: msgType, content }),
+      body: JSON.stringify({ msg_type: msgType, content, ...(uuid ? { uuid } : {}) }),
     });
     const payload = await parseJson(response);
     if (!response.ok) throw providerError(response.status);

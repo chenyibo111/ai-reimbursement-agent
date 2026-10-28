@@ -1,10 +1,11 @@
 import { expect, it } from "vitest";
 
 import { createFeishuBotRuntime } from "@/src/worker/feishu-bot-runtime";
+import type { ClaimedInboundEvent } from "@/src/infrastructure/prisma/feishu-bot-repository";
 
 function fixture() {
   const calls = { record: 0, recorded: [] as unknown[], processed: 0, retryable: 0, process: 0, replies: 0, close: 0 };
-  const pending = [{ id: "inbound-1", eventId: "event-1", messageId: "om-1", messageType: "text", chatId: "oc-1", senderOpenId: "ou-1", chatType: "p2p", mentionedOpenIds: [], status: "PROCESSING" as const, claimId: null, attemptCount: 1 }];
+  const pending: ClaimedInboundEvent[] = [{ id: "inbound-1", eventId: "event-1", messageId: "om-1", messageType: "text", chatId: "oc-1", senderOpenId: "ou-1", chatType: "p2p", mentionedOpenIds: [], status: "PROCESSING", claimId: null, attemptCount: 1, replyText: null, deliveryAttemptCount: 0 }];
   const runtime = createFeishuBotRuntime({
     repository: {
       recordInbound: async (input) => {
@@ -15,6 +16,10 @@ function fixture() {
       claimNextPending: async () => pending.shift() ?? null,
       markProcessed: async () => { calls.processed += 1; },
       markRetryableFailure: async () => { calls.retryable += 1; },
+      markReplyPending: async (_id, replyText) => { pending.push({ id: "inbound-1", eventId: "event-1", messageId: "om-1", messageType: "text", chatId: "oc-1", senderOpenId: "ou-1", chatType: "p2p", mentionedOpenIds: [], status: "REPLY_PROCESSING", claimId: null, attemptCount: 1, replyText, deliveryAttemptCount: 1 }); },
+      markReplyDelivered: async () => { calls.processed += 1; },
+      markReplyRetryableFailure: async () => { calls.retryable += 1; },
+      markReplyFailed: async () => { throw new Error("unexpected terminal delivery failure"); },
     },
     processEvent: async () => {
       calls.process += 1;
@@ -43,12 +48,15 @@ it("persists a long-connection event once and does not process inside the callba
   expect(calls.process).toBe(0);
 });
 
-it("marks a successfully processed event before sending its safe reply", async () => {
+it("persists the reply before sending and marks it delivered only afterward", async () => {
   const { runtime, calls } = fixture();
 
   await expect(runtime.drainOnce()).resolves.toBe(true);
-
   expect(calls.process).toBe(1);
+  expect(calls.processed).toBe(0);
+  expect(calls.replies).toBe(0);
+  await expect(runtime.drainOnce()).resolves.toBe(true);
+
   expect(calls.processed).toBe(1);
   expect(calls.replies).toBe(1);
   expect(calls.retryable).toBe(0);
@@ -59,9 +67,13 @@ it("returns retryable processing failures to the pending queue", async () => {
   const retryable = createFeishuBotRuntime({
     repository: {
       recordInbound: async () => ({ id: "inbound-1", shouldProcess: true }),
-      claimNextPending: async () => ({ id: "inbound-1", eventId: "event-1", messageId: "om-1", messageType: "text", chatId: "oc-1", senderOpenId: "ou-1", chatType: "p2p", mentionedOpenIds: [], status: "PROCESSING", claimId: null, attemptCount: 1 }),
+      claimNextPending: async () => ({ id: "inbound-1", eventId: "event-1", messageId: "om-1", messageType: "text", chatId: "oc-1", senderOpenId: "ou-1", chatType: "p2p", mentionedOpenIds: [], status: "PROCESSING", claimId: null, attemptCount: 1, replyText: null, deliveryAttemptCount: 0 }),
       markProcessed: async () => { calls.processed += 1; },
       markRetryableFailure: async (_id, code) => { expect(code).toBe("RETRYABLE_FAILURE"); calls.retryable += 1; },
+      markReplyPending: async () => { throw new Error("not yet terminal"); },
+      markReplyDelivered: async () => {},
+      markReplyRetryableFailure: async () => {},
+      markReplyFailed: async () => {},
     },
     processEvent: async () => ({ kind: "RETRYABLE_FAILURE", retryable: true, replyText: "稍后重试" }),
     replyText: async () => { calls.replies += 1; },
@@ -73,14 +85,18 @@ it("returns retryable processing failures to the pending queue", async () => {
   expect(calls.processed).toBe(0);
 });
 
-it("notifies the user and releases the queue after three retryable failures", async () => {
+it("persists a final user notice after three retryable business failures", async () => {
   const { calls } = fixture();
   const runtime = createFeishuBotRuntime({
     repository: {
       recordInbound: async () => ({ id: "inbound-1", shouldProcess: true }),
-      claimNextPending: async () => ({ id: "inbound-1", eventId: "event-1", messageId: "om-1", messageType: "file", chatId: "oc-1", senderOpenId: "ou-1", chatType: "p2p", mentionedOpenIds: [], status: "PROCESSING", claimId: null, attemptCount: 3 }),
+      claimNextPending: async () => ({ id: "inbound-1", eventId: "event-1", messageId: "om-1", messageType: "file", chatId: "oc-1", senderOpenId: "ou-1", chatType: "p2p", mentionedOpenIds: [], status: "PROCESSING", claimId: null, attemptCount: 3, replyText: null, deliveryAttemptCount: 0 }),
       markProcessed: async () => { calls.processed += 1; },
       markRetryableFailure: async () => { calls.retryable += 1; },
+      markReplyPending: async (_id, text) => { expect(text).toBe("附件暂未上传完成，请重新发送。"); calls.processed += 1; },
+      markReplyDelivered: async () => {},
+      markReplyRetryableFailure: async () => {},
+      markReplyFailed: async () => {},
     },
     processEvent: async () => ({ kind: "RETRYABLE_FAILURE", retryable: true, replyText: "附件暂未上传完成，请重新发送。" }),
     replyText: async () => { calls.replies += 1; },
@@ -90,10 +106,10 @@ it("notifies the user and releases the queue after three retryable failures", as
 
   expect(calls.retryable).toBe(0);
   expect(calls.processed).toBe(1);
-  expect(calls.replies).toBe(1);
+  expect(calls.replies).toBe(0);
 });
 
-it("keeps a completed business event processed when sending the reply fails", async () => {
+it("keeps a completed business reply queued when sending fails", async () => {
   const { calls, pending } = fixture();
   const runtime = createFeishuBotRuntime({
     repository: {
@@ -101,15 +117,81 @@ it("keeps a completed business event processed when sending the reply fails", as
       claimNextPending: async () => pending.shift() ?? null,
       markProcessed: async () => { calls.processed += 1; },
       markRetryableFailure: async () => { calls.retryable += 1; },
+      markReplyPending: async (_id, replyText) => { pending.push({ id: "inbound-1", eventId: "event-1", messageId: "om-1", messageType: "text", chatId: "oc-1", senderOpenId: "ou-1", chatType: "p2p", mentionedOpenIds: [], status: "REPLY_PROCESSING", claimId: null, attemptCount: 1, replyText, deliveryAttemptCount: 1 }); },
+      markReplyDelivered: async () => { calls.processed += 1; },
+      markReplyRetryableFailure: async () => { calls.retryable += 1; },
+      markReplyFailed: async () => {},
     },
     processEvent: async () => ({ kind: "AGENT_REPLIED", claimId: "claim-1", replyText: "草稿链接" }),
     replyText: async () => { throw new Error("provider body must not escape"); },
   });
 
   await runtime.drainOnce();
+  await runtime.drainOnce();
 
-  expect(calls.processed).toBe(1);
-  expect(calls.retryable).toBe(0);
+  expect(calls.processed).toBe(0);
+  expect(calls.retryable).toBe(1);
+});
+
+it("persists the business reply and retries its delivery without running the business turn again", async () => {
+  let stage: "business" | "delivery" | "retry" | "done" = "business";
+  let processed = 0;
+  let delivered = 0;
+  const attempts: Array<{ messageId: string; text: string; uuid: string }> = [];
+  const runtime = createFeishuBotRuntime({
+    repository: {
+      recordInbound: async () => ({ id: "inbound-1", shouldProcess: true }),
+      claimNextPending: async () => {
+        const base = { id: "inbound-1", eventId: "event-1", messageId: "om-1", messageType: "text", chatId: "oc-1", senderOpenId: "ou-1", chatType: "p2p", mentionedOpenIds: [], claimId: null, attemptCount: 1 };
+        if (stage === "business") return { ...base, status: "PROCESSING" as const, replyText: null, deliveryAttemptCount: 0 };
+        if (stage === "delivery" || stage === "retry") return { ...base, status: "REPLY_PROCESSING" as const, replyText: "报销已保存", deliveryAttemptCount: stage === "delivery" ? 1 : 2 };
+        return null;
+      },
+      markReplyPending: async (_id, text) => { expect(text).toBe("报销已保存"); stage = "delivery"; },
+      markReplyRetryableFailure: async () => { stage = "retry"; },
+      markReplyDelivered: async () => { stage = "done"; delivered += 1; },
+      markReplyFailed: async () => { throw new Error("must not fail terminally"); },
+      markProcessed: async () => { throw new Error("business cannot mark delivered before sending"); },
+      markRetryableFailure: async () => { throw new Error("business must not be replayed after a send failure"); },
+    },
+    processEvent: async () => { processed += 1; return { kind: "AGENT_REPLIED", claimId: "claim-1", replyText: "报销已保存" }; },
+    replyText: async (messageId, text, uuid) => { attempts.push({ messageId, text, uuid }); if (attempts.length === 1) throw new Error("network timeout after send"); },
+  });
+
+  await runtime.drainOnce();
+  await runtime.drainOnce();
+  await runtime.drainOnce();
+
+  expect(processed).toBe(1);
+  expect(delivered).toBe(1);
+  expect(attempts).toHaveLength(2);
+  expect(attempts[0]).toEqual(attempts[1]);
+  expect(attempts[0].uuid).toMatch(/^[0-9a-f-]{36}$/);
+});
+
+it("ends delivery after five failed sends and reports the terminal failure", async () => {
+  let terminal = false;
+  const reports: Array<{ status: string; attempt: number; failureCode?: string }> = [];
+  const runtime = createFeishuBotRuntime({
+    repository: {
+      recordInbound: async () => ({ id: "inbound-1", shouldProcess: true }),
+      claimNextPending: async () => terminal ? null : { id: "inbound-1", eventId: "event-1", messageId: "om-1", messageType: "text", chatId: "oc-1", senderOpenId: "ou-1", chatType: "p2p", mentionedOpenIds: [], status: "REPLY_PROCESSING", claimId: null, attemptCount: 1, replyText: "结果", deliveryAttemptCount: 5 },
+      markProcessed: async () => {},
+      markRetryableFailure: async () => {},
+      markReplyPending: async () => {},
+      markReplyDelivered: async () => { throw new Error("unexpected delivery"); },
+      markReplyRetryableFailure: async () => { throw new Error("unexpected retry"); },
+      markReplyFailed: async (_id, code) => { expect(code).toBe("UNAVAILABLE"); terminal = true; },
+    },
+    processEvent: async () => { throw new Error("business must not rerun"); },
+    replyText: async () => { throw Object.assign(new Error("provider detail"), { code: "UNAVAILABLE" }); },
+    onReplyDelivery: (result) => reports.push(result),
+  });
+
+  await runtime.drainOnce();
+  expect(terminal).toBe(true);
+  expect(reports).toEqual([{ status: "failed", attempt: 5, failureCode: "UNAVAILABLE" }]);
+  await expect(runtime.drainOnce()).resolves.toBe(false);
 });
 
 it("stops new work and closes the long connection during graceful shutdown", async () => {

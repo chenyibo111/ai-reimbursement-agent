@@ -45,3 +45,12 @@ groups:
           service: observability
         annotations:
           summary: Loki 或 Alloy 日志采集链路出现错误
+
+      - alert: FeishuReplyDeliveryFailed
+        expr: sum(count_over_time({service="feishu-bot-worker", event="reply.delivery.failed"}[5m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+          service: feishu-bot-worker
+        annotations:
+          summary: 飞书机器人回复投递终止，请检查失败事件并人工处理

@@ -35,3 +35,9 @@ it("provisions Grafana with the internal Loki datasource", async () => {
   expect(datasource).toContain("name: Loki");
   expect(datasource).toContain("url: http://loki:3100");
 });
+
+it("alerts on terminal Feishu reply failures using the Docker service label", async () => {
+  const rules = await readFile(new URL("../../observability/loki-rules.yml", import.meta.url), "utf8");
+  expect(rules).toContain("alert: FeishuReplyDeliveryFailed");
+  expect(rules).toContain('{service="feishu-bot-worker", event="reply.delivery.failed"}');
+});
