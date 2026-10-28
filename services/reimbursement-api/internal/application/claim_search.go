@@ -33,6 +33,7 @@ type SearchClaimsQuery struct {
 	MaxRequestedAmountCent *int64
 	Sort                   string
 	Limit                  int
+	Page                   int `json:"-"` // Keep this out of legacy cursor fingerprints.
 	Cursor                 string
 	CountOnly              bool
 	AfterValue             string
@@ -65,7 +66,8 @@ func (service *ClaimService) SearchClaims(ctx context.Context, actorID string, q
 	if query.Limit == 0 {
 		query.Limit = 5
 	}
-	if query.Limit < 1 || query.Limit > 100 ||
+	if query.Limit < 1 || query.Limit > 100 || query.Page < 0 || query.Page > 10000 ||
+		(query.Page > 0 && (query.Cursor != "" || query.CountOnly)) ||
 		(query.Status != "" && query.Status != string(domain.ClaimStatusDraft) && query.Status != string(domain.ClaimStatusSubmitted)) ||
 		(query.Sort != ClaimSearchCreatedDesc && query.Sort != ClaimSearchCreatedAsc && query.Sort != ClaimSearchAmountDesc && query.Sort != ClaimSearchAmountAsc) ||
 		(!query.CreatedFrom.IsZero() && !query.CreatedBefore.IsZero() && !query.CreatedFrom.Before(query.CreatedBefore)) ||
@@ -77,7 +79,7 @@ func (service *ClaimService) SearchClaims(ctx context.Context, actorID string, q
 	}
 	// A cursor belongs to one authenticated owner's exact filter set. Page size may change.
 	fingerprintQuery := query
-	fingerprintQuery.Limit, fingerprintQuery.Cursor, fingerprintQuery.CountOnly = 0, "", false
+	fingerprintQuery.Limit, fingerprintQuery.Page, fingerprintQuery.Cursor, fingerprintQuery.CountOnly = 0, 0, "", false
 	fingerprintQuery.AfterValue, fingerprintQuery.AfterID, fingerprintQuery.AfterNull = "", "", false
 	fingerprintInput, _ := json.Marshal(struct {
 		Owner string
@@ -121,7 +123,7 @@ func (service *ClaimService) SearchClaims(ctx context.Context, actorID string, q
 		return page, nil
 	}
 	more := len(claims) > query.Limit
-	if more {
+	if more && query.Page == 0 {
 		claims = claims[:query.Limit]
 	}
 	for _, claim := range claims {

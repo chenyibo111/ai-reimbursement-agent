@@ -223,13 +223,21 @@ func (repository *PostgresClaimRepository) SearchOwned(ctx context.Context, acto
 			conditions = append(conditions, fmt.Sprintf("(requested_amount_cent IS NULL OR requested_amount_cent %s $%d OR (requested_amount_cent = $%d AND id > $%d))", comparison, len(args)-1, len(args)-1, len(args)))
 		}
 	}
-	args = append(args, query.Limit+1)
+	rowLimit := query.Limit + 1
+	if query.Page > 0 {
+		rowLimit = query.Limit
+	}
+	args = append(args, rowLimit)
 	statement := fmt.Sprintf("SELECT id FROM reimbursement.claims WHERE %s ORDER BY %s LIMIT $%d", strings.Join(conditions, " AND "), order, len(args))
+	if query.Page > 0 {
+		args = append(args, (query.Page-1)*query.Limit)
+		statement += fmt.Sprintf(" OFFSET $%d", len(args))
+	}
 	rows, err := repository.pool.Query(ctx, statement, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("search owned claim ids: %w", err)
 	}
-	ids := make([]string, 0, query.Limit+1)
+	ids := make([]string, 0, rowLimit)
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {

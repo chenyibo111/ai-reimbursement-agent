@@ -13,6 +13,14 @@ func TestClaimSearchRejectsInvalidFiltersWithoutFallingBackToList(t *testing.T) 
 		"/api/v1/claims?search=true&limit=101",
 		"/api/v1/claims?search=true&cursor=bad",
 		"/api/v1/claims?createdFrom=2026-10-10&createdBefore=2026-10-01",
+		"/api/v1/claims?page=0",
+		"/api/v1/claims?page=-1",
+		"/api/v1/claims?page=10001",
+		"/api/v1/claims?page=abc",
+		"/api/v1/claims?page=1&cursor=bad",
+		"/api/v1/claims?page=1&cursor=",
+		"/api/v1/claims?page=1&countOnly=true",
+		"/api/v1/claims?page=1&countOnly=",
 	} {
 		request := httptest.NewRequest(http.MethodGet, path, nil)
 		request.Header.Set("Authorization", "Bearer employee-1")

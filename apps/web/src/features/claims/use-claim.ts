@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { reimbursementApi } from "../../api/client";
 import type { ClaimPatch, ClaimSearchQuery } from "../../api/generated/reimbursement";
@@ -15,11 +15,9 @@ export function shouldRefreshClaimAfterReceiptTransition(wasPending: boolean, is
 }
 
 export function useClaims(query: Omit<ClaimSearchQuery, "cursor">) {
-  return useInfiniteQuery({
+  return useQuery({
     queryKey: [...claimKeys.all, "search", query],
-    initialPageParam: null as string | null,
-    queryFn: ({ pageParam }) => reimbursementApi.searchClaims({ ...query, ...(pageParam ? { cursor: pageParam } : {}) }),
-    getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
+    queryFn: () => reimbursementApi.searchClaims(query),
   });
 }
 

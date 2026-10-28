@@ -120,7 +120,7 @@ paths:
         - name: search
           in: query
           schema: { type: boolean }
-          description: Return an owned, filtered cursor page with totalCount and nextCursor. Exact claimNumber lookup keeps its existing response.
+          description: Return an owned, filtered cursor or numbered page with totalCount and nextCursor. Exact claimNumber lookup keeps its existing response.
         - name: limit
           in: query
           required: false
@@ -154,6 +154,11 @@ paths:
         - name: cursor
           in: query
           schema: { type: string }
+          description: Cursor mode only; cannot be combined with page.
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 10000 }
+          description: One-based numbered page; cannot be combined with cursor or countOnly. Numbered pages return an empty nextCursor.
         - name: countOnly
           in: query
           schema: { type: boolean }

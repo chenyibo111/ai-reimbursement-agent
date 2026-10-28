@@ -62,10 +62,42 @@ func TestSearchClaimsRejectsInvalidFiltersAndExcludesNullAmounts(t *testing.T) {
 		{Limit: 101},
 		{Limit: 5, MinRequestedAmountCent: &minimum, MaxRequestedAmountCent: func() *int64 { n := int64(-1); return &n }()},
 		{Limit: 5, Cursor: "invalid"},
+		{Limit: 5, Page: -1},
+		{Limit: 5, Page: 10001},
+		{Limit: 5, Page: 1, CountOnly: true},
 		{Limit: 5, CreatedFrom: time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC), CreatedBefore: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)},
 	} {
 		if _, err := service.SearchClaims(context.Background(), "employee-1", query); !errors.Is(err, ErrInvalidClaimSearch) {
 			t.Fatalf("query %#v returned %v", query, err)
 		}
+	}
+}
+
+func TestSearchClaimsNumberedPagesDoNotReturnCursor(t *testing.T) {
+	repository := NewMemoryClaimRepository()
+	service := newClaimServiceForTest(repository)
+	for i := 0; i < 12; i++ {
+		if _, err := service.CreateClaim(context.Background(), "employee-1", CreateClaimCommand{Purpose: fmt.Sprintf("travel-%02d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := service.CreateClaim(context.Background(), "employee-2", CreateClaimCommand{Purpose: "foreign"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := service.SearchClaims(context.Background(), "employee-1", SearchClaimsQuery{Page: 1, Limit: 10})
+	if err != nil || first.TotalCount != 12 || len(first.Items) != 10 || first.NextCursor != "" {
+		t.Fatalf("first numbered page: %#v %v", first, err)
+	}
+	second, err := service.SearchClaims(context.Background(), "employee-1", SearchClaimsQuery{Page: 2, Limit: 10})
+	if err != nil || second.TotalCount != 12 || len(second.Items) != 2 || second.NextCursor != "" {
+		t.Fatalf("second numbered page: %#v %v", second, err)
+	}
+	if second.Items[0].ID == first.Items[0].ID {
+		t.Fatal("numbered pages overlap")
+	}
+	if _, err := service.SearchClaims(context.Background(), "employee-1", SearchClaimsQuery{Page: 1, Limit: 10, Cursor: "x"}); !errors.Is(err, ErrInvalidClaimSearch) {
+		t.Fatalf("page/cursor combination: %v", err)
 	}
 }

@@ -35,9 +35,9 @@ function amountInCent(value: string): number | null {
   return Number(yuan) * 100 + Number(fraction.padEnd(2, "0"));
 }
 
-function toQuery(filters: Filters): Omit<ClaimSearchQuery, "cursor"> {
+function toQuery(filters: Filters, page: number): Omit<ClaimSearchQuery, "cursor"> {
   return {
-    limit: 10, sort: filters.sort,
+    limit: 10, page, sort: filters.sort,
     ...(filters.status ? { status: filters.status } : {}),
     ...(filters.purposeContains.trim() ? { purposeContains: filters.purposeContains.trim() } : {}),
     ...(filters.expenseCategory.trim() ? { expenseCategory: filters.expenseCategory.trim() } : {}),
@@ -46,6 +46,19 @@ function toQuery(filters: Filters): Omit<ClaimSearchQuery, "cursor"> {
     ...(filters.minAmount ? { minRequestedAmountCent: amountInCent(filters.minAmount)! } : {}),
     ...(filters.maxAmount ? { maxRequestedAmountCent: amountInCent(filters.maxAmount)! } : {}),
   };
+}
+
+function readPage(params: URLSearchParams): number {
+  const raw = params.get("page");
+  if (!raw || !/^[1-9]\d{0,4}$/.test(raw)) return 1;
+  const page = Number(raw);
+  return page <= 10000 ? page : 1;
+}
+
+function visiblePages(page: number, totalPages: number): Array<number | "…"> {
+  const pages = new Set([1, 2, page - 1, page, page + 1, totalPages - 1, totalPages]);
+  const valid = [...pages].filter((value) => value >= 1 && value <= totalPages).sort((a, b) => a - b);
+  return valid.flatMap((value, index) => index && value > valid[index - 1] + 1 ? ["…" as const, value] : [value]);
 }
 
 function toParams(filters: Filters): URLSearchParams {
@@ -60,12 +73,55 @@ function toParams(filters: Filters): URLSearchParams {
 export function ClaimListPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const searchKey = searchParams.toString();
+  const filterKey = toParams(readFilters(searchParams)).toString();
   const [draft, setDraft] = useState<Filters>(() => readFilters(searchParams));
   const [filterError, setFilterError] = useState<string | null>(null);
-  useEffect(() => { setDraft(readFilters(new URLSearchParams(searchKey))); setFilterError(null); }, [searchKey]);
-  const claimsQuery = useClaims(toQuery(readFilters(searchParams)));
-  const items = [...new Map((claimsQuery.data?.pages.flatMap((page) => page.items) ?? []).map((claim) => [claim.id, claim])).values()];
-  const total = claimsQuery.data?.pages.at(-1)?.totalCount;
+  const [jumpInput, setJumpInput] = useState("");
+  const [jumpError, setJumpError] = useState<string | null>(null);
+  useEffect(() => { setDraft(readFilters(new URLSearchParams(filterKey))); setFilterError(null); }, [filterKey]);
+  const page = readPage(searchParams);
+  const claimsQuery = useClaims(toQuery(readFilters(searchParams), page));
+  const items = claimsQuery.data?.items ?? [];
+  const total = claimsQuery.data?.totalCount;
+  const totalPages = Math.max(1, Math.min(10000, Math.ceil((total ?? 0) / 10)));
+
+  useEffect(() => {
+    const raw = searchParams.get("page");
+    if (raw !== null && (readPage(searchParams) === 1 && raw !== "1")) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("page");
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchKey, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (total !== undefined && page > totalPages) {
+      const next = new URLSearchParams(searchParams);
+      if (totalPages === 1) next.delete("page"); else next.set("page", String(totalPages));
+      setSearchParams(next, { replace: true });
+    }
+  }, [page, total, totalPages, searchKey, searchParams, setSearchParams]);
+
+  function goToPage(nextPage: number) {
+    if (nextPage < 1 || nextPage > totalPages || nextPage === page) return;
+    setJumpError(null);
+    setJumpInput("");
+    const next = new URLSearchParams(searchParams);
+    if (nextPage === 1) next.delete("page"); else next.set("page", String(nextPage));
+    setSearchParams(next);
+  }
+
+  function jumpToPage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const target = jumpInput.trim();
+    if (!/^[1-9]\d*$/.test(target) || Number(target) > totalPages) {
+      setJumpError(`页码需在 1–${totalPages} 之间。`);
+      return;
+    }
+    setJumpError(null);
+    if (Number(target) === page) { setJumpInput(""); return; }
+    goToPage(Number(target));
+  }
 
   function applyFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -110,7 +166,7 @@ export function ClaimListPage() {
         {filterError && <p className="field-error" role="alert">{filterError}</p>}
         {claimsQuery.isPending && <p className="empty-state" role="status">正在读取你的报销单…</p>}
         {claimsQuery.isError && items.length === 0 && <p className="field-error" role="alert">读取报销单失败。请检查连接后重试。 <button className="text-action" type="button" onClick={() => void claimsQuery.refetch()}>重新加载</button></p>}
-        {claimsQuery.data && items.length === 0 && <p className="empty-state">{searchKey ? "没有符合条件的报销单。可调整条件或清除筛选。" : "尚无报销草稿。创建一份卷宗即可从上传票据开始。"}</p>}
+        {claimsQuery.data && items.length === 0 && page <= totalPages && <p className="empty-state">{filterKey ? "没有符合条件的报销单。可调整条件或清除筛选。" : "尚无报销草稿。创建一份卷宗即可从上传票据开始。"}</p>}
         <div className="claim-grid">
           {items.map((claim) => (
             <Link className="claim-card" key={claim.id} to={`/claims/${claim.id}`}>
@@ -127,8 +183,21 @@ export function ClaimListPage() {
             </Link>
           ))}
         </div>
-        {claimsQuery.data && <div className="claim-list-footer"><span className="quiet-count">已显示 {items.length} / {total ?? items.length} 条</span>{claimsQuery.hasNextPage && <button className="secondary-action" type="button" disabled={claimsQuery.isFetchingNextPage} aria-busy={claimsQuery.isFetchingNextPage} onClick={() => void claimsQuery.fetchNextPage()}>{claimsQuery.isFetchingNextPage ? "正在加载…" : "加载更多报销单"}</button>}</div>}
-        {claimsQuery.isFetchNextPageError && <p className="field-error" role="alert">下一批单据加载失败，请重试。</p>}
+        {claimsQuery.data && page <= totalPages && <div className="claim-list-footer">
+          <span className="quiet-count">{total === 0 ? "共 0 条" : `第 ${(page - 1) * 10 + 1}–${(page - 1) * 10 + items.length} 条 / 共 ${total} 条`}</span>
+          {totalPages > 1 && <div className="claim-pagination-controls">
+            <nav className="claim-pagination" aria-label="报销单分页">
+              <button className="secondary-action" type="button" disabled={page === 1} onClick={() => goToPage(page - 1)}>上一页</button>
+              {visiblePages(page, totalPages).map((value, index) => value === "…" ? <span className="pagination-ellipsis" aria-hidden="true" key={`ellipsis-${index}`}>…</span> : <button className="secondary-action pagination-page" type="button" key={value} aria-label={`第 ${value} 页`} aria-current={page === value ? "page" : undefined} onClick={() => goToPage(value)}>{value}</button>)}
+              <button className="secondary-action" type="button" disabled={page === totalPages} onClick={() => goToPage(page + 1)}>下一页</button>
+            </nav>
+            <form className="claim-page-jump" onSubmit={jumpToPage} noValidate>
+              <label>跳转页码<input type="number" inputMode="numeric" min="1" max={totalPages} step="1" value={jumpInput} onChange={(event) => setJumpInput(event.target.value)} /></label>
+              <button className="secondary-action" type="submit">跳转</button>
+              {jumpError && <span className="field-error" role="alert">{jumpError}</span>}
+            </form>
+          </div>}
+        </div>}
       </section>
     </main>
   );

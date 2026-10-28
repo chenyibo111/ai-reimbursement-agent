@@ -51,7 +51,16 @@ input::placeholder, textarea::placeholder { color: #94a3b8; }
 .claim-search-form label { display: grid; align-content: start; gap: 6px; color: #334155; font-size: .84rem; }
 .claim-search-form input, .claim-search-form select { min-width: 0; background: #fff; }
 .claim-search-actions { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; grid-column: 1 / -1; }
-.claim-list-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; min-height: 44px; }
+.claim-list-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-top: 20px; min-height: 44px; }
+.claim-pagination { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
+.claim-pagination-controls { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px 16px; }
+.claim-pagination .pagination-page { min-width: 40px; padding-inline: 8px; }
+.claim-pagination [aria-current="page"] { border-color: #3569e8; background: #eaf0ff; color: #2857cb; font-weight: 700; }
+.pagination-ellipsis { padding-inline: 5px; color: #64748b; }
+.claim-page-jump { display: flex; align-items: end; flex-wrap: wrap; gap: 6px; }
+.claim-page-jump label { display: grid; gap: 3px; color: #64748b; font-size: .75rem; }
+.claim-page-jump input { width: 76px; min-height: 40px; padding: 7px 9px; }
+.claim-page-jump .field-error { flex-basis: 100%; margin: 0; font-size: .8rem; }
 .claim-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; margin-top: 20px; }
 .claim-card { display: grid; gap: 13px; min-height: 188px; padding: 18px; border: 1px solid #dce4f0; border-radius: 14px; text-decoration: none; background: #fff; }
 .claim-card:hover { border-color: #3569e8; background: #fafdff; }

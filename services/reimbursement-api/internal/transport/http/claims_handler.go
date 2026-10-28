@@ -101,7 +101,7 @@ func (handler *claimsHandler) listClaims(response http.ResponseWriter, request *
 }
 
 func claimSearchRequested(request *http.Request) bool {
-	for _, key := range []string{"search", "status", "createdFrom", "createdBefore", "purposeContains", "expenseCategory", "minRequestedAmountCent", "maxRequestedAmountCent", "sort", "cursor", "countOnly"} {
+	for _, key := range []string{"search", "status", "createdFrom", "createdBefore", "purposeContains", "expenseCategory", "minRequestedAmountCent", "maxRequestedAmountCent", "sort", "cursor", "countOnly", "page"} {
 		if _, exists := request.URL.Query()[key]; exists {
 			return true
 		}
@@ -111,13 +111,22 @@ func claimSearchRequested(request *http.Request) bool {
 
 func parseClaimSearchQuery(request *http.Request) (application.SearchClaimsQuery, error) {
 	values := request.URL.Query()
-	allowed := map[string]bool{"search": true, "status": true, "createdFrom": true, "createdBefore": true, "purposeContains": true, "expenseCategory": true, "minRequestedAmountCent": true, "maxRequestedAmountCent": true, "sort": true, "limit": true, "cursor": true, "countOnly": true}
+	allowed := map[string]bool{"search": true, "status": true, "createdFrom": true, "createdBefore": true, "purposeContains": true, "expenseCategory": true, "minRequestedAmountCent": true, "maxRequestedAmountCent": true, "sort": true, "limit": true, "cursor": true, "countOnly": true, "page": true}
 	for key, entries := range values {
 		if !allowed[key] || len(entries) != 1 {
 			return application.SearchClaimsQuery{}, application.ErrInvalidClaimSearch
 		}
 	}
 	query := application.SearchClaimsQuery{Status: values.Get("status"), PurposeContains: strings.TrimSpace(values.Get("purposeContains")), ExpenseCategory: strings.TrimSpace(values.Get("expenseCategory")), Sort: values.Get("sort"), Cursor: values.Get("cursor")}
+	if raw, present := values["page"]; present {
+		page, err := strconv.Atoi(raw[0])
+		_, hasCursor := values["cursor"]
+		_, hasCountOnly := values["countOnly"]
+		if err != nil || page < 1 || page > 10000 || hasCursor || hasCountOnly {
+			return query, application.ErrInvalidClaimSearch
+		}
+		query.Page = page
+	}
 	if raw := values.Get("limit"); raw != "" {
 		limit, err := strconv.Atoi(raw)
 		if err != nil || limit < 1 || limit > 100 {

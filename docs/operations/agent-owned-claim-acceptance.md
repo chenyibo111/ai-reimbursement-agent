@@ -21,4 +21,4 @@ React + Go 报销工作台从 `http://localhost:8088/claims` 进入；本轮的 
 6. 对选中的旧草稿请求提交前摘要，检查 Go 最新版本/金额/阻断项，明确回复“确认提交”后再看 Web 状态。改字段、上传/删除票据、切换目标或 Web 并发修改后，旧确认应失效；重新准备后才能提交。飞书群聊、员工 B、已提交单、过期确认均不能提交员工 A 的旧单。
 7. 重放相同飞书事件 ID 或 Web `turnId`，确认不重复写入/通知。若当前 `APP_PUBLIC_URL` 是 `localhost`，飞书只应给单号和文字指引，不应发无法从飞书打开的 localhost 链接；有可访问的 HTTPS 公开地址时才附准确工作台链接。
 
-自动化检查：根目录 `npm test`、`npm run lint`、`npx tsc --noEmit`、`npm run build`；`apps/web` 下 `npm test` 与 `npm run build`；`services/agent` 下 `npm test`；Go 使用**隔离测试库**运行 `go test ./...`。Go 仓储测试覆盖 105 张本人单据、另一个员工、完整游标遍历和旧单保留；React 测试覆盖筛选参数、总数和“加载更多”。模型真实调用评测可能计费，只有明确允许后才运行 `npm run eval:intent`。浏览器 OAuth 和飞书双员工现场验收需在有两名有效员工、机器人长连接与当前公开域名的环境执行，并记录实际单号与事件 ID。
+自动化检查：根目录 `npm test`、`npm run lint`、`npx tsc --noEmit`、`npm run build`；`apps/web` 下 `npm test` 与 `npm run build`；`services/agent` 下 `npm test`；Go 使用**隔离测试库**运行 `go test ./...`。Go 仓储测试覆盖 105 张本人单据、另一个员工、完整游标遍历、页码直达与旧单保留；React 测试覆盖筛选参数、总数和页码跳转。模型真实调用评测可能计费，只有明确允许后才运行 `npm run eval:intent`。浏览器 OAuth 和飞书双员工现场验收需在有两名有效员工、机器人长连接与当前公开域名的环境执行，并记录实际单号与事件 ID。

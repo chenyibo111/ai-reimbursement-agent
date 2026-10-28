@@ -37,6 +37,7 @@ export type ClaimSearchQuery = {
   maxRequestedAmountCent?: number;
   sort?: "created_desc" | "created_asc" | "amount_desc" | "amount_asc";
   limit: number;
+  page?: number;
   cursor?: string;
 };
 export type ClaimSearchPage = { items: Claim[]; totalCount: number; nextCursor: string | null };

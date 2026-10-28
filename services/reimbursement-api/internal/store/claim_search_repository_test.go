@@ -76,6 +76,14 @@ func TestPostgresClaimSearchFiltersOwnerAndPaginatesStableTies(t *testing.T) {
 	if len(seen) != 105 || !seen[fmt.Sprintf("search-%s-%02d", suffix, 0)] {
 		t.Fatalf("older claim lost after 100+ results: %d", len(seen))
 	}
+	numbered, err := service.SearchClaims(ctx, owner, application.SearchClaimsQuery{PurposeContains: "Travel", Limit: 10, Page: 11, Sort: application.ClaimSearchCreatedDesc})
+	if err != nil || numbered.TotalCount != 105 || len(numbered.Items) != 5 || numbered.NextCursor != "" || numbered.Items[0].OwnerID != owner || numbered.Items[0].ID != fmt.Sprintf("search-%s-%02d", suffix, 95) {
+		t.Fatalf("numbered last page: %#v %v", numbered, err)
+	}
+	outside, err := service.SearchClaims(ctx, owner, application.SearchClaimsQuery{Limit: 10, Page: 12})
+	if err != nil || outside.TotalCount != 105 || len(outside.Items) != 0 {
+		t.Fatalf("out of range: %#v %v", outside, err)
+	}
 	minimum := int64(0)
 	amountPage, err := service.SearchClaims(ctx, owner, application.SearchClaimsQuery{Limit: 20, MinRequestedAmountCent: &minimum, Sort: application.ClaimSearchAmountAsc})
 	if err != nil || amountPage.TotalCount != 104 || len(amountPage.Items) != 20 {

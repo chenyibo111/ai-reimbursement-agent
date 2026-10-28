@@ -15,6 +15,15 @@ describe("createReimbursementApi", () => {
     expect(url.searchParams.get("cursor")).toBe("page+1");
     expect(url.searchParams.has("ownerId")).toBe(false);
   });
+  it("passes an exact numbered page to the owner-scoped search endpoint", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ items: [], totalCount: 101, nextCursor: "" }));
+    const api = createReimbursementApi({ getAccessToken: () => "employee-token", refreshAccessToken: async () => "employee-token" }, { fetcher });
+    await api.searchClaims({ limit: 10, page: 11 });
+    const url = new URL(String(fetcher.mock.calls[0][0]), "http://localhost");
+    expect(url.searchParams.get("page")).toBe("11");
+    expect(url.searchParams.get("limit")).toBe("10");
+    expect(url.searchParams.has("cursor")).toBe(false);
+  });
   it("refreshes once after a mutation 401 and reuses the same idempotency key", async () => {
     const fetcher = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify({ code: "UNAUTHENTICATED" }), { status: 401, headers: { "Content-Type": "application/json" } }))

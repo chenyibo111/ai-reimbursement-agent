@@ -297,6 +297,17 @@ func (repository *MemoryClaimRepository) SearchOwned(_ context.Context, actorID 
 			return []domain.Claim{}, total, ErrInvalidClaimSearch
 		}
 	}
+	if query.Page > 0 {
+		offset := (query.Page - 1) * query.Limit
+		if offset >= len(filtered) {
+			return []domain.Claim{}, total, nil
+		}
+		filtered = filtered[offset:]
+		if len(filtered) > query.Limit {
+			filtered = filtered[:query.Limit]
+		}
+		return filtered, total, nil
+	}
 	if len(filtered) > query.Limit+1 {
 		filtered = filtered[:query.Limit+1]
 	}
