@@ -2,7 +2,7 @@ import { connect } from "@nats-io/transport-node";
 import { jetstream, jetstreamManager } from "@nats-io/jetstream";
 
 import { ReimbursementApiClient } from "../../services/agent/src/adapters/reimbursement-api-client";
-import { AGENT_RECEIPT_EVENT_CONSUMER, ensureReceiptExtractionConsumer, REIMBURSEMENT_EVENT_STREAM } from "../../services/agent/src/events/jetstream-durable-consumer";
+import { AGENT_PROGRESS_EVENT_CONSUMER, AGENT_RECEIPT_EVENT_CONSUMER, ensureProgressConsumer, ensureReceiptExtractionConsumer, REIMBURSEMENT_EVENT_STREAM } from "../../services/agent/src/events/jetstream-durable-consumer";
 import { consumeReceiptExtractionEvents } from "../../services/agent/src/events/jetstream-consumer";
 import { createPrismaClient } from "@/src/infrastructure/prisma/client";
 import { AgentConversationRepository } from "@/src/infrastructure/prisma/agent-conversation-repository";
@@ -34,24 +34,28 @@ async function main() {
   try {
     const manager = await jetstreamManager(connection);
     await ensureReceiptExtractionConsumer(manager);
-    const consumer = await jetstream(connection).consumers.get(REIMBURSEMENT_EVENT_STREAM, AGENT_RECEIPT_EVENT_CONSUMER);
-    const handler = createAgentEventNotificationHandler({
-      port: new ReimbursementApiClient({
+    await ensureProgressConsumer(manager);
+    const streams = jetstream(connection);
+    const [receiptConsumer, progressConsumer] = await Promise.all([
+      streams.consumers.get(REIMBURSEMENT_EVENT_STREAM, AGENT_RECEIPT_EVENT_CONSUMER),
+      streams.consumers.get(REIMBURSEMENT_EVENT_STREAM, AGENT_PROGRESS_EVENT_CONSUMER),
+    ]);
+    const port = new ReimbursementApiClient({
         baseUrl: requiredEnv("REIMBURSEMENT_API_URL"),
         serviceKey: requiredEnv("REIMBURSEMENT_AGENT_SERVICE_KEY"),
         signingSecret: requiredEnv("REIMBURSEMENT_AUTH_HS256_SECRET"),
-      }),
-      processedEvents: new PrismaAgentProcessedEventRepository(prisma, AGENT_RECEIPT_EVENT_CONSUMER),
-      conversations: new AgentConversationRepository(prisma),
-      client: createFeishuBotClient({ appId: bot.appId, appSecret: bot.appSecret }),
-      publicAppUrl: bot.publicAppUrl,
     });
+    const processedEvents = new PrismaAgentProcessedEventRepository(prisma, AGENT_RECEIPT_EVENT_CONSUMER);
+    const conversations = new AgentConversationRepository(prisma);
+    const client = createFeishuBotClient({ appId: bot.appId, appSecret: bot.appSecret });
+    const common = { port, processedEvents, conversations, client, publicAppUrl: bot.publicAppUrl };
+    const receiptHandler = createAgentEventNotificationHandler({ ...common, acceptedEventTypes: ["ReceiptExtractionCompleted"] });
+    const progressHandler = createAgentEventNotificationHandler({ ...common, acceptedEventTypes: ["ReceiptReviewRequired", "ReceiptReviewResolved", "ClaimSubmitted"] });
     logger.info("worker.started", "Agent 事件 Worker 已启动", { status: "ready" });
-    await consumeReceiptExtractionEvents({
-      consumer,
-      handle: (event) => handler.handle(event),
-      shouldContinue: () => !stopping,
-    });
+    await Promise.all([
+      consumeReceiptExtractionEvents({ consumer: receiptConsumer, handle: (event) => receiptHandler.handle(event), shouldContinue: () => !stopping }),
+      consumeReceiptExtractionEvents({ consumer: progressConsumer, handle: (event) => progressHandler.handle(event), shouldContinue: () => !stopping }),
+    ]);
   } finally {
     await shutdown();
   }

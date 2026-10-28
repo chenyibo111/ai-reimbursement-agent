@@ -327,6 +327,10 @@ model AgentConversation {
   scopeKey               String
   kind                   AgentConversationKind
   latestFeishuChatId     String?
+  selectedReadClaimId    String?
+  selectedEditClaimId    String?
+  pendingAction          Json?
+  searchState            Json?
   summary                String                @default("")
   summaryThroughSequence Int                   @default(0)
   nextSequence           Int                   @default(1)
@@ -336,6 +340,7 @@ model AgentConversation {
   messages               AgentMessage[]
   reimbursementIntakes   ReimbursementIntake[]
   receiptExtractionNotifications ReceiptExtractionNotification[]
+  claimNotificationTargets AgentClaimNotificationTarget[]
 
   @@unique([employeeId, kind, scopeKey])
   @@index([employeeId, lastActiveAt])
@@ -357,6 +362,19 @@ model AgentMessage {
 
   @@unique([conversationId, sequence])
   @@index([conversationId, createdAt])
+}
+
+// A private Feishu chat subscribed to a claim through a verified conversation turn.
+// The claim itself lives in the Go-owned reimbursement database.
+model AgentClaimNotificationTarget {
+  claimId        String @id
+  employeeId     String
+  conversationId String
+  conversation   AgentConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  chatId         String
+  updatedAt      DateTime @updatedAt
+
+  @@index([employeeId])
 }
 
 // Agent-owned idempotency record. It intentionally stores only the tool result

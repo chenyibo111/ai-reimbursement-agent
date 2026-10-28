@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { reimbursementApi } from "../../api/client";
-import type { ClaimPatch } from "../../api/generated/reimbursement";
+import type { ClaimPatch, ClaimSearchQuery } from "../../api/generated/reimbursement";
 
 export const claimKeys = {
   all: ["claims"] as const,
@@ -14,8 +14,11 @@ export function shouldRefreshClaimAfterReceiptTransition(wasPending: boolean, is
   return wasPending && !isPending;
 }
 
-export function useClaims() {
-  return useQuery({ queryKey: claimKeys.all, queryFn: reimbursementApi.listClaims });
+export function useClaims(query: Omit<ClaimSearchQuery, "cursor">) {
+  return useQuery({
+    queryKey: [...claimKeys.all, "search", query],
+    queryFn: () => reimbursementApi.searchClaims(query),
+  });
 }
 
 export function useClaim(claimId: string) {

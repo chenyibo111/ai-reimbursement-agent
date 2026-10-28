@@ -1,5 +1,5 @@
 import {
-  isConversationCollectedFieldName,
+  conversationCollectedFieldNames,
   type AgentMessageChannel,
   type AgentMessageRole,
   type ConversationCollectedFieldName,
@@ -47,7 +47,7 @@ export function buildConversationContext(input: ConversationContextInput): Conve
     messages: selectNewestMessages(input.messages, budgets.messageChars),
     intake,
     policyCitations: selectPolicyCitations(input.policyCitations, budgets.policyChars),
-    allowedFields: intake?.pendingFields.filter(isConversationCollectedFieldName) ?? [],
+    allowedFields: intake ? [...conversationCollectedFieldNames] : [],
   };
 }
 

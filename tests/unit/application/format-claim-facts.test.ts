@@ -11,6 +11,13 @@ it("distinguishes the requested amount from an invoice's OCR amount", () => {
   expect(formatClaimFacts("READ_RECEIPT_AMOUNT", workbench)).toContain("价税合计：¥101.55");
 });
 
+it("includes status and purpose when answering an existing-claim detail request", () => {
+  const reply = formatClaimFacts("READ_CLAIM", { claim: { ...claim, claimNumber: "BX20261009-0026", status: "SUBMITTED", purpose: "客户拜访" }, receipts: [] });
+  expect(reply).toContain("BX20261009-0026");
+  expect(reply).toContain("已提交");
+  expect(reply).toContain("客户拜访");
+});
+
 it("lists each receipt rather than choosing an ambiguous current invoice", () => {
   const reply = formatClaimFacts("READ_RECEIPT_AMOUNT", { claim: { ...claim, receiptCount: 2 }, receipts: [receipt, { ...receipt, id: "receipt-2", filename: "second.pdf", invoiceNumber: "456", totalAmountCent: 2500 }] });
   expect(reply).toContain("invoice.pdf");

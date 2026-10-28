@@ -107,19 +107,33 @@ func (repository *PostgresReviewCaseRepository) ResolveReceiptCase(ctx context.C
 	}
 	defer tx.Rollback(ctx)
 
-	var receiptID, currentInvoice string
+	var targetReceiptID string
+	if err := tx.QueryRow(ctx, `SELECT receipt_id FROM reimbursement.review_cases WHERE id = $1 AND receipt_id IS NOT NULL`, command.CaseID).Scan(&targetReceiptID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return application.ReviewCase{}, application.ErrReviewCaseConflict
+		}
+		return application.ReviewCase{}, fmt.Errorf("find review receipt: %w", err)
+	}
+	_, lockedClaimID, err := lockDraftClaimForReceipt(ctx, tx, targetReceiptID)
+	if err != nil {
+		return application.ReviewCase{}, err
+	}
+	var receiptID, claimID, currentInvoice string
 	if err := tx.QueryRow(ctx, `
-		SELECT review_case.receipt_id, COALESCE(receipt.invoice_number, '')
+		SELECT review_case.receipt_id, review_case.claim_id, COALESCE(receipt.invoice_number, '')
 		FROM reimbursement.review_cases AS review_case
 		JOIN reimbursement.receipts AS receipt ON receipt.id = review_case.receipt_id
 		WHERE review_case.id = $1 AND review_case.status = 'CLAIMED' AND review_case.version = $2
 		  AND ($3::boolean OR review_case.assigned_to = $4)
 		FOR UPDATE OF review_case, receipt
-	`, command.CaseID, command.ExpectedVersion, administratorTakeover, actorID).Scan(&receiptID, &currentInvoice); err != nil {
+	`, command.CaseID, command.ExpectedVersion, administratorTakeover, actorID).Scan(&receiptID, &claimID, &currentInvoice); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return application.ReviewCase{}, application.ErrReviewCaseConflict
 		}
 		return application.ReviewCase{}, fmt.Errorf("lock receipt review case: %w", err)
+	}
+	if receiptID != targetReceiptID || claimID != lockedClaimID {
+		return application.ReviewCase{}, application.ErrReviewCaseConflict
 	}
 
 	invoiceNumber := currentInvoice
@@ -169,6 +183,15 @@ func (repository *PostgresReviewCaseRepository) ResolveReceiptCase(ctx context.C
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO reimbursement.review_case_audits (review_case_id, actor_id, action) VALUES ($1, $2, $3)`, command.CaseID, actorID, "REVIEW_CASE_"+string(command.Action)); err != nil {
 		return application.ReviewCase{}, fmt.Errorf("audit receipt review resolution: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO reimbursement.outbox_events (event_id, event_type, aggregate_id, payload)
+		VALUES ($1::uuid, 'ReceiptReviewResolved', $2::text, jsonb_build_object('receiptId', $2::text, 'claimId', $3::text))
+	`, randomUUID(), receiptID, claimID); err != nil {
+		return application.ReviewCase{}, fmt.Errorf("insert receipt review resolution event: %w", err)
+	}
+	if err := advanceClaimVersionForReceipt(ctx, tx, claimID); err != nil {
+		return application.ReviewCase{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return application.ReviewCase{}, fmt.Errorf("commit review case resolution: %w", err)

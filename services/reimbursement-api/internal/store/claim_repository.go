@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/application"
@@ -76,6 +77,18 @@ func (repository *PostgresClaimRepository) FindOwned(ctx context.Context, claimI
 	return claim, nil
 }
 
+func (repository *PostgresClaimRepository) FindOwnedByNumber(ctx context.Context, claimNumber string, actorID string) (domain.Claim, error) {
+	var claimID string
+	err := repository.pool.QueryRow(ctx, `SELECT id FROM reimbursement.claims WHERE claim_number = $1 AND owner_id = $2`, claimNumber, actorID).Scan(&claimID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Claim{}, application.ErrClaimNotFound
+	}
+	if err != nil {
+		return domain.Claim{}, fmt.Errorf("query owned claim number: %w", err)
+	}
+	return repository.FindOwned(ctx, claimID, actorID)
+}
+
 type claimRow interface{ Scan(...any) error }
 
 func scanClaim(row claimRow) (domain.Claim, error) {
@@ -140,6 +153,119 @@ func (repository *PostgresClaimRepository) ListOwned(ctx context.Context, actorI
 		claims = append(claims, claim)
 	}
 	return claims, rows.Err()
+}
+
+func (repository *PostgresClaimRepository) SearchOwned(ctx context.Context, actorID string, query application.SearchClaimsQuery) ([]domain.Claim, int64, error) {
+	args := []any{actorID}
+	conditions := []string{"owner_id = $1"}
+	add := func(column string, value any, operator string) {
+		args = append(args, value)
+		conditions = append(conditions, fmt.Sprintf("%s %s $%d", column, operator, len(args)))
+	}
+	if query.Status != "" {
+		add("status", query.Status, "=")
+	}
+	if !query.CreatedFrom.IsZero() {
+		add("created_at", query.CreatedFrom, ">=")
+	}
+	if !query.CreatedBefore.IsZero() {
+		add("created_at", query.CreatedBefore, "<")
+	}
+	if query.PurposeContains != "" {
+		args = append(args, "%"+escapeLike(query.PurposeContains)+"%")
+		conditions = append(conditions, fmt.Sprintf("purpose ILIKE $%d ESCAPE '\\'", len(args)))
+	}
+	if query.ExpenseCategory != "" {
+		add("expense_category", query.ExpenseCategory, "=")
+	}
+	if query.MinRequestedAmountCent != nil {
+		add("requested_amount_cent", *query.MinRequestedAmountCent, ">=")
+	}
+	if query.MaxRequestedAmountCent != nil {
+		add("requested_amount_cent", *query.MaxRequestedAmountCent, "<=")
+	}
+	baseWhere := strings.Join(conditions, " AND ")
+	var total int64
+	if err := repository.pool.QueryRow(ctx, "SELECT count(*) FROM reimbursement.claims WHERE "+baseWhere, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count owned claims: %w", err)
+	}
+	if query.CountOnly {
+		return []domain.Claim{}, total, nil
+	}
+	order := "created_at DESC, id ASC"
+	column := "created_at"
+	comparison := "<"
+	switch query.Sort {
+	case application.ClaimSearchCreatedAsc:
+		order, comparison = "created_at ASC, id ASC", ">"
+	case application.ClaimSearchAmountDesc:
+		order, column = "requested_amount_cent DESC NULLS LAST, id ASC", "requested_amount_cent"
+	case application.ClaimSearchAmountAsc:
+		order, column, comparison = "requested_amount_cent ASC NULLS LAST, id ASC", "requested_amount_cent", ">"
+	}
+	if query.AfterID != "" {
+		if column == "created_at" {
+			at, err := time.Parse(time.RFC3339Nano, query.AfterValue)
+			if err != nil {
+				return nil, 0, application.ErrInvalidClaimSearch
+			}
+			args = append(args, at, query.AfterID)
+			conditions = append(conditions, fmt.Sprintf("(created_at %s $%d OR (created_at = $%d AND id > $%d))", comparison, len(args)-1, len(args)-1, len(args)))
+		} else if query.AfterNull {
+			args = append(args, query.AfterID)
+			conditions = append(conditions, fmt.Sprintf("(requested_amount_cent IS NULL AND id > $%d)", len(args)))
+		} else {
+			var amount int64
+			if _, err := fmt.Sscan(query.AfterValue, &amount); err != nil {
+				return nil, 0, application.ErrInvalidClaimSearch
+			}
+			args = append(args, amount, query.AfterID)
+			conditions = append(conditions, fmt.Sprintf("(requested_amount_cent IS NULL OR requested_amount_cent %s $%d OR (requested_amount_cent = $%d AND id > $%d))", comparison, len(args)-1, len(args)-1, len(args)))
+		}
+	}
+	rowLimit := query.Limit + 1
+	if query.Page > 0 {
+		rowLimit = query.Limit
+	}
+	args = append(args, rowLimit)
+	statement := fmt.Sprintf("SELECT id FROM reimbursement.claims WHERE %s ORDER BY %s LIMIT $%d", strings.Join(conditions, " AND "), order, len(args))
+	if query.Page > 0 {
+		args = append(args, (query.Page-1)*query.Limit)
+		statement += fmt.Sprintf(" OFFSET $%d", len(args))
+	}
+	rows, err := repository.pool.Query(ctx, statement, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("search owned claim ids: %w", err)
+	}
+	ids := make([]string, 0, rowLimit)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, 0, err
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, 0, err
+	}
+	claims := make([]domain.Claim, 0, len(ids))
+	for _, id := range ids {
+		claim, err := repository.FindOwned(ctx, id, actorID)
+		if err != nil {
+			return nil, 0, err
+		}
+		claims = append(claims, claim)
+	}
+	return claims, total, nil
+}
+
+func escapeLike(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `%`, `\%`)
+	return strings.ReplaceAll(value, `_`, `\_`)
 }
 
 func (repository *PostgresClaimRepository) Update(ctx context.Context, claim domain.Claim, expectedVersion int64, audit application.ClaimAudit, event application.ClaimOutboxEvent) error {
@@ -229,23 +355,101 @@ func (repository *PostgresClaimRepository) Delete(ctx context.Context, claimID s
 		return fmt.Errorf("begin claim deletion: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	result, err := tx.Exec(ctx, `
-		DELETE FROM reimbursement.claims
-		WHERE id = $1 AND owner_id = $2 AND status = 'DRAFT' AND version = $3
-	`, claimID, actorID, expectedVersion)
-	if err != nil {
-		return fmt.Errorf("delete claim: %w", err)
-	}
-	if result.RowsAffected() != 1 {
-		return application.ErrClaimVersionConflict
-	}
-	if err = writeClaimAuditAndEvent(ctx, tx, audit, event); err != nil {
+	if err = deleteClaimInTx(ctx, tx, claimID, actorID, expectedVersion, audit, event); err != nil {
 		return err
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit claim deletion: %w", err)
 	}
 	return nil
+}
+
+func (repository *PostgresClaimRepository) DeleteIdempotent(ctx context.Context, claimID string, actorID string, expectedVersion int64, key string, audit application.ClaimAudit, event application.ClaimOutboxEvent) error {
+	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin idempotent claim deletion: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	hash := fmt.Sprintf("%s:%d", claimID, expectedVersion)
+	if _, err = tx.Exec(ctx, `
+		INSERT INTO reimbursement.idempotency_records (actor_id, operation, idempotency_key, request_hash)
+		VALUES ($1, 'claim.delete', $2, $3) ON CONFLICT DO NOTHING
+	`, actorID, key, hash); err != nil {
+		return fmt.Errorf("record claim deletion key: %w", err)
+	}
+	var storedHash string
+	var completedStatus *int
+	if err = tx.QueryRow(ctx, `
+		SELECT request_hash, status_code FROM reimbursement.idempotency_records
+		WHERE actor_id=$1 AND operation='claim.delete' AND idempotency_key=$2 FOR UPDATE
+	`, actorID, key).Scan(&storedHash, &completedStatus); err != nil {
+		return fmt.Errorf("lock claim deletion key: %w", err)
+	}
+	if storedHash != hash {
+		return application.ErrClaimVersionConflict
+	}
+	if completedStatus != nil && *completedStatus == 204 {
+		return tx.Commit(ctx)
+	}
+	if err = deleteClaimInTx(ctx, tx, claimID, actorID, expectedVersion, audit, event); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE reimbursement.idempotency_records SET status_code=204, response_body='', completed_at=now() WHERE actor_id=$1 AND operation='claim.delete' AND idempotency_key=$2`, actorID, key); err != nil {
+		return fmt.Errorf("complete claim deletion key: %w", err)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit idempotent claim deletion: %w", err)
+	}
+	return nil
+}
+
+func deleteClaimInTx(ctx context.Context, tx pgx.Tx, claimID string, actorID string, expectedVersion int64, audit application.ClaimAudit, event application.ClaimOutboxEvent) error {
+	var status domain.ClaimStatus
+	var version int64
+	err := tx.QueryRow(ctx, `SELECT status, version FROM reimbursement.claims WHERE id=$1 AND owner_id=$2 FOR UPDATE`, claimID, actorID).Scan(&status, &version)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return application.ErrClaimNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("lock claim for deletion: %w", err)
+	}
+	if status != domain.ClaimStatusDraft {
+		return domain.ErrClaimNotDraft
+	}
+	if version != expectedVersion {
+		return application.ErrClaimVersionConflict
+	}
+	if _, err = tx.Exec(ctx, `
+		INSERT INTO reimbursement.object_cleanup_jobs (object_key)
+		SELECT object_key FROM reimbursement.receipts WHERE claim_id=$1
+		ON CONFLICT (object_key) DO NOTHING
+	`, claimID); err != nil {
+		return fmt.Errorf("queue claim objects for cleanup: %w", err)
+	}
+	if _, err = tx.Exec(ctx, `
+		WITH closed AS (
+			UPDATE reimbursement.review_cases
+			SET claim_id=NULL, receipt_id=NULL,
+			    status=CASE WHEN status IN ('OPEN','CLAIMED') THEN 'CLOSED' ELSE status END,
+			    resolution=CASE WHEN status IN ('OPEN','CLAIMED') THEN 'CLAIM_DELETED' ELSE resolution END,
+			    resolved_by=CASE WHEN status IN ('OPEN','CLAIMED') THEN $2 ELSE resolved_by END,
+			    resolved_at=CASE WHEN status IN ('OPEN','CLAIMED') THEN now() ELSE resolved_at END,
+			    updated_at=now(), version=version+1
+			WHERE claim_id=$1 RETURNING id
+		)
+		INSERT INTO reimbursement.review_case_audits (review_case_id, actor_id, action)
+		SELECT id, $2, 'CLAIM_DELETED_BY_EMPLOYEE' FROM closed
+	`, claimID, actorID); err != nil {
+		return fmt.Errorf("close claim review cases: %w", err)
+	}
+	result, err := tx.Exec(ctx, `DELETE FROM reimbursement.claims WHERE id=$1 AND owner_id=$2 AND status='DRAFT' AND version=$3`, claimID, actorID, expectedVersion)
+	if err != nil {
+		return fmt.Errorf("delete claim: %w", err)
+	}
+	if result.RowsAffected() != 1 {
+		return application.ErrClaimVersionConflict
+	}
+	return writeClaimAuditAndEvent(ctx, tx, audit, event)
 }
 
 func writeClaimAuditAndEvent(ctx context.Context, tx pgx.Tx, audit application.ClaimAudit, event application.ClaimOutboxEvent) error {

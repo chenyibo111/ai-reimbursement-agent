@@ -8,7 +8,7 @@ export function formatClaimFacts(kind: ClaimFactKind, workbench: Workbench, vali
   const claimLabel = claim.claimNumber || claim.id;
   const receiptTotal = receiptTotalDescription(workbench);
   if (kind === "READ_CLAIM") {
-    return `报销单 ${claimLabel}。申请报销总额：${money(claim.requestedAmountCent)}。${receiptTotal}。两者不是同一个字段，请以工作台当前单据为准。`;
+    return `报销单 ${claimLabel}，状态：${claim.status === "DRAFT" ? "草稿" : claim.status === "SUBMITTED" ? "已提交" : "待确认"}，报销事由：${claim.purpose || "未填写"}。申请报销总额：${money(claim.requestedAmountCent)}。${receiptTotal}。两者不是同一个字段，请以工作台当前单据为准。`;
   }
   if (kind === "READ_RECEIPT_AMOUNT") {
     if (!receipts.length) return `报销单 ${claimLabel} 尚无票据，无法确认发票金额。`;

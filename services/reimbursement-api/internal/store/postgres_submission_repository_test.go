@@ -2,13 +2,52 @@ package store
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/application"
+	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/domain"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func TestPostgresSubmissionConfirmationExpiresWhenReceiptIsAdded(t *testing.T) {
+	databaseURL := os.Getenv("TEST_REIMBURSEMENT_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_REIMBURSEMENT_DATABASE_URL is not configured")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	suffix := time.Now().UTC().Format("20060102150405.000000000")
+	ownerID, claimID := "stale-receipt-owner-"+suffix, "stale-receipt-claim-"+suffix
+	if _, err := pool.Exec(ctx, `INSERT INTO reimbursement.employees (id, display_name) VALUES ($1, 'Stale receipt owner')`, ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO reimbursement.claims (id, owner_id, purpose, requested_amount_cent, requested_amount_source) VALUES ($1, $2, 'Customer visit', 10000, 'MANUAL')`, claimID, ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO reimbursement.receipts (id, claim_id, owner_id, filename, content_type, expected_size, object_key, status, ocr_confidence) VALUES ($1, $2, $3, 'original.png', 'image/png', 1, $4, 'EXTRACTED', 0.99)`, "original-"+suffix, claimID, ownerID, "test/original-"+suffix); err != nil {
+		t.Fatal(err)
+	}
+	clock := fixedSubmissionClock{now: time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)}
+	service := application.NewSubmissionService(NewPostgresSubmissionRepository(pool), clock)
+	confirmation, err := service.RequestSubmission(ctx, ownerID, claimID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newReceipt := domain.Receipt{ID: "new-" + suffix, ClaimID: claimID, OwnerID: ownerID, Filename: "new.png", ContentType: "image/png", ExpectedSize: 1, ObjectKey: "test/new-" + suffix, Status: domain.ReceiptStatusUploadPending, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	if err := NewPostgresReceiptRepository(pool).Create(ctx, newReceipt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SubmitClaim(ctx, ownerID, claimID, confirmation.Token, "stale-receipt-submit-"+suffix); !errors.Is(err, application.ErrStaleSubmissionConfirmation) {
+		t.Fatalf("submit with pre-upload token = %v", err)
+	}
+}
 
 func TestPostgresSubmissionRepositoryCreatesImmutableSnapshotAndReplays(t *testing.T) {
 	databaseURL := os.Getenv("TEST_REIMBURSEMENT_DATABASE_URL")

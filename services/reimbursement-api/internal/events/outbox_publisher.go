@@ -63,6 +63,8 @@ func subject(eventType string) string {
 		return "reimbursement.receipt.extraction_completed.v1"
 	case "ReceiptReviewRequired":
 		return "reimbursement.receipt.review_required.v1"
+	case "ReceiptReviewResolved":
+		return "reimbursement.receipt.review_resolved.v1"
 	default:
 		return "reimbursement.event." + strings.ToLower(strings.TrimSpace(eventType)) + ".v1"
 	}

@@ -108,7 +108,7 @@ type ReceiptRepository interface {
 	FindOwned(context.Context, string, string, string) (domain.Receipt, error)
 	ListOwnedByClaim(context.Context, string, string) ([]domain.Receipt, error)
 	FindByContentHash(context.Context, string) (domain.Receipt, error)
-	DeleteOwned(context.Context, string, string, string) error
+	DeleteOwned(context.Context, string, string, string, int64) error
 	MarkReadyForOCR(context.Context, string, string) error
 	MarkReviewRequired(context.Context, string, string) error
 	TransitionToReview(context.Context, string, string, *OCRResult) error
@@ -236,6 +236,19 @@ func (service *ReceiptService) FinalizeReceiptUpload(ctx context.Context, actorI
 }
 
 func (service *ReceiptService) DeleteReceipt(ctx context.Context, actorID string, claimID string, receiptID string) error {
+	return service.deleteReceipt(ctx, actorID, claimID, receiptID, 0)
+}
+
+// DeleteReceiptAtVersion rejects a stale confirmation before changing either
+// the database record or its durable object-cleanup task.
+func (service *ReceiptService) DeleteReceiptAtVersion(ctx context.Context, actorID string, claimID string, receiptID string, expectedVersion int64) error {
+	if expectedVersion < 1 {
+		return domain.ErrClaimVersionConflict
+	}
+	return service.deleteReceipt(ctx, actorID, claimID, receiptID, expectedVersion)
+}
+
+func (service *ReceiptService) deleteReceipt(ctx context.Context, actorID string, claimID string, receiptID string, expectedVersion int64) error {
 	claim, err := service.claims.FindOwned(ctx, claimID, actorID)
 	if errors.Is(err, ErrClaimNotFound) {
 		return ErrClaimNotFound
@@ -246,17 +259,13 @@ func (service *ReceiptService) DeleteReceipt(ctx context.Context, actorID string
 	if claim.Status != domain.ClaimStatusDraft {
 		return domain.ErrClaimNotDraft
 	}
-	receipt, err := service.repository.FindOwned(ctx, receiptID, claimID, actorID)
-	if errors.Is(err, ErrReceiptNotFound) {
-		return ErrReceiptNotFound
+	if expectedVersion > 0 && claim.Version != expectedVersion {
+		return domain.ErrClaimVersionConflict
 	}
-	if err != nil {
-		return fmt.Errorf("find receipt for deletion: %w", err)
+	if expectedVersion == 0 {
+		expectedVersion = claim.Version
 	}
-	if err := service.objects.DeleteObject(ctx, receipt.ObjectKey); err != nil {
-		return fmt.Errorf("delete receipt object: %w", err)
-	}
-	if err := service.repository.DeleteOwned(ctx, receiptID, claimID, actorID); err != nil {
+	if err := service.repository.DeleteOwned(ctx, receiptID, claimID, actorID, expectedVersion); err != nil {
 		return fmt.Errorf("delete receipt record: %w", err)
 	}
 	if service.suggestions != nil {

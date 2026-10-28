@@ -95,9 +95,15 @@ function createProcessDeps(input: {
           const receipt = await tools.uploadReceipt(context, receiptInput.claimId, { filename: receiptInput.filename, mimeType: receiptInput.mimeType, bytes: receiptInput.bytes });
           return { id: receipt.receiptId };
         },
-        updatePurpose: ({ claimId, value }) => tools.updatePurpose(context, claimId, value),
+        updateFields: ({ claimId, fields }) => tools.updateFields(context, claimId, fields),
         readWorkbench: ({ claimId }) => tools.readWorkbench(context, claimId),
+        deleteReceipt: ({ claimId, receiptId, expectedClaimVersion }) => tools.deleteReceipt(context, claimId, receiptId, expectedClaimVersion),
+        deleteDraft: ({ claimId, expectedClaimVersion }) => tools.deleteDraft(context, claimId, expectedClaimVersion),
+        listOwnedClaims: ({ limit }) => tools.listOwnedClaims(context, limit),
+        searchOwnedClaims: ({ query }) => tools.searchOwnedClaims(context, query),
+        findOwnedClaimByNumber: ({ claimNumber }) => tools.findOwnedClaimByNumber(context, claimNumber),
         readValidation: ({ claimId }) => tools.readValidation(context, claimId),
+        readProgress: ({ claimId }) => tools.readProgress(context, claimId),
         prepareSubmission: async ({ claimId }) => {
           const confirmation = await tools.prepareSubmission(context, claimId);
           return { token: confirmation.confirmationToken, claimId: confirmation.claimId, claimVersion: confirmation.claimVersion, workbench: confirmation.workbench };

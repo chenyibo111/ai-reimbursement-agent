@@ -3,11 +3,35 @@ package application
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/domain"
 )
+
+func TestFindClaimByNumberIsExactAndOwnerScopedBeyondRecentList(t *testing.T) {
+	service := newClaimServiceForTest(NewMemoryClaimRepository())
+	ctx := context.Background()
+	old, err := service.CreateClaim(ctx, "employee-1", CreateClaimCommand{Purpose: "old"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 101; i++ {
+		if _, err := service.CreateClaim(ctx, "employee-1", CreateClaimCommand{Purpose: fmt.Sprintf("new-%d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	found, err := service.FindClaimByNumber(ctx, "employee-1", old.ClaimNumber)
+	if err != nil || found.ID != old.ID {
+		t.Fatalf("owned exact lookup = %#v, %v", found, err)
+	}
+	for _, number := range []string{old.ClaimNumber, "BX20261008-9999"} {
+		if _, err := service.FindClaimByNumber(ctx, "employee-2", number); !errors.Is(err, ErrClaimNotFound) {
+			t.Fatalf("foreign/missing %s: %v", number, err)
+		}
+	}
+}
 
 func TestCreateClaimAssignsImmutableBusinessNumber(t *testing.T) {
 	service := NewClaimService(

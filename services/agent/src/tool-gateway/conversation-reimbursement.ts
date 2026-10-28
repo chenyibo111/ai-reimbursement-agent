@@ -1,27 +1,53 @@
 import { ReimbursementToolGateway, type ReimbursementToolName } from "./reimbursement-tools";
-import type { ClaimSnapshot, ReceiptSnapshot, ValidationSnapshot } from "../ports/reimbursement-port";
+import { ReimbursementApiHttpError } from "../adapters/reimbursement-api-client";
+import type { ClaimFieldPatch, ClaimProgressSnapshot, ClaimSnapshot, OwnedClaimSearchPage, OwnedClaimSearchQuery, ReceiptSnapshot, ValidationSnapshot } from "../ports/reimbursement-port";
 
 export type ConversationReimbursementContext = { actorId: string; actorRole: "EMPLOYEE" | "FINANCE_REVIEWER" | "ADMIN"; channel: "WEB" | "FEISHU"; conversationId: string; turnId: string };
 type Attachment = { filename: string; mimeType: string; bytes: Uint8Array };
 
 /** Adapts persisted conversation actions to the eight audited reimbursement tools. */
 export function createConversationReimbursementTools(gateway: ReimbursementToolGateway, fetcher: typeof fetch = fetch, internalStorageEndpoint?: string) {
-  const execute = (context: ConversationReimbursementContext, name: ReimbursementToolName, args: Record<string, unknown>) => gateway.execute({
+  const execute = (context: ConversationReimbursementContext, name: ReimbursementToolName, args: Record<string, unknown>, operationKey: string = name) => gateway.execute({
     actorEmployeeId: context.actorId,
     actorRole: context.actorRole,
     channel: context.channel,
     conversationId: context.conversationId,
-    toolCallId: `${context.actorId}:${context.conversationId}:${context.turnId}:${name}`,
-    idempotencyKey: `${context.actorId}:${context.conversationId}:${context.turnId}:${name}`,
+    toolCallId: `${context.actorId}:${context.conversationId}:${context.turnId}:${operationKey}`,
+    idempotencyKey: `${context.actorId}:${context.conversationId}:${context.turnId}:${operationKey}`,
     name,
     arguments: args,
   });
   return {
+    async searchOwnedClaims(context: ConversationReimbursementContext, query: OwnedClaimSearchQuery): Promise<OwnedClaimSearchPage> {
+      return (await execute(context, "search_owned_claims", query, `search_owned_claims:${JSON.stringify(query)}`)).page as OwnedClaimSearchPage;
+    },
+    async listOwnedClaims(context: ConversationReimbursementContext, limit: number): Promise<ClaimSnapshot[]> {
+      return (await execute(context, "list_owned_claims", { limit })).claims as ClaimSnapshot[];
+    },
+    async findOwnedClaimByNumber(context: ConversationReimbursementContext, claimNumber: string): Promise<ClaimSnapshot | null> {
+      return (await execute(context, "find_owned_claim_by_number", { claimNumber })).claim as ClaimSnapshot | null;
+    },
+    async updateFields(context: ConversationReimbursementContext, claimId: string, fields: ClaimFieldPatch): Promise<ClaimSnapshot> {
+      const before = (await execute(context, "get_claim_workbench", { claimId }, "fields.pre-read")).workbench as { claim: ClaimSnapshot };
+      try {
+        await execute(context, "update_claim_fields", { claimId, version: before.claim.version, ...fields }, "fields.patch");
+      } catch (error) {
+        if (!(error instanceof ReimbursementApiHttpError) || error.code !== "VERSION_CONFLICT") throw error;
+        const current = (await execute(context, "get_claim_workbench", { claimId }, "fields.conflict-read")).workbench as { claim: ClaimSnapshot };
+        if (!Object.entries(fields).every(([name, value]) => JSON.stringify(current.claim[name as keyof ClaimSnapshot]) === JSON.stringify(value))) throw error;
+        return current.claim;
+      }
+      const after = (await execute(context, "get_claim_workbench", { claimId }, "fields.post-read")).workbench as { claim: ClaimSnapshot };
+      return after.claim;
+    },
     async readWorkbench(context: ConversationReimbursementContext, claimId: string) {
-      return (await execute(context, "get_claim_workbench", { claimId })).workbench as { claim: ClaimSnapshot; receipts: ReceiptSnapshot[] };
+      return (await execute(context, "get_claim_workbench", { claimId }, `get_claim_workbench:${claimId}`)).workbench as { claim: ClaimSnapshot; receipts: ReceiptSnapshot[] };
     },
     async readValidation(context: ConversationReimbursementContext, claimId: string) {
       return (await execute(context, "get_claim_validation", { claimId })).validation as ValidationSnapshot;
+    },
+    async readProgress(context: ConversationReimbursementContext, claimId: string): Promise<ClaimProgressSnapshot> {
+      return (await execute(context, "get_owned_claim_progress", { claimId }, `get_owned_claim_progress:${claimId}`)).progress as ClaimProgressSnapshot;
     },
     async prepareSubmission(context: ConversationReimbursementContext, claimId: string) {
       const workbench = (await execute(context, "get_claim_workbench", { claimId })).workbench as { claim: ClaimSnapshot; receipts: ReceiptSnapshot[] };
@@ -39,6 +65,12 @@ export function createConversationReimbursementTools(gateway: ReimbursementToolG
       if (!upload.ok) throw new Error("receipt upload failed");
       const result = await execute(context, "finalize_receipt_upload", { claimId, receiptId: session.receiptId });
       return result.receipt as { receiptId: string; status: string };
+    },
+    async deleteReceipt(context: ConversationReimbursementContext, claimId: string, receiptId: string, expectedClaimVersion: number): Promise<void> {
+      await execute(context, "delete_owned_receipt", { claimId, receiptId, expectedClaimVersion }, `delete_owned_receipt:${claimId}:${receiptId}:${expectedClaimVersion}`);
+    },
+    async deleteDraft(context: ConversationReimbursementContext, claimId: string, expectedClaimVersion: number): Promise<void> {
+      await execute(context, "delete_owned_draft", { claimId, expectedClaimVersion }, `delete_owned_draft:${claimId}:${expectedClaimVersion}`);
     },
     async updatePurpose(context: ConversationReimbursementContext, claimId: string, purpose: string) {
       const workbench = (await execute(context, "get_claim_workbench", { claimId })).workbench as { claim: { version: number } };

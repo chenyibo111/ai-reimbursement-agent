@@ -25,6 +25,16 @@ func (repository *PostgresReceiptRepository) Create(ctx context.Context, receipt
 		return fmt.Errorf("begin receipt creation: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	var status domain.ClaimStatus
+	if err = tx.QueryRow(ctx, `SELECT status FROM reimbursement.claims WHERE id = $1 AND owner_id = $2 FOR UPDATE`, receipt.ClaimID, receipt.OwnerID).Scan(&status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return application.ErrClaimNotFound
+		}
+		return fmt.Errorf("lock claim for receipt creation: %w", err)
+	}
+	if status != domain.ClaimStatusDraft {
+		return domain.ErrClaimNotDraft
+	}
 	if _, err = tx.Exec(ctx, `
 		INSERT INTO reimbursement.receipts (id, claim_id, owner_id, filename, content_type, expected_size, object_key, status, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -32,6 +42,9 @@ func (repository *PostgresReceiptRepository) Create(ctx context.Context, receipt
 		return fmt.Errorf("insert receipt: %w", err)
 	}
 	if err = writeReceiptAuditAndEvent(ctx, tx, receipt.ID, receipt.ClaimID, receipt.OwnerID, "RECEIPT_UPLOAD_SESSION_CREATED", "ReceiptUploadSessionCreated"); err != nil {
+		return err
+	}
+	if err = advanceClaimVersionForReceipt(ctx, tx, receipt.ClaimID); err != nil {
 		return err
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -100,7 +113,7 @@ func (repository *PostgresReceiptRepository) FindByContentHash(ctx context.Conte
 	`, hash))
 }
 
-func (repository *PostgresReceiptRepository) DeleteOwned(ctx context.Context, receiptID string, claimID string, actorID string) error {
+func (repository *PostgresReceiptRepository) DeleteOwned(ctx context.Context, receiptID string, claimID string, actorID string, expectedVersion int64) error {
 	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin receipt deletion: %w", err)
@@ -108,7 +121,8 @@ func (repository *PostgresReceiptRepository) DeleteOwned(ctx context.Context, re
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var status domain.ClaimStatus
-	if err = tx.QueryRow(ctx, `SELECT status FROM reimbursement.claims WHERE id = $1 AND owner_id = $2 FOR UPDATE`, claimID, actorID).Scan(&status); err != nil {
+	var version int64
+	if err = tx.QueryRow(ctx, `SELECT status, version FROM reimbursement.claims WHERE id = $1 AND owner_id = $2 FOR UPDATE`, claimID, actorID).Scan(&status, &version); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return application.ErrClaimNotFound
 		}
@@ -117,18 +131,42 @@ func (repository *PostgresReceiptRepository) DeleteOwned(ctx context.Context, re
 	if status != domain.ClaimStatusDraft {
 		return domain.ErrClaimNotDraft
 	}
+	if version != expectedVersion {
+		return domain.ErrClaimVersionConflict
+	}
 
-	if _, err = scanReceipt(tx.QueryRow(ctx, `
+	receipt, err := scanReceipt(tx.QueryRow(ctx, `
 		SELECT id, claim_id, owner_id, filename, content_type, expected_size, object_key,
 		       content_hash, status, invoice_number, invoice_date, total_amount_cent, seller_name, ocr_confidence, created_at, updated_at
 		FROM reimbursement.receipts
 		WHERE id = $1 AND claim_id = $2 AND owner_id = $3
 		FOR UPDATE
-	`, receiptID, claimID, actorID)); err != nil {
+	`, receiptID, claimID, actorID))
+	if err != nil {
 		return err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO reimbursement.object_cleanup_jobs (object_key) VALUES ($1) ON CONFLICT (object_key) DO NOTHING`, receipt.ObjectKey); err != nil {
+		return fmt.Errorf("queue receipt object cleanup: %w", err)
 	}
 	if err = writeReceiptAuditAndEvent(ctx, tx, receiptID, claimID, actorID, "RECEIPT_DELETED", "ReceiptDeleted"); err != nil {
 		return err
+	}
+	if _, err = tx.Exec(ctx, `
+		WITH closed AS (
+			UPDATE reimbursement.review_cases
+			SET receipt_id = NULL,
+			    status = CASE WHEN status IN ('OPEN', 'CLAIMED') THEN 'CLOSED' ELSE status END,
+			    resolution = CASE WHEN status IN ('OPEN', 'CLAIMED') THEN 'RECEIPT_DELETED' ELSE resolution END,
+			    resolved_by = CASE WHEN status IN ('OPEN', 'CLAIMED') THEN $2 ELSE resolved_by END,
+			    resolved_at = CASE WHEN status IN ('OPEN', 'CLAIMED') THEN now() ELSE resolved_at END,
+			    updated_at = now(), version = version + 1
+			WHERE receipt_id = $1
+			RETURNING id
+		)
+		INSERT INTO reimbursement.review_case_audits (review_case_id, actor_id, action)
+		SELECT id, $2, 'RECEIPT_DELETED_BY_EMPLOYEE' FROM closed
+	`, receiptID, actorID); err != nil {
+		return fmt.Errorf("close receipt review cases: %w", err)
 	}
 	result, err := tx.Exec(ctx, `DELETE FROM reimbursement.receipts WHERE id = $1 AND claim_id = $2 AND owner_id = $3`, receiptID, claimID, actorID)
 	if err != nil {
@@ -136,6 +174,9 @@ func (repository *PostgresReceiptRepository) DeleteOwned(ctx context.Context, re
 	}
 	if result.RowsAffected() != 1 {
 		return application.ErrReceiptNotFound
+	}
+	if _, err = tx.Exec(ctx, `UPDATE reimbursement.claims SET version = version + 1, updated_at = now() WHERE id = $1`, claimID); err != nil {
+		return fmt.Errorf("advance claim version after receipt deletion: %w", err)
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit receipt deletion: %w", err)
@@ -174,7 +215,10 @@ func (repository *PostgresReceiptRepository) TransitionToReview(ctx context.Cont
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var actorID, claimID string
+	actorID, claimID, err := lockDraftClaimForReceipt(ctx, tx, receiptID)
+	if err != nil {
+		return err
+	}
 	if err := tx.QueryRow(ctx, `SELECT owner_id, claim_id FROM reimbursement.receipts WHERE id = $1 FOR UPDATE`, receiptID).Scan(&actorID, &claimID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return application.ErrReceiptNotFound
@@ -219,6 +263,9 @@ func (repository *PostgresReceiptRepository) TransitionToReview(ctx context.Cont
 		}
 	}
 	if err := writeReceiptAuditAndEvent(ctx, tx, receiptID, claimID, actorID, "RECEIPT_REVIEW_REQUIRED", "ReceiptReviewRequired"); err != nil {
+		return err
+	}
+	if err := advanceClaimVersionForReceipt(ctx, tx, claimID); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -279,15 +326,54 @@ func (repository *PostgresReceiptRepository) withReceiptMutation(ctx context.Con
 		return fmt.Errorf("begin receipt mutation: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	lockedActor, lockedClaim, err := lockDraftClaimForReceipt(ctx, tx, receiptID)
+	if err != nil {
+		return err
+	}
 	actorID, claimID, err := mutate(tx)
 	if err != nil {
 		return err
 	}
+	if actorID != lockedActor || claimID != lockedClaim {
+		return application.ErrReceiptNotFound
+	}
 	if err = writeReceiptAuditAndEvent(ctx, tx, receiptID, claimID, actorID, action, eventType); err != nil {
+		return err
+	}
+	if err = advanceClaimVersionForReceipt(ctx, tx, claimID); err != nil {
 		return err
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit receipt mutation: %w", err)
+	}
+	return nil
+}
+
+func lockDraftClaimForReceipt(ctx context.Context, tx pgx.Tx, receiptID string) (string, string, error) {
+	var actorID, claimID string
+	var status domain.ClaimStatus
+	err := tx.QueryRow(ctx, `
+		SELECT receipt.owner_id, receipt.claim_id, claim.status
+		FROM reimbursement.receipts AS receipt
+		JOIN reimbursement.claims AS claim ON claim.id = receipt.claim_id AND claim.owner_id = receipt.owner_id
+		WHERE receipt.id = $1
+		FOR UPDATE OF claim
+	`, receiptID).Scan(&actorID, &claimID, &status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", application.ErrReceiptNotFound
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("lock claim for receipt mutation: %w", err)
+	}
+	if status != domain.ClaimStatusDraft {
+		return "", "", domain.ErrClaimNotDraft
+	}
+	return actorID, claimID, nil
+}
+
+func advanceClaimVersionForReceipt(ctx context.Context, tx pgx.Tx, claimID string) error {
+	if _, err := tx.Exec(ctx, `UPDATE reimbursement.claims SET version = version + 1, updated_at = now() WHERE id = $1`, claimID); err != nil {
+		return fmt.Errorf("advance claim version after receipt mutation: %w", err)
 	}
 	return nil
 }

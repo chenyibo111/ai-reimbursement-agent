@@ -49,7 +49,7 @@ describe("intent evaluation", () => {
       allowedFields = context.allowedFields;
       return { action: "COLLECT_FIELDS", reply: "只分类", fields: { projectCode: "测试项目" } };
     });
-    expect(allowedFields).toEqual(["projectCode"]);
+    expect(allowedFields).toEqual(["purpose", "expenseCategory", "participants", "projectCode"]);
   });
 
   it("preserves assistant and cross-channel history roles in the classifier context", async () => {
@@ -74,10 +74,10 @@ describe("intent evaluation", () => {
   it("ships a diverse, schema-valid split dataset with a locked holdout", () => {
     const dev = parseIntentEvalDataset(readFileSync(resolve("tests/fixtures/intent-eval/dev.jsonl"), "utf8"));
     const holdout = parseIntentEvalDataset(readFileSync(resolve("tests/fixtures/intent-eval/holdout.jsonl"), "utf8"));
-    expect(dev).toHaveLength(60);
-    expect(holdout).toHaveLength(60);
-    expect(new Set([...dev, ...holdout].map((item) => item.id)).size).toBe(120);
-    expect(new Set(holdout.map((item) => item.expectedAction)).size).toBe(10);
+    expect(dev).toHaveLength(62);
+    expect(holdout).toHaveLength(62);
+    expect(new Set([...dev, ...holdout].map((item) => item.id)).size).toBe(124);
+    expect(new Set(holdout.map((item) => item.expectedAction)).size).toBe(11);
     expect(holdout.filter((item) => item.riskTags?.includes("unsafe_submit")).length).toBeGreaterThanOrEqual(4);
   });
 });

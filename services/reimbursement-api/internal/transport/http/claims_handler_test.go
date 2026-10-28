@@ -485,6 +485,38 @@ func TestListClaimsReturnsOnlyAuthenticatedActorsClaims(t *testing.T) {
 	}
 }
 
+func TestClaimNumberQueryValidatesFormatAndReturnsOwnerScopedResult(t *testing.T) {
+	handler := NewRouter(Dependencies{Claims: fakeClaims{}, Auth: StaticActorResolver{}})
+	for _, scenario := range []struct {
+		number string
+		status int
+		count  int
+	}{
+		{"BX20261008-0001", http.StatusOK, 1},
+		{"BX20261008-9999", http.StatusOK, 0},
+		{"not-a-number", http.StatusBadRequest, 0},
+	} {
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/claims?claimNumber="+scenario.number, nil)
+		request.Header.Set("Authorization", "Bearer employee-1")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != scenario.status {
+			t.Fatalf("%s status = %d, want %d", scenario.number, response.Code, scenario.status)
+		}
+		if scenario.status == http.StatusOK {
+			var body struct {
+				Items []any `json:"items"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if len(body.Items) != scenario.count {
+				t.Fatalf("%s items = %d, want %d", scenario.number, len(body.Items), scenario.count)
+			}
+		}
+	}
+}
+
 func TestListReceiptsReturnsOnlyReceiptsBelongingToTheAuthenticatedClaim(t *testing.T) {
 	handler := NewRouter(Dependencies{Claims: fakeClaims{}, Receipts: fakeReceipts{}, Auth: StaticActorResolver{}})
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/claims/claim-1/receipts", nil)
@@ -510,6 +542,41 @@ func TestListReceiptsReturnsOnlyReceiptsBelongingToTheAuthenticatedClaim(t *test
 	}
 }
 
+type progressFixture struct{ actorID string }
+
+func (fixture *progressFixture) GetClaimProgress(_ context.Context, actorID, claimID string) (application.ClaimProgress, error) {
+	fixture.actorID = actorID
+	if actorID != "employee-1" || claimID != "claim-1" {
+		return application.ClaimProgress{}, application.ErrClaimNotFound
+	}
+	return application.ClaimProgress{ClaimID: claimID, ClaimNumber: "BX20261027-0001", Status: "DRAFT", Version: 2,
+		Receipts: []application.ReceiptProgress{{ReceiptID: "receipt-1", Filename: "invoice.pdf", Status: "REVIEW_REQUIRED", ReviewStatus: "PENDING"}},
+		Approval: "NOT_CONNECTED", Payment: "NOT_CONNECTED"}, nil
+}
+
+func TestClaimProgressIsOwnerScopedAndHidesFinanceNotes(t *testing.T) {
+	fixture := &progressFixture{}
+	handler := NewRouter(Dependencies{Progress: fixture, Auth: StaticActorResolver{}})
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/claims/claim-1/progress", nil)
+	request.Header.Set("Authorization", "Bearer employee-1")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || fixture.actorID != "employee-1" || strings.Contains(response.Body.String(), "internalNote") {
+		t.Fatalf("progress response=%d %s actor=%s", response.Code, response.Body.String(), fixture.actorID)
+	}
+	for _, value := range []string{"REVIEW_REQUIRED", "PENDING", "NOT_CONNECTED"} {
+		if !strings.Contains(response.Body.String(), value) {
+			t.Fatalf("missing %s: %s", value, response.Body.String())
+		}
+	}
+	request.Header.Set("Authorization", "Bearer employee-2")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound || strings.Contains(response.Body.String(), "BX20261027-0001") {
+		t.Fatalf("foreign progress=%d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestDeleteReceiptDeletesOwnedDraftReceipt(t *testing.T) {
 	receipts := &deletingFakeReceipts{}
 	handler := NewRouter(Dependencies{Claims: fakeClaims{}, Receipts: receipts, Auth: StaticActorResolver{}})
@@ -525,6 +592,54 @@ func TestDeleteReceiptDeletesOwnedDraftReceipt(t *testing.T) {
 	if receipts.actorID != "employee-1" || receipts.claimID != "claim-1" || receipts.receiptID != "receipt-1" {
 		t.Fatalf("unexpected delete input: %#v", receipts)
 	}
+}
+
+func TestDeleteReceiptPassesExpectedVersionForAgentConfirmation(t *testing.T) {
+	receipts := &deletingFakeReceipts{}
+	handler := NewRouter(Dependencies{Claims: fakeClaims{}, Receipts: receipts, Auth: StaticActorResolver{}})
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/claims/claim-1/receipts/receipt-2?expectedClaimVersion=3", nil)
+	request.Header.Set("Authorization", "Bearer employee-1")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent || receipts.receiptID != "receipt-2" || receipts.version != 3 {
+		t.Fatalf("response=%d receipt=%s version=%d", response.Code, receipts.receiptID, receipts.version)
+	}
+	invalid := httptest.NewRequest(http.MethodDelete, "/api/v1/claims/claim-1/receipts/receipt-2?expectedClaimVersion=0", nil)
+	invalid.Header.Set("Authorization", "Bearer employee-1")
+	invalidResponse := httptest.NewRecorder()
+	handler.ServeHTTP(invalidResponse, invalid)
+	if invalidResponse.Code != http.StatusBadRequest {
+		t.Fatalf("invalid version status=%d", invalidResponse.Code)
+	}
+}
+
+func TestDeleteClaimRequiresVersionAndIdempotencyKey(t *testing.T) {
+	claims := &deletingFakeClaims{}
+	handler := NewRouter(Dependencies{Claims: claims, Auth: StaticActorResolver{}})
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/claims/claim-1?expectedVersion=3", nil)
+	request.Header.Set("Authorization", "Bearer employee-1")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("missing key status=%d", response.Code)
+	}
+	request.Header.Set("Idempotency-Key", "delete-turn-1")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent || claims.actorID != "employee-1" || claims.claimID != "claim-1" || claims.version != 3 || claims.key != "delete-turn-1" {
+		t.Fatalf("delete result=%d, %#v", response.Code, claims)
+	}
+}
+
+type deletingFakeClaims struct {
+	fakeClaims
+	actorID, claimID, key string
+	version               int64
+}
+
+func (service *deletingFakeClaims) DeleteClaimIdempotent(_ context.Context, actorID, claimID string, version int64, key string) error {
+	service.actorID, service.claimID, service.version, service.key = actorID, claimID, version, key
+	return nil
 }
 
 func TestReceiptResponseKeepsMissingMetadataNull(t *testing.T) {
@@ -655,6 +770,12 @@ func (fakeClaims) ListClaims(_ context.Context, actorID string, _ int) ([]applic
 	}
 	return []application.ClaimView{{ID: "claim-1", OwnerID: actorID, Status: domain.ClaimStatusDraft, Purpose: "客户拜访", Version: 1}}, nil
 }
+func (fakeClaims) FindClaimByNumber(_ context.Context, actorID string, claimNumber string) (application.ClaimView, error) {
+	if actorID != "employee-1" || claimNumber != "BX20261008-0001" {
+		return application.ClaimView{}, application.ErrClaimNotFound
+	}
+	return application.ClaimView{ID: "claim-1", ClaimNumber: claimNumber, OwnerID: actorID, Status: domain.ClaimStatusDraft, Version: 1}, nil
+}
 func (fakeClaims) GetClaim(_ context.Context, actorID string, claimID string) (application.ClaimView, error) {
 	if actorID != "employee-1" || claimID != "claim-1" {
 		return application.ClaimView{}, application.ErrClaimNotFound
@@ -700,6 +821,7 @@ func (fakeReceipts) ListReceipts(_ context.Context, actorID string, claimID stri
 
 type deletingFakeReceipts struct {
 	actorID, claimID, receiptID string
+	version                     int64
 }
 
 func (*deletingFakeReceipts) CreateUploadSession(context.Context, string, string, application.CreateUploadSessionCommand) (application.UploadSession, error) {
@@ -713,5 +835,9 @@ func (*deletingFakeReceipts) ListReceipts(context.Context, string, string) ([]ap
 }
 func (service *deletingFakeReceipts) DeleteReceipt(_ context.Context, actorID string, claimID string, receiptID string) error {
 	service.actorID, service.claimID, service.receiptID = actorID, claimID, receiptID
+	return nil
+}
+func (service *deletingFakeReceipts) DeleteReceiptAtVersion(_ context.Context, actorID string, claimID string, receiptID string, version int64) error {
+	service.actorID, service.claimID, service.receiptID, service.version = actorID, claimID, receiptID, version
 	return nil
 }

@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 
-import type { ClaimSnapshot, ReimbursementPort, ReceiptSnapshot, ToolCallContext, ValidationSnapshot } from "../ports/reimbursement-port";
+import type { ClaimFieldPatch, ClaimProgressSnapshot, ClaimSnapshot, OwnedClaimSearchPage, OwnedClaimSearchQuery, ReimbursementPort, ReceiptSnapshot, ToolCallContext, ValidationSnapshot } from "../ports/reimbursement-port";
 
 type ApiClientOptions = {
   baseUrl: string;
@@ -33,19 +33,51 @@ export class ReimbursementApiClient implements ReimbursementPort {
   createClaimDraft(input: ToolCallContext & { purpose: string }) { return this.request<ClaimSnapshot>(input, "/api/v1/claims", "POST", { purpose: input.purpose }); }
   createUploadSession(input: ToolCallContext & { claimId: string; filename: string; contentType: string; sizeBytes: number }) { return this.request<{ receiptId: string; uploadUrl: string }>(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}/uploads`, "POST", { filename: input.filename, contentType: input.contentType, sizeBytes: input.sizeBytes }); }
   finalizeReceiptUpload(input: ToolCallContext & { claimId: string; receiptId: string }) { return this.request<{ receiptId: string; status: string }>(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}/receipts`, "POST", { receiptId: input.receiptId }); }
+  async deleteOwnedReceipt(input: ToolCallContext & { claimId: string; receiptId: string; expectedClaimVersion: number }): Promise<void> {
+    await this.request(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}/receipts/${encodeURIComponent(input.receiptId)}?expectedClaimVersion=${input.expectedClaimVersion}`, "DELETE");
+  }
+  async deleteOwnedDraft(input: ToolCallContext & { claimId: string; expectedClaimVersion: number }): Promise<void> {
+    await this.request(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}?expectedVersion=${input.expectedClaimVersion}`, "DELETE");
+  }
   async getClaimWorkbench(input: ToolCallContext & { claimId: string }) {
     const path = `/api/v1/claims/${encodeURIComponent(input.claimId)}`;
     const [claim, receipts] = await Promise.all([this.request<ClaimSnapshot>(input, path, "GET"), this.request<{ items: ReceiptSnapshot[] }>(input, `${path}/receipts`, "GET")]);
     return { claim, receipts: receipts.items };
   }
-  updateClaimFields(input: ToolCallContext & { claimId: string; version: number; purpose?: string }) { return this.request<ClaimSnapshot>(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}`, "PATCH", { version: input.version, ...(input.purpose === undefined ? {} : { purpose: input.purpose }) }); }
+  async listOwnedClaims(input: ToolCallContext & { limit: number }) {
+    const response = await this.request<{ items: ClaimSnapshot[] }>(input, `/api/v1/claims?limit=${input.limit}`, "GET");
+    if (!Array.isArray(response.items)) throw new Error("invalid owned claim list");
+    return response.items.map(assertClaimSnapshot);
+  }
+  async searchOwnedClaims(input: ToolCallContext & { query: OwnedClaimSearchQuery }): Promise<OwnedClaimSearchPage> {
+    const params = new URLSearchParams({ search: "true" });
+    for (const [key, value] of Object.entries(input.query)) {
+      if (value !== undefined) params.set(key, String(value));
+    }
+    const response = await this.request<unknown>(input, `/api/v1/claims?${params}`, "GET");
+    if (!response || typeof response !== "object" || Array.isArray(response)) throw new Error("invalid owned claim search");
+    const page = response as Record<string, unknown>;
+    if (!Array.isArray(page.items) || typeof page.totalCount !== "number" || !Number.isSafeInteger(page.totalCount) || page.totalCount < 0 || (typeof page.nextCursor !== "string" && page.nextCursor !== null)) throw new Error("invalid owned claim search");
+    try {
+      const items = page.items.map((item) => assertClaimSnapshot(item as ClaimSnapshot));
+      if (items.length > input.query.limit || items.length > page.totalCount) throw new Error("invalid owned claim search");
+      return { items, totalCount: page.totalCount as number, nextCursor: page.nextCursor === "" ? null : page.nextCursor as string | null };
+    } catch { throw new Error("invalid owned claim search"); }
+  }
+  async findOwnedClaimByNumber(input: ToolCallContext & { claimNumber: string }) {
+    const response = await this.request<{ items: ClaimSnapshot[] }>(input, `/api/v1/claims?claimNumber=${encodeURIComponent(input.claimNumber)}`, "GET");
+    if (!Array.isArray(response.items) || response.items.length > 1) throw new Error("invalid claim lookup response");
+    return response.items.length ? assertClaimSnapshot(response.items[0]) : null;
+  }
+  updateClaimFields(input: ToolCallContext & { claimId: string; version: number; fields: ClaimFieldPatch }) { return this.request<ClaimSnapshot>(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}`, "PATCH", { version: input.version, ...input.fields }); }
   getClaimValidation(input: ToolCallContext & { claimId: string }) { return this.request<ValidationSnapshot>(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}/validation`, "GET"); }
+  getOwnedClaimProgress(input: ToolCallContext & { claimId: string }) { return this.request<ClaimProgressSnapshot>(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}/progress`, "GET"); }
   requestSubmissionConfirmation(input: ToolCallContext & { claimId: string; version: number }) { return this.request<{ confirmationToken: string; claimId: string; claimVersion: number }>(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}/submission-requests`, "POST", { version: input.version }); }
   submitClaim(input: ToolCallContext & { claimId: string; confirmationToken: string }) { return this.request<{ claimId: string; submissionNumber: string }>(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}/submit`, "POST", { confirmationToken: input.confirmationToken }); }
 
   private async request<T>(context: ToolCallContext, path: string, method: string, body?: unknown): Promise<T> {
     const response = await this.fetcher(`${this.baseUrl}${path}`, { method, headers: { "Accept": "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json" }), "Authorization": `Bearer ${this.token(context)}`, "X-Agent-Service-Key": this.options.serviceKey, "Idempotency-Key": context.idempotencyKey }, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
-    const payload = await response.json().catch(() => ({}));
+    const payload = response.status === 204 ? {} : await response.json().catch(() => ({}));
     if (!response.ok) throw new ReimbursementApiHttpError(typeof payload.message === "string" ? payload.message : "报销服务暂不可用", response.status, typeof payload.code === "string" ? payload.code : undefined);
     return payload as T;
   }
@@ -57,4 +89,10 @@ export class ReimbursementApiClient implements ReimbursementPort {
     const signed = `${header}.${payload}`;
     return `${signed}.${createHmac("sha256", this.options.signingSecret).update(signed).digest("base64url")}`;
   }
+}
+
+function assertClaimSnapshot(value: ClaimSnapshot): ClaimSnapshot {
+  const participants = value?.participants === null ? [] : value?.participants;
+  if (!value || typeof value.id !== "string" || typeof value.claimNumber !== "string" || typeof value.version !== "number" || typeof value.status !== "string" || !Array.isArray(participants) || typeof value.expenseCategory !== "string" || typeof value.projectCode !== "string") throw new Error("invalid claim response");
+  return { ...value, participants };
 }

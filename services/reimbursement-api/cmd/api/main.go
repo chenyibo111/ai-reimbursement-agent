@@ -83,9 +83,11 @@ func main() {
 	if allowDuplicateSubmittedInvoiceForTesting {
 		log.Print("WARNING: duplicate submitted invoice numbers are allowed for local testing")
 	}
+	submissionService := application.NewSubmissionService(store.NewPostgresSubmissionRepository(pool), nil)
 	router := transport.NewRouter(transport.Dependencies{
 		Claims:             application.NewClaimService(claimRepository, application.SecureIDGenerator{}, store.NewPostgresClaimNumberGenerator(pool), time.Now, ocrSuggestionRefresher),
-		Submissions:        application.NewSubmissionService(store.NewPostgresSubmissionRepository(pool), nil),
+		Submissions:        submissionService,
+		Progress:           application.NewClaimProgressService(store.NewPostgresClaimProgressRepository(pool), submissionService),
 		Receipts:           application.NewReceiptServiceWithOptions(claimRepository, receiptRepository, objects, infrastructure.NewClamAVScanner(clamAddress), infrastructure.NewHTTPReceiptOCRClient(ocrURL), application.SecureIDGenerator{}, application.ReceiptServiceOptions{AllowDuplicateContentForTesting: allowDuplicateContentForTesting, AllowDuplicateSubmittedInvoiceForTesting: allowDuplicateSubmittedInvoiceForTesting}, ocrSuggestionRefresher),
 		Admin:              transport.AdminServices{Policies: application.NewPolicyRuleService(store.NewPostgresPolicyRuleRepository(pool)), Reviews: application.NewReviewCaseService(reviewCaseRepository), Previews: application.NewReceiptPreviewService(reviewCaseRepository, receiptRepository, objects), Role: store.EmployeeRole(pool)},
 		EmployeeIdentities: application.NewEmployeeIdentityService(store.NewPostgresEmployeeIdentityRepository(pool)),

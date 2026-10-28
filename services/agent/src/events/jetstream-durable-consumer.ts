@@ -2,6 +2,7 @@ import { AckPolicy, DeliverPolicy } from "@nats-io/jetstream";
 
 export const REIMBURSEMENT_EVENT_STREAM = "REIMBURSEMENT";
 export const AGENT_RECEIPT_EVENT_CONSUMER = "agent-reimbursement-notifications-v1";
+export const AGENT_PROGRESS_EVENT_CONSUMER = "agent-claim-progress-notifications-v1";
 export const RECEIPT_EXTRACTION_COMPLETED_SUBJECT = "reimbursement.receipt.extraction_completed.v1";
 
 type ConsumerApi = {
@@ -22,6 +23,23 @@ export async function ensureReceiptExtractionConsumer(manager: { consumers: Cons
     ack_policy: AckPolicy.Explicit,
     deliver_policy: DeliverPolicy.New,
     filter_subject: RECEIPT_EXTRACTION_COMPLETED_SUBJECT,
+    max_deliver: 10,
+  });
+}
+
+/** Uses its own cursor; the existing OCR durable is never reconfigured. */
+export async function ensureProgressConsumer(manager: { consumers: ConsumerApi }): Promise<void> {
+  try {
+    await manager.consumers.info(REIMBURSEMENT_EVENT_STREAM, AGENT_PROGRESS_EVENT_CONSUMER);
+    return;
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== "consumer not found") throw error;
+  }
+  await manager.consumers.add(REIMBURSEMENT_EVENT_STREAM, {
+    durable_name: AGENT_PROGRESS_EVENT_CONSUMER,
+    ack_policy: AckPolicy.Explicit,
+    deliver_policy: DeliverPolicy.New,
+    filter_subject: "reimbursement.>",
     max_deliver: 10,
   });
 }

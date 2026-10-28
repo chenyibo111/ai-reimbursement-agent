@@ -45,7 +45,7 @@ func TestPostgresIdempotencyStoreReplaysAndRejectsConflicts(t *testing.T) {
 		t.Fatalf("expected stored response after one callback, calls=%d body=%s", calls, second.Body)
 	}
 
-	_, err = store.ExecuteIdempotent(ctx, IdempotencyRequest{ActorID: "employee-1", Operation: "claim.create", Key: "request-1", RequestHash: "hash-b"}, func(context.Context, pgx.Tx) (StoredResponse, error) {
+	_, err = store.ExecuteIdempotent(ctx, IdempotencyRequest{ActorID: request.ActorID, Operation: "claim.create", Key: "request-1", RequestHash: "hash-b"}, func(context.Context, pgx.Tx) (StoredResponse, error) {
 		return StoredResponse{}, nil
 	})
 	if !errors.Is(err, ErrIdempotencyConflict) {

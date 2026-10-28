@@ -11,6 +11,7 @@ import (
 type ClaimService interface {
 	CreateClaim(ctx context.Context, actorID string, command application.CreateClaimCommand) (application.ClaimView, error)
 	ListClaims(ctx context.Context, actorID string, limit int) ([]application.ClaimView, error)
+	FindClaimByNumber(ctx context.Context, actorID string, claimNumber string) (application.ClaimView, error)
 	GetClaim(ctx context.Context, actorID string, claimID string) (application.ClaimView, error)
 	UpdateClaim(ctx context.Context, actorID string, claimID string, expectedVersion int64, command application.PatchClaimCommand) (application.ClaimView, error)
 }
@@ -19,6 +20,10 @@ type SubmissionService interface {
 	ValidateClaim(ctx context.Context, actorID string, claimID string) (application.ValidationResult, error)
 	RequestSubmission(ctx context.Context, actorID string, claimID string, expectedVersion int64) (application.SubmissionConfirmation, error)
 	SubmitClaim(ctx context.Context, actorID string, claimID string, confirmationToken string, idempotencyKey string) (application.SubmissionSnapshot, error)
+}
+
+type ClaimProgressService interface {
+	GetClaimProgress(ctx context.Context, actorID string, claimID string) (application.ClaimProgress, error)
 }
 
 type ReceiptService interface {
@@ -31,6 +36,7 @@ type ReceiptService interface {
 type Dependencies struct {
 	Claims             ClaimService
 	Submissions        SubmissionService
+	Progress           ClaimProgressService
 	Receipts           ReceiptService
 	Auth               ActorResolver
 	Admin              AdminServices
@@ -40,12 +46,14 @@ type Dependencies struct {
 
 func NewRouter(dependencies Dependencies) http.Handler {
 	mux := http.NewServeMux()
-	handler := &claimsHandler{claims: dependencies.Claims, submissions: dependencies.Submissions, receipts: dependencies.Receipts}
+	handler := &claimsHandler{claims: dependencies.Claims, submissions: dependencies.Submissions, progress: dependencies.Progress, receipts: dependencies.Receipts}
 	mux.HandleFunc("POST /api/v1/claims", handler.createClaim)
 	mux.HandleFunc("GET /api/v1/claims", handler.listClaims)
 	mux.HandleFunc("GET /api/v1/claims/{claimId}", handler.getClaim)
 	mux.HandleFunc("PATCH /api/v1/claims/{claimId}", handler.patchClaim)
+	mux.HandleFunc("DELETE /api/v1/claims/{claimId}", handler.deleteClaim)
 	mux.HandleFunc("GET /api/v1/claims/{claimId}/validation", handler.validateClaim)
+	mux.HandleFunc("GET /api/v1/claims/{claimId}/progress", handler.getClaimProgress)
 	mux.HandleFunc("POST /api/v1/claims/{claimId}/uploads", handler.createUploadSession)
 	mux.HandleFunc("GET /api/v1/claims/{claimId}/receipts", handler.listReceipts)
 	mux.HandleFunc("POST /api/v1/claims/{claimId}/receipts", handler.finalizeReceiptUpload)

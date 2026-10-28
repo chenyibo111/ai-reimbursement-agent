@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,9 +41,21 @@ type ClaimView = domain.Claim
 type ClaimRepository interface {
 	Create(context.Context, domain.Claim, ClaimAudit, ClaimOutboxEvent) error
 	FindOwned(context.Context, string, string) (domain.Claim, error)
+	FindOwnedByNumber(context.Context, string, string) (domain.Claim, error)
 	ListOwned(context.Context, string, int) ([]domain.Claim, error)
 	Update(context.Context, domain.Claim, int64, ClaimAudit, ClaimOutboxEvent) error
 	Delete(context.Context, string, string, int64, ClaimAudit, ClaimOutboxEvent) error
+}
+
+func (service *ClaimService) FindClaimByNumber(ctx context.Context, actorID string, claimNumber string) (ClaimView, error) {
+	claim, err := service.repository.FindOwnedByNumber(ctx, claimNumber, actorID)
+	if errors.Is(err, ErrClaimNotFound) {
+		return ClaimView{}, ErrClaimNotFound
+	}
+	if err != nil {
+		return ClaimView{}, fmt.Errorf("find owned claim by number: %w", err)
+	}
+	return claim.Clone(), nil
 }
 
 func (service *ClaimService) ListClaims(ctx context.Context, actorID string, limit int) ([]ClaimView, error) {
@@ -184,6 +197,23 @@ func (service *ClaimService) DeleteClaim(ctx context.Context, actorID string, cl
 	return nil
 }
 
+// DeleteClaimIdempotent is the Agent/Web confirmation entry point. The
+// repository stores the idempotency result in the same transaction as deletion.
+func (service *ClaimService) DeleteClaimIdempotent(ctx context.Context, actorID string, claimID string, expectedVersion int64, key string) error {
+	if expectedVersion < 1 || strings.TrimSpace(key) == "" {
+		return domain.ErrInvalidClaim
+	}
+	deleter, ok := service.repository.(interface {
+		DeleteIdempotent(context.Context, string, string, int64, string, ClaimAudit, ClaimOutboxEvent) error
+	})
+	if !ok {
+		return fmt.Errorf("idempotent claim deletion unavailable")
+	}
+	audit := ClaimAudit{ClaimID: claimID, ActorID: actorID, Action: "CLAIM_DRAFT_DELETED", Version: expectedVersion}
+	event := ClaimOutboxEvent{ClaimID: claimID, Type: "ClaimDraftDeleted", Version: expectedVersion}
+	return deleter.DeleteIdempotent(ctx, claimID, actorID, expectedVersion, key, audit, event)
+}
+
 type MemoryClaimRepository struct {
 	mu     sync.Mutex
 	claims map[string]domain.Claim
@@ -217,6 +247,17 @@ func (repository *MemoryClaimRepository) FindOwned(_ context.Context, claimID st
 	return claim.Clone(), nil
 }
 
+func (repository *MemoryClaimRepository) FindOwnedByNumber(_ context.Context, claimNumber string, actorID string) (domain.Claim, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	for _, claim := range repository.claims {
+		if claim.OwnerID == actorID && claim.ClaimNumber == claimNumber {
+			return claim.Clone(), nil
+		}
+	}
+	return domain.Claim{}, ErrClaimNotFound
+}
+
 func (repository *MemoryClaimRepository) ListOwned(_ context.Context, actorID string, limit int) ([]domain.Claim, error) {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
@@ -227,6 +268,50 @@ func (repository *MemoryClaimRepository) ListOwned(_ context.Context, actorID st
 		}
 	}
 	return claims, nil
+}
+
+func (repository *MemoryClaimRepository) SearchOwned(_ context.Context, actorID string, query SearchClaimsQuery) ([]domain.Claim, int64, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	owned := make([]domain.Claim, 0)
+	for _, claim := range repository.claims {
+		if claim.OwnerID == actorID {
+			owned = append(owned, claim.Clone())
+		}
+	}
+	filtered := filterAndSortClaims(owned, query)
+	total := int64(len(filtered))
+	if query.CountOnly {
+		return []domain.Claim{}, total, nil
+	}
+	if query.AfterID != "" {
+		found := false
+		for index, claim := range filtered {
+			if claim.ID == query.AfterID {
+				filtered = filtered[index+1:]
+				found = true
+				break
+			}
+		}
+		if !found {
+			return []domain.Claim{}, total, ErrInvalidClaimSearch
+		}
+	}
+	if query.Page > 0 {
+		offset := (query.Page - 1) * query.Limit
+		if offset >= len(filtered) {
+			return []domain.Claim{}, total, nil
+		}
+		filtered = filtered[offset:]
+		if len(filtered) > query.Limit {
+			filtered = filtered[:query.Limit]
+		}
+		return filtered, total, nil
+	}
+	if len(filtered) > query.Limit+1 {
+		filtered = filtered[:query.Limit+1]
+	}
+	return filtered, total, nil
 }
 
 func (repository *MemoryClaimRepository) Update(_ context.Context, claim domain.Claim, expectedVersion int64, audit ClaimAudit, event ClaimOutboxEvent) error {

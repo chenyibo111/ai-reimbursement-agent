@@ -8,7 +8,7 @@ import (
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/domain"
 )
 
-func TestDeleteReceiptRemovesDraftReceiptAndStoredObject(t *testing.T) {
+func TestDeleteReceiptQueuesObjectCleanupAfterRemovingDraftReceipt(t *testing.T) {
 	service := newReceiptServiceForTest(t)
 	receipt, err := service.CreateUploadSession(context.Background(), "employee-1", "claim-1", CreateUploadSessionCommand{Filename: "invoice.png", ContentType: "image/png", SizeBytes: 12})
 	if err != nil {
@@ -22,8 +22,26 @@ func TestDeleteReceiptRemovesDraftReceiptAndStoredObject(t *testing.T) {
 	if _, found := service.repository.receipts[receipt.ReceiptID]; found {
 		t.Fatal("expected receipt record to be deleted")
 	}
-	if _, found := service.objects.objects[receipt.ObjectKey]; found {
-		t.Fatal("expected stored object to be deleted")
+	if _, found := service.objects.objects[receipt.ObjectKey]; !found {
+		t.Fatal("stored object must remain until durable cleanup runs")
+	}
+	if len(service.repository.cleanupKeys) != 1 || service.repository.cleanupKeys[0] != receipt.ObjectKey {
+		t.Fatalf("cleanup queue = %#v", service.repository.cleanupKeys)
+	}
+}
+
+func TestDeleteReceiptAtVersionRejectsConcurrentClaimUpdate(t *testing.T) {
+	service := newReceiptServiceForTest(t)
+	receipt, err := service.CreateUploadSession(context.Background(), "employee-1", "claim-1", CreateUploadSessionCommand{Filename: "invoice.png", ContentType: "image/png", SizeBytes: 12})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = service.DeleteReceiptAtVersion(context.Background(), "employee-1", "claim-1", receipt.ReceiptID, 2)
+	if !errors.Is(err, domain.ErrClaimVersionConflict) {
+		t.Fatalf("expected conflict, got %v", err)
+	}
+	if _, found := service.repository.receipts[receipt.ReceiptID]; !found {
+		t.Fatal("receipt must remain")
 	}
 }
 

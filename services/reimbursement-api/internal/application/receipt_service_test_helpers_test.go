@@ -83,6 +83,7 @@ type fakeReceiptRepository struct {
 	receipts                map[string]domain.Receipt
 	submittedInvoiceNumbers map[string]bool
 	reviewReasons           map[string][]string
+	cleanupKeys             []string
 }
 
 func (repository *fakeReceiptRepository) Create(_ context.Context, receipt domain.Receipt) error {
@@ -123,14 +124,18 @@ func (repository *fakeReceiptRepository) FindByContentHash(_ context.Context, ha
 	return domain.Receipt{}, ErrReceiptNotFound
 }
 
-func (repository *fakeReceiptRepository) DeleteOwned(_ context.Context, receiptID string, claimID string, actorID string) error {
+func (repository *fakeReceiptRepository) DeleteOwned(_ context.Context, receiptID string, claimID string, actorID string, expectedVersion int64) error {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
+	if expectedVersion != 1 {
+		return domain.ErrClaimVersionConflict
+	}
 	receipt, found := repository.receipts[receiptID]
 	if !found || receipt.ClaimID != claimID || receipt.OwnerID != actorID {
 		return ErrReceiptNotFound
 	}
 	delete(repository.receipts, receiptID)
+	repository.cleanupKeys = append(repository.cleanupKeys, receipt.ObjectKey)
 	return nil
 }
 

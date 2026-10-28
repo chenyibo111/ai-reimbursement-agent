@@ -26,6 +26,59 @@ async function createEmployee() {
 }
 
 describe("AgentConversationRepository", () => {
+  it("persists an old claim's private Feishu notification target and rejects group targets", async () => {
+    const employee = await createEmployee();
+    const privateChat = await repository.getOrCreatePrivate(employee.id);
+    const group = await repository.getOrCreateGroup(employee.id, `oc-group-${employee.id}`);
+    const claimId = `old-go-claim-${employee.id}`;
+    await repository.recordFeishuDeliveryTarget({ conversationId: privateChat.id, chatId: `oc-private-${employee.id}` });
+    await repository.subscribeClaimNotifications({ employeeId: employee.id, conversationId: privateChat.id, chatId: `oc-private-${employee.id}`, claimId });
+    await expect(repository.findNotificationTargetByClaimId(claimId)).resolves.toEqual({ employeeId: employee.id, conversationId: privateChat.id, chatId: `oc-private-${employee.id}` });
+    await repository.recordFeishuDeliveryTarget({ conversationId: group.id, chatId: `oc-group-${employee.id}` });
+    await expect(repository.subscribeClaimNotifications({ employeeId: employee.id, conversationId: group.id, chatId: `oc-group-${employee.id}`, claimId })).rejects.toThrow("not verified");
+    await expect(repository.findNotificationTargetByClaimId(claimId)).resolves.toEqual({ employeeId: employee.id, conversationId: privateChat.id, chatId: `oc-private-${employee.id}` });
+  });
+  it("consumes a pending receipt deletion at most once", async () => {
+    const employee = await createEmployee();
+    const conversation = await repository.getOrCreatePrivate(employee.id);
+    const action = { kind: "DELETE_RECEIPT" as const, claimId: "claim-1", claimVersion: 3, receiptId: "receipt-2", expiresAt: new Date(Date.now() + 60_000).toISOString() };
+    await repository.setPendingAction({ conversationId: conversation.id, action });
+    expect(await repository.consumePendingAction({ conversationId: conversation.id, action })).toBe(true);
+    expect(await repository.consumePendingAction({ conversationId: conversation.id, action })).toBe(false);
+    await expect(repository.getConversationByIdOrThrow(conversation.id)).resolves.toMatchObject({ pendingAction: null });
+  });
+  it("persists an edit target independently of read selection and active Intake", async () => {
+    const employee = await createEmployee();
+    const conversation = await repository.getOrCreatePrivate(employee.id);
+    const intake = await repository.createIntake({ employeeId: employee.id, conversationId: conversation.id, claimId: "active-go-claim" });
+    await repository.setSelectedReadClaimId({ conversationId: conversation.id, claimId: "read-go-claim" });
+    await repository.setSelectedEditClaimId({ conversationId: conversation.id, claimId: "edit-go-claim" });
+    await expect(repository.getConversationByIdOrThrow(conversation.id)).resolves.toMatchObject({ selectedReadClaimId: "read-go-claim", selectedEditClaimId: "edit-go-claim" });
+    await expect(repository.getCurrentIntake(employee.id)).resolves.toMatchObject({ id: intake.id, claimId: "active-go-claim" });
+  });
+  it("persists a bounded search page independently of the active intake", async () => {
+    const employee = await createEmployee();
+    const conversation = await repository.getOrCreatePrivate(employee.id);
+    const intake = await repository.createIntake({ employeeId: employee.id, conversationId: conversation.id, claimId: "active-claim" });
+    const state = { query: { status: "DRAFT" as const }, remaining: 2, cursor: "cursor", totalCount: 12, expiresAt: new Date(Date.now()+600_000).toISOString(), lastPage: [{ ordinal: 1, id: "old-claim", claimNumber: "BX20261026-0001" }] };
+    await repository.setSearchState({ conversationId: conversation.id, state });
+    await expect(repository.getConversationByIdOrThrow(conversation.id)).resolves.toMatchObject({ searchState: state });
+    await expect(repository.getCurrentIntake(employee.id)).resolves.toMatchObject({ id: intake.id, claimId: "active-claim" });
+    await repository.setSearchState({ conversationId: conversation.id, state: null });
+    await expect(repository.getConversationByIdOrThrow(conversation.id)).resolves.toMatchObject({ searchState: null });
+  });
+  it("persists a private read selection separately from active intake and group chat", async () => {
+    const employee = await createEmployee();
+    const conversation = await repository.getOrCreatePrivate(employee.id);
+    const group = await repository.getOrCreateGroup(employee.id, `oc-read-${employee.id}`);
+    const intake = await repository.createIntake({ employeeId: employee.id, conversationId: conversation.id, claimId: "active-go-claim" });
+    await repository.setSelectedReadClaimId({ conversationId: conversation.id, claimId: "old-go-claim" });
+    await expect(repository.getConversationByIdOrThrow(conversation.id)).resolves.toMatchObject({ selectedReadClaimId: "old-go-claim" });
+    await expect(repository.getCurrentIntake(employee.id)).resolves.toMatchObject({ id: intake.id, claimId: "active-go-claim" });
+    await expect(repository.getConversationByIdOrThrow(group.id)).resolves.toMatchObject({ selectedReadClaimId: null });
+    await repository.setSelectedReadClaimId({ conversationId: conversation.id, claimId: null });
+    await expect(repository.getConversationByIdOrThrow(conversation.id)).resolves.toMatchObject({ selectedReadClaimId: null });
+  });
   it("shares an employee private conversation between Web and Feishu but isolates group conversations", async () => {
     const employee = await createEmployee();
 

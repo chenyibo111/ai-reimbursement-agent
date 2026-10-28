@@ -72,6 +72,7 @@ func main() {
 		workers.NewApplicationReceiptExtractor(receipts, receiptService),
 	)
 	go publishOutbox(ctx, events.NewOutboxPublisher(events.NewPostgresOutboxStore(pool), publisher))
+	go workers.RunObjectCleanup(ctx, pool, objects)
 	log.Print("reimbursement worker started")
 	if err := workers.ConsumeReceiptReady(ctx, publisher.JetStream(), receiptWorker, receipts); err != nil {
 		log.Printf("reimbursement worker stopped with error: %v", err)
