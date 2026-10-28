@@ -330,6 +330,51 @@ it("previews the exact second same-name receipt and deletes it once after confir
   expect(deleteReceipt).toHaveBeenCalledTimes(1);
 });
 
+it("checks a model-supplied claim number against the selected draft before staging receipt deletion", async () => {
+  const setup = createDeps();
+  const setPendingAction = vi.fn(async () => undefined);
+  const deleteReceipt = vi.fn(async () => undefined);
+  const claim = { id: "older-draft", claimNumber: "BX20261026-0007", version: 3, status: "DRAFT", purpose: "客户拜访", totalAmountCent: null, currency: "CNY" as const };
+  const receipt = { id: "receipt-1", claimId: "older-draft", filename: "invoice.pdf", status: "EXTRACTED", invoiceNumber: "123", ocrConfidence: 0.9, totalAmountCent: 1000 };
+  const decisions = [
+    { action: "DELETE_RECEIPT" as const, reply: "ignored", claimNumber: "BX20261026-9999", receiptOrdinal: 1 },
+    { action: "DELETE_RECEIPT" as const, reply: "ignored", claimNumber: claim.claimNumber, receiptOrdinal: 1 },
+  ];
+  const deps = { ...setup.deps, deleteReceipt,
+    conversations: { ...setup.deps.conversations,
+      getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0, selectedEditClaimId: claim.id }),
+      setPendingAction,
+    },
+    model: { decideConversation: async () => decisions.shift()! },
+    readWorkbench: vi.fn(async () => ({ claim, receipts: [receipt] })),
+  };
+  const mismatch = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "删除另一张单的票据" }, deps);
+  expect(mismatch.reply).toContain("不一致");
+  expect(setPendingAction).not.toHaveBeenCalled();
+  const matched = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "删除本单第一张票据" }, deps);
+  expect(matched.reply).toContain("确认删除票据");
+  expect(setPendingAction).toHaveBeenCalledTimes(1);
+  expect(deleteReceipt).not.toHaveBeenCalled();
+});
+
+it("refuses a receipt deletion when the employee explicitly names a different draft even if the model repeats the selected one", async () => {
+  const setup = createDeps();
+  const setPendingAction = vi.fn(async () => undefined);
+  const deleteReceipt = vi.fn(async () => undefined);
+  const claim = { id: "older-draft", claimNumber: "BX20261026-0007", version: 3, status: "DRAFT", purpose: "客户拜访", totalAmountCent: null, currency: "CNY" as const };
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "删除 BX20261026-0008 的第一张票据" }, {
+    ...setup.deps, deleteReceipt,
+    conversations: { ...setup.deps.conversations,
+      getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0, selectedEditClaimId: claim.id }),
+      setPendingAction,
+    },
+    model: { decideConversation: async () => ({ action: "DELETE_RECEIPT" as const, reply: "ignored", claimNumber: claim.claimNumber, receiptOrdinal: 1 }) },
+    readWorkbench: async () => ({ claim, receipts: [{ id: "receipt-1", claimId: claim.id, filename: "invoice.pdf", status: "EXTRACTED", invoiceNumber: "123", ocrConfidence: 0.9, totalAmountCent: 1000 }] }),
+  });
+  expect(result.reply).toContain("不一致");
+  expect(setPendingAction).not.toHaveBeenCalled();
+});
+
 it("edits a selected old draft even without a current Intake", async () => {
   const setup = createDeps();
   const updateFields = vi.fn(async ({ claimId, fields }: { claimId: string; fields: ClaimFieldPatch }) => ({ id: claimId, claimNumber: "BX20261026-0007", version: 4, status: "DRAFT", purpose: fields.purpose ?? null, totalAmountCent: null, currency: "CNY" as const }));

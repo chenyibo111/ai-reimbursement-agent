@@ -296,7 +296,7 @@ async function answerPolicyQuestion(
 }
 
 async function applyDecision(
-  input: { actorId: string; conversationId: string; channel: AgentMessageChannel; chatType?: "p2p" | "group"; channelMessageId?: string },
+  input: { actorId: string; conversationId: string; channel: AgentMessageChannel; chatType?: "p2p" | "group"; channelMessageId?: string; message: string },
   intake: IntakeRecord | null,
   decision: ConversationDecision,
   deps: RunConversationTurnDeps,
@@ -317,6 +317,9 @@ async function applyDecision(
     try {
       const workbench = await deps.readWorkbench({ actorId: input.actorId, claimId: selectedEditClaimId });
       if (workbench.claim.id !== selectedEditClaimId || workbench.claim.status !== "DRAFT") return persistReply(input, intake, "当前草稿不可办理，请重新选择。", [], deps.conversations);
+      const explicitClaimNumbers = [...new Set(Array.from(input.message.matchAll(/\bBX\d{8}-\d{4,}\b/gi), ([number]) => number.toUpperCase()))];
+      if (explicitClaimNumbers.some((number) => number !== workbench.claim.claimNumber.toUpperCase())) return persistReply(input, intake, "所提报销单号与当前选中草稿不一致。请先选中要删除票据的本人草稿。", [], deps.conversations);
+      if (decision.claimNumber && workbench.claim.claimNumber.toUpperCase() !== decision.claimNumber.toUpperCase()) return persistReply(input, intake, "所提报销单号与当前选中草稿不一致。请先选中要删除票据的本人草稿。", [], deps.conversations);
       const ordinal = decision.receiptOrdinal;
       if (!ordinal || ordinal > workbench.receipts.length) return persistReply(input, intake, `请指定票据序号。当前单据有 ${workbench.receipts.length} 张票据：${workbench.receipts.map((item, index) => `${index + 1}. ${item.filename}（${item.id}）`).join("；")}`, [], deps.conversations);
       const receipt = workbench.receipts[ordinal - 1];

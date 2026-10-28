@@ -7,7 +7,7 @@ import type { ConversationContext } from "@/src/application/build-conversation-c
 import type { ConversationDecision } from "@/src/infrastructure/model/chat-model";
 import { OpenAiCompatibleChatModel } from "@/src/infrastructure/model/openai-compatible-chat-model";
 
-export const INTENT_PROMPT_VERSION = "semantic-intent-v2";
+export const INTENT_PROMPT_VERSION = "semantic-intent-v3";
 
 export function checkIntentEvalGate(report: IntentEvalReport): { passed: boolean; reasons: string[] } {
   const reasons: string[] = [];

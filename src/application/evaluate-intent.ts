@@ -120,12 +120,13 @@ export async function evaluateIntent(
       const argumentMatch = item.expectedDecision ? isDeepStrictEqual(argumentsOnly, item.expectedDecision) : null;
       const actionMatch = decision.action === item.expectedAction || Boolean(item.acceptedActions?.includes(decision.action));
       const expectedTarget = targetReference(item.expectedDecision);
-      const targetReferenceMatch = expectedTarget ? actionMatch && isDeepStrictEqual(targetReference(decision), expectedTarget) : null;
+      const actualTarget = targetReference(decision);
+      const targetReferenceMatch = compareTargetReference(expectedTarget, actualTarget, actionMatch, item.riskTags);
       results.push({ id: item.id, expectedAction: item.expectedAction, actualAction: decision.action, accepted: actionMatch && argumentMatch !== false, argumentMatch, targetReferenceMatch, riskTags: item.riskTags ?? [], latencyMs: Math.round(performance.now() - started) });
     } catch (error) {
       const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
       const failureType = code === "TIMEOUT" || code === "UNAVAILABLE" || code === "INVALID_RESPONSE" ? code : "MODEL_ERROR";
-      results.push({ id: item.id, expectedAction: item.expectedAction, actualAction: "ERROR", accepted: false, argumentMatch: item.expectedDecision ? false : null, targetReferenceMatch: targetReference(item.expectedDecision) ? false : null, riskTags: item.riskTags ?? [], latencyMs: Math.round(performance.now() - started), failureType });
+      results.push({ id: item.id, expectedAction: item.expectedAction, actualAction: "ERROR", accepted: false, argumentMatch: item.expectedDecision ? false : null, targetReferenceMatch: null, riskTags: item.riskTags ?? [], latencyMs: Math.round(performance.now() - started), failureType });
     }
   }
 
@@ -151,7 +152,7 @@ export async function evaluateIntent(
     outOfScopeRecall: byAction.OUT_OF_SCOPE.recall,
     dangerousPrepareFalsePositives: results.filter((result) => result.riskTags.includes("unsafe_submit") && result.actualAction === "PREPARE_SUBMISSION").length,
     dangerousWriteTargetErrors: results.filter((result) => result.riskTags.includes("wrong_claim") && targetActions.includes(result.actualAction as ConversationAction) && !result.accepted).length,
-    targetReferenceErrors: results.filter((result) => result.targetReferenceMatch === false || (result.riskTags.includes("wrong_claim") && !result.accepted)).length,
+    targetReferenceErrors: results.filter((result) => result.targetReferenceMatch === false).length,
     decisionAccuracy: decisionsWithArguments.length ? decisionsWithArguments.filter((result) => result.accepted).length / decisionsWithArguments.length : 0,
     clarificationRate: results.length ? results.filter((result) => result.actualAction === "CLARIFY").length / results.length : 0,
     failureCount: results.filter((result) => result.actualAction === "ERROR").length,
@@ -165,4 +166,10 @@ function targetReference(value: Partial<ConversationDecision> | undefined): obje
   const keys = ["claimNumber", "claimOrdinal", "receiptOrdinal", "targetReference"] as const;
   const target = Object.fromEntries(keys.filter((key) => value[key] !== undefined).map((key) => [key, value[key]]));
   return Object.keys(target).length ? target : null;
+}
+
+function compareTargetReference(expected: object | null, actual: object | null, actionMatch: boolean, riskTags: string[] | undefined): boolean | null {
+  if (!actual) return null;
+  if (!expected) return riskTags?.includes("wrong_claim") ? false : null;
+  return actionMatch && isDeepStrictEqual(actual, expected);
 }

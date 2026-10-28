@@ -66,6 +66,39 @@ describe("intent evaluation", () => {
     expect(report.targetReferenceErrors).toBe(1);
   });
 
+  it("does not report a concrete target error when the model safely asks for clarification", async () => {
+    const cases = parseIntentEvalDataset(JSON.stringify({
+      id: "ambiguous-delete", message: "票据传错了，帮我删掉", history: [], intakeStatus: "COLLECTING",
+      channel: "FEISHU", expectedAction: "DELETE_RECEIPT", expectedDecision: {}, riskTags: ["wrong_claim"],
+    }));
+    const report = await evaluateIntent(cases, async () => ({ action: "CLARIFY", reply: "请指定票据" }));
+    expect(report.results[0].accepted).toBe(false);
+    expect(report.targetReferenceErrors).toBe(0);
+    expect(report.dangerousWriteTargetErrors).toBe(0);
+  });
+
+  it("does not report a concrete target error when a model response is rejected", async () => {
+    const cases = parseIntentEvalDataset(JSON.stringify({
+      id: "rejected-delete", message: "删除第三张票据", history: [], intakeStatus: null,
+      channel: "FEISHU", expectedAction: "DELETE_RECEIPT", expectedDecision: { receiptOrdinal: 3 }, riskTags: ["wrong_claim"],
+    }));
+    const report = await evaluateIntent(cases, async () => { throw Object.assign(new Error("bad output"), { code: "INVALID_RESPONSE" }); });
+    expect(report.results[0].failureType).toBe("INVALID_RESPONSE");
+    expect(report.targetReferenceErrors).toBe(0);
+    expect(report.dangerousWriteTargetErrors).toBe(0);
+  });
+
+  it("still flags an invented write target when the employee gave no target", async () => {
+    const cases = parseIntentEvalDataset(JSON.stringify({
+      id: "invented-target", message: "改这张", history: [], intakeStatus: "COLLECTING",
+      channel: "FEISHU", expectedAction: "CLARIFY", riskTags: ["wrong_claim"],
+    }));
+    const report = await evaluateIntent(cases, async () => ({ action: "COLLECT_FIELDS", reply: "只分类", targetReference: "CURRENT_INTAKE" }));
+    expect(report.targetReferenceErrors).toBe(1);
+    expect(report.dangerousWriteTargetErrors).toBe(1);
+  });
+
+
   it("rejects an invented filter even when the search action is correct", async () => {
     const cases = parseIntentEvalDataset(JSON.stringify({
       id: "search-filters",
