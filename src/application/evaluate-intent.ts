@@ -63,6 +63,7 @@ export type IntentEvalResult = {
   actualAction: ConversationAction | "ERROR";
   accepted: boolean;
   argumentMatch: boolean | null;
+  targetReferenceMatch: boolean | null;
   riskTags: string[];
   latencyMs: number;
   failureType?: "MODEL_ERROR" | "TIMEOUT" | "UNAVAILABLE" | "INVALID_RESPONSE";
@@ -76,6 +77,7 @@ export type IntentEvalReport = {
   outOfScopeRecall: number;
   dangerousPrepareFalsePositives: number;
   dangerousWriteTargetErrors: number;
+  targetReferenceErrors: number;
   decisionAccuracy: number;
   clarificationRate: number;
   failureCount: number;
@@ -117,11 +119,13 @@ export async function evaluateIntent(
       const { action: _action, reply: _reply, ...argumentsOnly } = decision;
       const argumentMatch = item.expectedDecision ? isDeepStrictEqual(argumentsOnly, item.expectedDecision) : null;
       const actionMatch = decision.action === item.expectedAction || Boolean(item.acceptedActions?.includes(decision.action));
-      results.push({ id: item.id, expectedAction: item.expectedAction, actualAction: decision.action, accepted: actionMatch && argumentMatch !== false, argumentMatch, riskTags: item.riskTags ?? [], latencyMs: Math.round(performance.now() - started) });
+      const expectedTarget = targetReference(item.expectedDecision);
+      const targetReferenceMatch = expectedTarget ? actionMatch && isDeepStrictEqual(targetReference(decision), expectedTarget) : null;
+      results.push({ id: item.id, expectedAction: item.expectedAction, actualAction: decision.action, accepted: actionMatch && argumentMatch !== false, argumentMatch, targetReferenceMatch, riskTags: item.riskTags ?? [], latencyMs: Math.round(performance.now() - started) });
     } catch (error) {
       const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
       const failureType = code === "TIMEOUT" || code === "UNAVAILABLE" || code === "INVALID_RESPONSE" ? code : "MODEL_ERROR";
-      results.push({ id: item.id, expectedAction: item.expectedAction, actualAction: "ERROR", accepted: false, argumentMatch: item.expectedDecision ? false : null, riskTags: item.riskTags ?? [], latencyMs: Math.round(performance.now() - started), failureType });
+      results.push({ id: item.id, expectedAction: item.expectedAction, actualAction: "ERROR", accepted: false, argumentMatch: item.expectedDecision ? false : null, targetReferenceMatch: targetReference(item.expectedDecision) ? false : null, riskTags: item.riskTags ?? [], latencyMs: Math.round(performance.now() - started), failureType });
     }
   }
 
@@ -147,10 +151,18 @@ export async function evaluateIntent(
     outOfScopeRecall: byAction.OUT_OF_SCOPE.recall,
     dangerousPrepareFalsePositives: results.filter((result) => result.riskTags.includes("unsafe_submit") && result.actualAction === "PREPARE_SUBMISSION").length,
     dangerousWriteTargetErrors: results.filter((result) => result.riskTags.includes("wrong_claim") && targetActions.includes(result.actualAction as ConversationAction) && !result.accepted).length,
+    targetReferenceErrors: results.filter((result) => result.targetReferenceMatch === false || (result.riskTags.includes("wrong_claim") && !result.accepted)).length,
     decisionAccuracy: decisionsWithArguments.length ? decisionsWithArguments.filter((result) => result.accepted).length / decisionsWithArguments.length : 0,
     clarificationRate: results.length ? results.filter((result) => result.actualAction === "CLARIFY").length / results.length : 0,
     failureCount: results.filter((result) => result.actualAction === "ERROR").length,
     averageLatencyMs: results.length ? results.reduce((sum, result) => sum + result.latencyMs, 0) / results.length : 0,
     results,
   };
+}
+
+function targetReference(value: Partial<ConversationDecision> | undefined): object | null {
+  if (!value) return null;
+  const keys = ["claimNumber", "claimOrdinal", "receiptOrdinal", "targetReference"] as const;
+  const target = Object.fromEntries(keys.filter((key) => value[key] !== undefined).map((key) => [key, value[key]]));
+  return Object.keys(target).length ? target : null;
 }

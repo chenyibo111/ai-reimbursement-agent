@@ -38,7 +38,7 @@ APP_PUBLIC_URL="https://reimbursement.example.com"
 
 本机可执行 `npm run feishu:worker` 来建立长连接。不要在 Next.js Route Handler、浏览器或无状态函数中启动它。生产以 `feishu-bot-worker` 容器常驻运行；Worker 只需向飞书出网，员工浏览器需要访问 `APP_PUBLIC_URL`。
 
-Worker 将业务处理结果先保存为待投递回复，再用固定 `uuid` 调用飞书回复接口。投递失败按 5 秒、20 秒、60 秒、180 秒退避，最多尝试 5 次；业务动作不会因投递失败而重新执行。Worker 每分钟回收处理时间超过 2 分钟的事件。终止失败会保留 `InboundChannelEvent.status=REPLY_FAILED` 和脱敏 `failureCode`，并记录 `reply.delivery.failed` 日志；启用 observability profile 后触发 `FeishuReplyDeliveryFailed` 告警。排查时先核对飞书会话是否已有回复，再决定是否人工补发；对于超过飞书去重窗口、结果不明的旧请求，Worker 不会自动重发，以免重复通知。上线前运行新增 Prisma 迁移并重建 `feishu-bot-worker` 镜像。
+Worker 将业务处理结果先保存为待投递回复，再用固定 `uuid` 调用飞书回复接口。投递失败按 5 秒、20 秒、60 秒、180 秒退避，最多尝试 5 次；业务动作不会因投递失败而重新执行。Worker 每分钟回收处理时间超过 2 分钟的事件，启动时也只回收超时事件；飞书明确拒绝的回复继续重试。终止失败会保留 `InboundChannelEvent.status=REPLY_FAILED` 和脱敏 `failureCode`，并记录 `reply.delivery.failed` 日志；启用 observability profile 后触发 `FeishuReplyDeliveryFailed` 告警。排查时先核对飞书会话是否已有回复，再决定是否人工补发；对于超过飞书去重窗口、超时或响应不明的旧请求，Worker 不会自动重发，以免重复通知。上线前运行新增 Prisma 迁移并重建 `feishu-bot-worker` 镜像。
 
 ## 测试企业检查清单
 

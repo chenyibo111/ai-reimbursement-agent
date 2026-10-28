@@ -68,7 +68,7 @@ it("claims an inbound event once and makes retryable events available again", as
 });
 
 it("releases an event left processing by a stopped Worker so the next Worker can reclaim it", async () => {
-  await repository.recordInbound({
+  const event = await repository.recordInbound({
     eventId: "event-restart",
     messageId: "om-restart",
     messageType: "text",
@@ -77,6 +77,9 @@ it("releases an event left processing by a stopped Worker so the next Worker can
   });
   await expect(repository.claimNextPending()).resolves.toMatchObject({ eventId: "event-restart", status: "PROCESSING" });
 
+  await expect(repository.recoverProcessingEvents()).resolves.toMatchObject({ recovered: 0 });
+  await expect(repository.claimNextPending()).resolves.toBeNull();
+  await prisma.inboundChannelEvent.update({ where: { id: event.id }, data: { updatedAt: new Date(Date.now() - 3 * 60_000) } });
   await repository.recoverProcessingEvents();
 
   await expect(repository.claimNextPending()).resolves.toMatchObject({ eventId: "event-restart", status: "PROCESSING" });
@@ -93,6 +96,7 @@ it("keeps a completed business reply durable across delivery failure and worker 
   await prisma.inboundChannelEvent.update({ where: { id: event.id }, data: { nextDeliveryAttemptAt: new Date(0) } });
   await expect(repository.claimNextPending()).resolves.toMatchObject({ id: event.id, status: "REPLY_PROCESSING", deliveryAttemptCount: 2, attemptCount: 1 });
 
+  await prisma.inboundChannelEvent.update({ where: { id: event.id }, data: { updatedAt: new Date(Date.now() - 3 * 60_000) } });
   await repository.recoverProcessingEvents();
   await expect(repository.claimNextPending()).resolves.toMatchObject({ id: event.id, status: "REPLY_PROCESSING", deliveryAttemptCount: 3, attemptCount: 1 });
   await repository.markReplyDelivered(event.id);
@@ -116,6 +120,31 @@ it("does not automatically resend an ambiguous reply after Feishu's deduplicatio
   await repository.markReplyPending(event.id, "已提交");
   await repository.claimNextPending();
   await prisma.inboundChannelEvent.update({ where: { id: event.id }, data: { updatedAt: new Date(Date.now() - 56 * 60_000) } });
+
+  await expect(repository.recoverProcessingEvents()).resolves.toMatchObject({ uncertainDeliveryFailed: 1 });
+  await expect(repository.claimNextPending()).resolves.toBeNull();
+  await expect(prisma.inboundChannelEvent.findUniqueOrThrow({ where: { id: event.id } })).resolves.toMatchObject({ status: "REPLY_FAILED", failureCode: "DELIVERY_OUTCOME_UNKNOWN" });
+});
+
+it("keeps a known failed delivery retryable after a long worker outage", async () => {
+  const event = await repository.recordInbound({ eventId: "event-old-retry", messageId: "om-old-retry", messageType: "text", chatId: "oc-1", senderOpenId: "ou-1" });
+  await repository.claimNextPending();
+  await repository.markReplyPending(event.id, "已保存");
+  await repository.claimNextPending();
+  await repository.markReplyRetryableFailure(event.id, "REJECTED");
+  await prisma.inboundChannelEvent.update({ where: { id: event.id }, data: { updatedAt: new Date(Date.now() - 56 * 60_000), nextDeliveryAttemptAt: new Date(0) } });
+
+  await expect(repository.recoverProcessingEvents()).resolves.toMatchObject({ uncertainDeliveryFailed: 0 });
+  await expect(repository.claimNextPending()).resolves.toMatchObject({ id: event.id, status: "REPLY_PROCESSING", deliveryAttemptCount: 2, attemptCount: 1 });
+});
+
+it("stops an old retry after a transport failure whose delivery outcome is unknown", async () => {
+  const event = await repository.recordInbound({ eventId: "event-unknown-retry", messageId: "om-unknown-retry", messageType: "text", chatId: "oc-1", senderOpenId: "ou-1" });
+  await repository.claimNextPending();
+  await repository.markReplyPending(event.id, "已保存");
+  await repository.claimNextPending();
+  await repository.markReplyRetryableFailure(event.id, "UNAVAILABLE");
+  await prisma.inboundChannelEvent.update({ where: { id: event.id }, data: { updatedAt: new Date(Date.now() - 56 * 60_000), nextDeliveryAttemptAt: new Date(0) } });
 
   await expect(repository.recoverProcessingEvents()).resolves.toMatchObject({ uncertainDeliveryFailed: 1 });
   await expect(repository.claimNextPending()).resolves.toBeNull();

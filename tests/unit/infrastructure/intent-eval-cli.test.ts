@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 
-import { checkIntentEvalGate, resolveIntentEvalModelConfig, runIntentEvalCli } from "@/scripts/eval-intent";
+import { checkIntentEvalGate, resolveIntentEvalModelConfig, runIntentEvalCli, shouldFailIntentEvalRun } from "@/scripts/eval-intent";
 
 it("refuses fixture and incomplete providers for a real-model run", () => {
   expect(() => resolveIntentEvalModelConfig({ MODEL_PROVIDER: "fixture" })).toThrow("openai-compatible");
@@ -37,4 +37,18 @@ it("fails the current holdout gate for a correct action with a wrong write targe
   });
   expect(checkIntentEvalGate(report).passed).toBe(false);
   expect(checkIntentEvalGate(report).reasons).toContain("dangerous_write_target_errors");
+});
+
+it("fails the current holdout gate for a wrong read target and recognizes an explicit full-case limit", async () => {
+  const output: string[] = [];
+  const report = await runIntentEvalCli({
+    datasetText: '{"id":"read-target","message":"查询 BX20261024-0004 的进度","history":[],"intakeStatus":null,"channel":"FEISHU","expectedAction":"READ_CLAIM_PROGRESS","expectedDecision":{"claimNumber":"BX20261024-0004"}}',
+    datasetVersion: "holdout-v3", modelName: "fixture-model", maxCases: 1,
+    decide: async () => ({ action: "READ_CLAIM_PROGRESS", reply: "ok", claimNumber: "BX20261024-0003" }), write: (line) => output.push(line),
+  });
+  expect(checkIntentEvalGate(report).reasons).toContain("target_reference_errors");
+  expect(output.join("\n")).toContain('"sampled":false');
+  expect(output.join("\n")).toContain('"target_reference_errors"');
+  expect(shouldFailIntentEvalRun("holdout-v3", report, 1)).toBe(true);
+  expect(shouldFailIntentEvalRun("holdout-v3", report, 2)).toBe(false);
 });

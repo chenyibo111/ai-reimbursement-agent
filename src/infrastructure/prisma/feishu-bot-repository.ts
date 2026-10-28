@@ -105,10 +105,16 @@ export class FeishuBotRepository {
     });
   }
 
-  async recoverProcessingEvents(olderThan: Date = new Date()): Promise<{ recovered: number; uncertainDeliveryFailed: number }> {
+  async recoverProcessingEvents(olderThan: Date = new Date(Date.now() - 2 * 60_000)): Promise<{ recovered: number; uncertainDeliveryFailed: number }> {
     const cutoff = new Date(Date.now() - 55 * 60_000);
     const uncertain = await this.prisma.inboundChannelEvent.updateMany({
-      where: { status: { in: ["REPLY_PROCESSING", "REPLY_RETRYABLE"] }, updatedAt: { lt: cutoff } },
+      where: {
+        OR: [
+          { status: "REPLY_PROCESSING" },
+          { status: "REPLY_RETRYABLE", failureCode: { in: ["UNAVAILABLE", "INVALID_RESPONSE", "DELIVERY_UNAVAILABLE"] } },
+        ],
+        updatedAt: { lt: cutoff },
+      },
       data: { status: "REPLY_FAILED", failureCode: "DELIVERY_OUTCOME_UNKNOWN" },
     });
     const recovered = await this.prisma.inboundChannelEvent.updateMany({

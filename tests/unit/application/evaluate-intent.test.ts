@@ -51,6 +51,19 @@ describe("intent evaluation", () => {
     expect(report.results[0]).toMatchObject({ accepted: false, argumentMatch: false });
     expect(report.decisionAccuracy).toBe(0);
     expect(report.dangerousWriteTargetErrors).toBe(1);
+    expect(report.targetReferenceErrors).toBe(1);
+  });
+
+  it("counts an incorrect claim reference in a read action as a zero-tolerance target error", async () => {
+    const cases = parseIntentEvalDataset(JSON.stringify({
+      id: "read-target", message: "查询 BX20261024-0004 的进度", history: [], intakeStatus: null,
+      channel: "FEISHU", expectedAction: "READ_CLAIM_PROGRESS",
+      expectedDecision: { claimNumber: "BX20261024-0004" },
+    }));
+    const report = await evaluateIntent(cases, async () => ({ action: "READ_CLAIM_PROGRESS", reply: "只分类", claimNumber: "BX20261024-0003" }));
+    expect(report.byAction.READ_CLAIM_PROGRESS.f1).toBe(1);
+    expect(report.dangerousWriteTargetErrors).toBe(0);
+    expect(report.targetReferenceErrors).toBe(1);
   });
 
   it("rejects an invented filter even when the search action is correct", async () => {
