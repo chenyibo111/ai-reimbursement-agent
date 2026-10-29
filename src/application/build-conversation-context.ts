@@ -12,10 +12,11 @@ export type ConversationContext = {
   intake: { status: ReimbursementIntakeStatus; collectedFields: Record<string, unknown>; pendingFields: string[]; restartPending: boolean } | null;
   policyCitations: Array<{ title: string; headingPath: string[]; excerpt: string; score: number }>;
   allowedFields: ConversationCollectedFieldName[];
+  selection?: { hasReadClaim: boolean; hasEditDraft: boolean; readEditConflict: boolean; readIntakeConflict: boolean };
 };
 
 type ConversationContextInput = {
-  conversation: { summary: string; summaryThroughSequence: number };
+  conversation: { summary: string; summaryThroughSequence: number; selectedReadClaimId?: string | null; selectedEditClaimId?: string | null };
   messages: Array<{ sequence: number; role: AgentMessageRole; channel: AgentMessageChannel; text: string }>;
   intake: { status: ReimbursementIntakeStatus; claimId: string | null; collectedFields: unknown; pendingFields: string[]; restartRequestedAt?: Date | null } | null;
   policyCitations: Array<{ title: string; headingPath: string[]; excerpt: string; score: number; url?: string }>;
@@ -39,6 +40,8 @@ const defaultBudgets: ConversationContextBudgets = {
 export function buildConversationContext(input: ConversationContextInput): ConversationContext {
   const budgets = { ...defaultBudgets, ...input.budgets };
   const intake = toSafeIntake(input.intake, budgets.intakeChars);
+  const readId = input.conversation.selectedReadClaimId;
+  const editId = input.conversation.selectedEditClaimId;
   return {
     summary: {
       text: clamp(input.conversation.summary, budgets.summaryChars),
@@ -47,7 +50,13 @@ export function buildConversationContext(input: ConversationContextInput): Conve
     messages: selectNewestMessages(input.messages, budgets.messageChars),
     intake,
     policyCitations: selectPolicyCitations(input.policyCitations, budgets.policyChars),
-    allowedFields: intake ? [...conversationCollectedFieldNames] : [],
+    allowedFields: intake || editId ? [...conversationCollectedFieldNames] : [],
+    selection: {
+      hasReadClaim: Boolean(readId),
+      hasEditDraft: Boolean(editId),
+      readEditConflict: Boolean(readId && editId && readId !== editId),
+      readIntakeConflict: Boolean(readId && input.intake?.claimId && readId !== input.intake.claimId),
+    },
   };
 }
 
