@@ -46,6 +46,8 @@ type Claim struct {
 	Currency                  string
 	RequestedAmountSource     RequestedAmountSource
 	Remark                    string
+	SubmissionPolicyVersion   string
+	SubmissionWarnings        []ValidationIssue
 }
 
 type ClaimPatch struct {

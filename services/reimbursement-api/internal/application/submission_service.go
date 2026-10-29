@@ -30,6 +30,7 @@ type SubmissionConfirmation struct {
 	ClaimVersion  int64
 	PolicyVersion string
 	ExpiresAt     time.Time
+	Warnings      []domain.ValidationIssue
 }
 
 type SubmissionSnapshot struct {
@@ -54,10 +55,11 @@ type SubmissionInput struct {
 
 type SubmissionRepository interface {
 	LoadSubmissionInput(context.Context, string, string) (SubmissionInput, error)
+	LoadActivePolicy(context.Context, time.Time) (*PolicyVersion, error)
 	StoreConfirmation(context.Context, SubmissionConfirmation) error
 	FindConfirmation(context.Context, string) (SubmissionConfirmation, error)
 	FindSubmissionByIdempotencyKey(context.Context, string, string, string) (SubmissionSnapshot, error)
-	Submit(context.Context, SubmissionInput, SubmissionConfirmation, string, string) (SubmissionSnapshot, error)
+	Submit(context.Context, SubmissionInput, SubmissionConfirmation, string, string, Clock) (SubmissionSnapshot, error)
 }
 
 type SubmissionService struct {
@@ -81,7 +83,20 @@ func (service *SubmissionService) ValidateClaim(ctx context.Context, actorID str
 		return ValidationResult{}, fmt.Errorf("load claim validation input: %w", err)
 	}
 	issues := validateSubmissionInput(input)
-	return ValidationResult{ClaimID: input.Claim.ID, ClaimVersion: input.Claim.Version, PolicyVersion: "baseline-v1", Issues: issues}, nil
+	version := "baseline-v1"
+	policy, err := service.repository.LoadActivePolicy(ctx, service.clock.Now())
+	if err != nil {
+		return ValidationResult{}, fmt.Errorf("load active policy: %w", err)
+	}
+	if policy != nil {
+		policyIssues, err := EvaluatePolicyRules(*policy, input.Claim)
+		if err != nil {
+			return ValidationResult{}, fmt.Errorf("evaluate active policy: %w", err)
+		}
+		version = policy.ID
+		issues = append(issues, policyIssues...)
+	}
+	return ValidationResult{ClaimID: input.Claim.ID, ClaimVersion: input.Claim.Version, PolicyVersion: version, Issues: issues}, nil
 }
 
 func (service *SubmissionService) RequestSubmission(ctx context.Context, actorID string, claimID string, expectedVersion int64) (SubmissionConfirmation, error) {
@@ -95,7 +110,13 @@ func (service *SubmissionService) RequestSubmission(ctx context.Context, actorID
 	if hasBlockingIssue(validation.Issues) {
 		return SubmissionConfirmation{}, ErrValidationBlocked
 	}
-	confirmation := SubmissionConfirmation{Token: randomToken(), ClaimID: claimID, ActorID: actorID, ClaimVersion: validation.ClaimVersion, PolicyVersion: validation.PolicyVersion, ExpiresAt: service.clock.Now().Add(15 * time.Minute)}
+	warnings := make([]domain.ValidationIssue, 0)
+	for _, issue := range validation.Issues {
+		if !issue.IsBlocking() {
+			warnings = append(warnings, issue)
+		}
+	}
+	confirmation := SubmissionConfirmation{Token: randomToken(), ClaimID: claimID, ActorID: actorID, ClaimVersion: validation.ClaimVersion, PolicyVersion: validation.PolicyVersion, ExpiresAt: service.clock.Now().Add(15 * time.Minute), Warnings: warnings}
 	if err = service.repository.StoreConfirmation(ctx, confirmation); err != nil {
 		return SubmissionConfirmation{}, fmt.Errorf("store submission confirmation: %w", err)
 	}
@@ -138,7 +159,7 @@ func (service *SubmissionService) SubmitClaim(ctx context.Context, actorID strin
 	if err != nil {
 		return SubmissionSnapshot{}, fmt.Errorf("reload submission input: %w", err)
 	}
-	snapshot, err := service.repository.Submit(ctx, input, confirmation, idempotencyKey, validation.PolicyVersion)
+	snapshot, err := service.repository.Submit(ctx, input, confirmation, idempotencyKey, validation.PolicyVersion, service.clock)
 	if err != nil {
 		return SubmissionSnapshot{}, fmt.Errorf("persist submission: %w", err)
 	}

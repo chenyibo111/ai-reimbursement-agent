@@ -74,6 +74,30 @@ func (repository *PostgresClaimRepository) FindOwned(ctx context.Context, claimI
 	if err != nil {
 		return domain.Claim{}, fmt.Errorf("query owned claim: %w", err)
 	}
+	if claim.Status == domain.ClaimStatusSubmitted {
+		var policyIssues []byte
+		err = repository.pool.QueryRow(ctx, `
+			SELECT policy_version,
+				CASE WHEN jsonb_typeof(snapshot->'policyIssues') = 'array' THEN snapshot->'policyIssues' ELSE '[]'::jsonb END
+			FROM reimbursement.submission_snapshots
+			WHERE claim_id = $1 AND actor_id = $2
+			ORDER BY submitted_at DESC LIMIT 1
+		`, claimID, actorID).Scan(&claim.SubmissionPolicyVersion, &policyIssues)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return domain.Claim{}, fmt.Errorf("query submitted policy warnings: %w", err)
+		}
+		if err == nil {
+			var issues []domain.ValidationIssue
+			if err := json.Unmarshal(policyIssues, &issues); err != nil {
+				return domain.Claim{}, fmt.Errorf("decode submitted policy warnings: %w", err)
+			}
+			for _, issue := range issues {
+				if !issue.IsBlocking() {
+					claim.SubmissionWarnings = append(claim.SubmissionWarnings, issue)
+				}
+			}
+		}
+	}
 	return claim, nil
 }
 

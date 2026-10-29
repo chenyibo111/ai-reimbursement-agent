@@ -288,7 +288,7 @@ async function answerPolicyQuestion(
       ? "当前没有可供引用的已同步报销政策，请以公司财务制度为准。"
       : result.incomplete || !result.evidence.length
         ? "检索到相关制度，但无法读取完整章节，请查看引用原文；我暂不能据此给出完整规则。"
-        : await answerFromEvidence(message, result.evidence, deps.model);
+        : `${await answerFromEvidence(message, result.evidence, deps.model)}\n\n以上是已同步飞书文档的制度解释。报销系统会校验基础提交条件和已生效的结构化规则；城市等未配置字段需人工核对，不代表本单已通过提交校验。`;
     return persistReply(input, intake, reply, citations, deps.conversations);
   } catch {
     return persistReply(input, intake, "政策检索暂不可用，请稍后重试或查阅公司财务制度。", [], deps.conversations);

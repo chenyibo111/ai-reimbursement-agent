@@ -13,11 +13,26 @@ paths:
             schema:
               type: object
               required: [id, effectiveDate]
+              additionalProperties: false
               properties:
                 id: { type: string }
                 effectiveDate: { type: string, format: date }
+                rules:
+                  type: array
+                  description: Empty or omitted means no executable policy rules. City and item-level rules are not supported.
+                  items:
+                    type: object
+                    required: [code, name, type, severity, config]
+                    additionalProperties: false
+                    properties:
+                      code: { type: string }
+                      name: { type: string }
+                      type: { type: string, enum: [CLAIM_TOTAL_MAX, CATEGORY_ALLOWED, CATEGORY_REQUIRED_FIELD] }
+                      severity: { type: string, enum: [BLOCKING, WARNING] }
+                      config: { type: object }
       responses:
         "201": { description: Policy published }
+        "409": { description: Policy version identifier already exists; publish changes under a new identifier }
         default: { $ref: "#/components/responses/Error" }
   /api/v1/admin/reviews:
     get:
@@ -522,6 +537,13 @@ components:
           type: array
           items: { type: string }
         projectCode: { type: [string, "null"] }
+        submissionPolicyVersion:
+          type: string
+          description: Policy version recorded in the submitted snapshot, if available.
+        submissionWarnings:
+          type: array
+          description: Non-blocking policy issues recorded in the submitted snapshot.
+          items: { $ref: "#/components/schemas/ValidationIssue" }
         receiptCount:
           type: integer
           minimum: 0
@@ -624,9 +646,15 @@ components:
           enum: [BLOCKING, WARNING]
         message:
           type: string
+        policyVersionId:
+          type: string
+          description: Set for a published Go policy rule issue.
+        ruleCode:
+          type: string
+          description: Set for a published Go policy rule issue.
     SubmissionRequest:
       type: object
-      required: [confirmationToken, claimId, claimVersion, policyVersion, expiresAt]
+      required: [confirmationToken, claimId, claimVersion, policyVersion, expiresAt, warnings]
       properties:
         confirmationToken:
           type: string
@@ -639,6 +667,10 @@ components:
         expiresAt:
           type: string
           format: date-time
+        warnings:
+          type: array
+          description: Non-blocking validation issues shown to the employee during submission.
+          items: { $ref: "#/components/schemas/ValidationIssue" }
     ErrorResponse:
       type: object
       required: [code, message, requestId]

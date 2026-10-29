@@ -18,6 +18,10 @@ export function parseCNYAmountToCent(value: string): AmountParseResult {
 	return { cents: Number(cents) };
 }
 
+export function parseParticipants(value: string): string[] {
+	return value.split(/[,，、\n]/).map((item) => item.trim()).filter(Boolean);
+}
+
 function formatAmountInput(value: number | null) {
 	return value === null ? "" : (value / 100).toFixed(2);
 }
@@ -26,9 +30,12 @@ function errorMessage(error: unknown) {
 	return error instanceof Error ? error.message : "保存失败，请检查后重试。";
 }
 
-export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onSubmitted }: { claim: Claim; recognizedAmountCent: number | null; onSaved?: (claim: Claim) => void; onSubmitted?: () => void }) {
+export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onSubmitted }: { claim: Claim; recognizedAmountCent: number | null; onSaved?: (claim: Claim) => void; onSubmitted?: (warnings: ValidationIssue[]) => void }) {
 	const mutation = useUpdateClaim(claim.id);
 	const [purpose, setPurpose] = useState(claim.purpose ?? "");
+	const [expenseCategory, setExpenseCategory] = useState(claim.expenseCategory ?? "");
+	const [projectCode, setProjectCode] = useState(claim.projectCode ?? "");
+	const [participantsText, setParticipantsText] = useState((claim.participants ?? []).join("，"));
 	const [amountText, setAmountText] = useState(() => formatAmountInput(claim.requestedAmountCent));
 	const [remark, setRemark] = useState(claim.remark ?? "");
 	const [amountError, setAmountError] = useState("");
@@ -42,10 +49,13 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 	useEffect(() => {
 		if (isEditing) return;
 		setPurpose(claim.purpose ?? "");
+		setExpenseCategory(claim.expenseCategory ?? "");
+		setProjectCode(claim.projectCode ?? "");
+		setParticipantsText((claim.participants ?? []).join("，"));
 		setAmountText(formatAmountInput(claim.requestedAmountCent));
 		setRemark(claim.remark ?? "");
 		setAmountError("");
-	}, [claim.id, claim.version, claim.purpose, claim.requestedAmountCent, claim.remark, isEditing]);
+	}, [claim.id, claim.version, claim.purpose, claim.expenseCategory, claim.projectCode, claim.participants, claim.requestedAmountCent, claim.remark, isEditing]);
 
 	function markEdited() {
 		setIsEditing(true);
@@ -62,6 +72,9 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 		return {
 			version: claim.version,
 			purpose: purpose.trim(),
+			expenseCategory: expenseCategory.trim(),
+			projectCode: projectCode.trim(),
+			participants: parseParticipants(participantsText),
 			...(parsed ? { requestedAmountCent: parsed.cents } : {}),
 			currency: "CNY",
 			remark: remark.trim() || null,
@@ -73,6 +86,9 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 		if (!patch) return null;
 		const updated = await mutation.mutateAsync(patch);
 		setPurpose(updated.purpose ?? "");
+		setExpenseCategory(updated.expenseCategory ?? "");
+		setProjectCode(updated.projectCode ?? "");
+		setParticipantsText((updated.participants ?? []).join("，"));
 		setAmountText(formatAmountInput(updated.requestedAmountCent));
 		setRemark(updated.remark ?? "");
 		setIsEditing(false);
@@ -99,9 +115,13 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 			const updated = await saveDraft();
 			if (!updated) return;
 			const confirmation = await reimbursementApi.requestSubmission(claim.id, updated.version);
+			const warnings = confirmation.warnings ?? [];
+			setSubmissionIssues(warnings);
 			await reimbursementApi.submit(claim.id, confirmation.confirmationToken);
-			onSubmitted?.();
+			setSubmissionIssues([]);
+			onSubmitted?.(warnings);
 		} catch (error) {
+			setSubmissionIssues([]);
 			if (error instanceof ReimbursementApiError && error.code === "VALIDATION_BLOCKED") {
 				const validation = await reimbursementApi.getValidation(claim.id).catch(() => null);
 				if (validation) {
@@ -139,6 +159,15 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 					<label htmlFor="claim-purpose">报销事由 <span className="required-label">（提交必填）</span></label>
 					<input id="claim-purpose" name="purpose" value={purpose} onChange={(event) => { markEdited(); setPurpose(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} placeholder="例如：杭州客户拜访" />
 					<p className="field-hint">简要说明这笔报销对应的业务事项。</p>
+				</div>
+				<div className="field-stack">
+					<label htmlFor="claim-expense-category">费用类别</label>
+					<input id="claim-expense-category" name="expenseCategory" value={expenseCategory} onChange={(event) => { markEdited(); setExpenseCategory(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} placeholder="例如：住宿费" />
+					<p className="field-hint">若公司政策设置了类别范围，提交前需填写允许的类别。</p>
+				</div>
+				<div className="application-form-grid">
+					<div className="field-stack"><label htmlFor="claim-project-code">项目编码</label><input id="claim-project-code" name="projectCode" value={projectCode} onChange={(event) => { markEdited(); setProjectCode(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} placeholder="有对应项目时填写" /><p className="field-hint">适用的费用类别可能要求填写项目编码。</p></div>
+					<div className="field-stack"><label htmlFor="claim-participants">同行人</label><input id="claim-participants" name="participants" value={participantsText} onChange={(event) => { markEdited(); setParticipantsText(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} placeholder="例如：张三，李四" /><p className="field-hint">多人之间用逗号分隔；适用类别可能要求填写。</p></div>
 				</div>
 				<div className="application-form-grid">
 					<div className="field-stack">

@@ -110,6 +110,38 @@ describe("ClaimWorkbenchPage", () => {
     await waitFor(() => expect(reimbursementApi.submit).toHaveBeenCalledWith("claim-1", "confirmation-1"));
   });
 
+	it("shows policy warnings after a one-click submission", async () => {
+		const user = userEvent.setup();
+		const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+		const { reimbursementApi } = await import("../../api/client");
+		vi.mocked(reimbursementApi.requestSubmission).mockResolvedValueOnce({
+			confirmationToken: "confirmation-warning", claimId: "claim-1", claimVersion: 2,
+			policyVersion: "warning-policy", expiresAt: "2026-10-29T12:00:00.000Z",
+			warnings: [{ code: "POLICY_TOTAL", severity: "WARNING", message: "整单上限：申请报销总额超过上限。", policyVersionId: "warning-policy", ruleCode: "TOTAL" }],
+		});
+		render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={["/claims/claim-1"]}><Routes><Route path="/claims/:claimId" element={<ClaimWorkbenchPage />} /></Routes></MemoryRouter></QueryClientProvider>);
+		await user.click(await screen.findByRole("button", { name: "提交报销单" }));
+		await waitFor(() => expect(reimbursementApi.submit).toHaveBeenCalledWith("claim-1", "confirmation-warning"));
+		expect(await screen.findByText("整单上限：申请报销总额超过上限。")).toBeVisible();
+		expect(screen.getByText("政策提醒")).toBeVisible();
+	});
+
+	it("shows saved policy warnings when reopening a submitted claim", async () => {
+		const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+		const { reimbursementApi } = await import("../../api/client");
+		vi.mocked(reimbursementApi.getClaim).mockResolvedValueOnce({
+			id: "claim-1", claimNumber: "BX20261029-0001", status: "SUBMITTED", version: 7,
+			purpose: "客户拜访", expenseCategory: null, participants: [], projectCode: null,
+			receiptCount: 1, recognizedReceiptCount: 1, totalAmountCent: 12000, missingAmountReceiptCount: 0,
+			requestedAmountCent: 12000, currency: "CNY", requestedAmountSource: "MANUAL", remark: null,
+			createdAt: "2026-10-29T01:00:00.000Z", updatedAt: "2026-10-29T01:14:11.000Z",
+			submissionWarnings: [{ code: "POLICY_TOTAL", severity: "WARNING", message: "整单上限：申请报销总额超过上限。" }],
+		});
+		render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={["/claims/claim-1"]}><Routes><Route path="/claims/:claimId" element={<ClaimWorkbenchPage />} /></Routes></MemoryRouter></QueryClientProvider>);
+		expect(await screen.findByText("整单上限：申请报销总额超过上限。")).toBeVisible();
+		expect(screen.getByText("政策提醒")).toBeVisible();
+	});
+
 	it("requires confirmation before deleting a draft receipt", async () => {
 		const user = userEvent.setup();
 		const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

@@ -2,12 +2,14 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/application"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -17,15 +19,23 @@ func NewPostgresPolicyRuleRepository(pool *pgxpool.Pool) *PostgresPolicyRuleRepo
 	return &PostgresPolicyRuleRepository{pool}
 }
 func (repository *PostgresPolicyRuleRepository) Publish(ctx context.Context, actorID string, version application.PolicyVersion) error {
+	rules, err := json.Marshal(version.Rules)
+	if err != nil {
+		return fmt.Errorf("encode policy rules: %w", err)
+	}
 	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, `UPDATE reimbursement.policy_versions SET status='ARCHIVED' WHERE status='PUBLISHED'`); err != nil {
-		return fmt.Errorf("archive policy: %w", err)
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(4242424242)`); err != nil {
+		return fmt.Errorf("lock policy publication: %w", err)
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO reimbursement.policy_versions (id,status,effective_date,published_by,published_at) VALUES ($1,'PUBLISHED',$2::date,$3,now()) ON CONFLICT (id) DO UPDATE SET status='PUBLISHED',effective_date=EXCLUDED.effective_date,published_by=EXCLUDED.published_by,published_at=EXCLUDED.published_at`, version.ID, version.EffectiveDate, actorID); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO reimbursement.policy_versions (id,status,effective_date,published_by,published_at,rules) VALUES ($1,'PUBLISHED',$2::date,$3,now(),$4::jsonb)`, version.ID, version.EffectiveDate, actorID, rules); err != nil {
+		var pgError *pgconn.PgError
+		if errors.As(err, &pgError) && pgError.Code == "23505" && pgError.ConstraintName == "policy_versions_pkey" {
+			return application.ErrPolicyVersionExists
+		}
 		return fmt.Errorf("publish policy: %w", err)
 	}
 	return tx.Commit(ctx)

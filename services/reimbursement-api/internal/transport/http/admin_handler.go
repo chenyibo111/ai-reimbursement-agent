@@ -34,14 +34,21 @@ func (handler *adminHandler) publishPolicy(response http.ResponseWriter, request
 		return
 	}
 	var body struct {
-		ID            string `json:"id"`
-		EffectiveDate string `json:"effectiveDate"`
+		ID            string                   `json:"id"`
+		EffectiveDate string                   `json:"effectiveDate"`
+		Rules         []application.PolicyRule `json:"rules"`
 	}
-	if json.NewDecoder(request.Body).Decode(&body) != nil || strings.TrimSpace(body.ID) == "" {
+	decoder := json.NewDecoder(request.Body)
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&body) != nil || strings.TrimSpace(body.ID) == "" {
 		writeError(response, 400, "INVALID_REQUEST", "政策参数无效")
 		return
 	}
-	if err := handler.services.Policies.Publish(actor.ID, application.PolicyVersion{ID: body.ID, EffectiveDate: body.EffectiveDate}); err != nil {
+	if err := handler.services.Policies.Publish(actor.ID, application.PolicyVersion{ID: body.ID, EffectiveDate: body.EffectiveDate, Rules: body.Rules}); err != nil {
+		if errors.Is(err, application.ErrPolicyVersionExists) {
+			writeError(response, http.StatusConflict, "POLICY_VERSION_EXISTS", "该政策版本编号已发布，请使用新的版本编号。")
+			return
+		}
 		writeError(response, 400, "INVALID_REQUEST", err.Error())
 		return
 	}
