@@ -1,5 +1,17 @@
 # Agent 意图评测数据维护
 
+## 端到端工作流回放
+
+`tests/fixtures/agent-workflow/workflow-v1.jsonl` 使用一行一个案例，必须标记 `provenance`（`synthetic`、`self_test` 或 `employee_anonymized`）。每一轮写入原始测试输入、固定模式的 `fixtureDecision`，以及期望动作、工具名称和目标单据、回复包含/排除片段、引用数量和单据/Intake 状态。确认提交等精确短语由服务端处理，不需要 `fixtureDecision`。
+
+可用 `npm run eval:agent -- real self-submission-summary` 仅复测指定案例；按案例 ID 运行仍标记为 `sampled`，不会通过完整评测门槛。
+
+执行 `npm run eval:agent` 可离线验证完整回放；`npm run eval:agent -- real` 显式调用真实模型，可能计费。可以附加案例数量进行抽样，抽样结果的 `gate` 为 `null`。完整运行不通过时以非零状态退出。固定模式只验证编排与授权边界，不测模型准确率；真实模式在合成/自测集上的通过率也不能代表生产员工流量质量。录入员工案例前先移除姓名、单号、金额、发票号码、政策正文、会话历史等敏感信息，并由人工确认期望动作和业务结果；勿把真实凭据或原文写入仓库。报告只含 ID、来源分类、失败码、失败时的预期/实际动作和工具名称、模型失败阶段与错误码、未命中的回复断言序号，不包含输入、回复、工具参数或引用正文。`MODEL_ERROR` 的 `stage=decision` 表示意图判断调用失败，`stage=policy_answer` 表示已找到引用但生成政策答案的调用失败；`missingReplyChecks` 从 1 开始，对应场景中的 `replyIncludes` 顺序。金额数字与“元”之间的空格在回复断言中视为排版差异。
+
+回放使用生产会话编排和 Go 工具网关，但底层报销端口、会话存储、政策检索和上传目标均是内存替身。因此它无法验证网络故障、Go 持久化、实际权限配置、OCR/知识库检索质量或飞书事件交付；这些仍需独立集成和环境验收。
+
+选中旧草稿后的“修改事由”和“请提交这张报销单”案例依赖服务端传给模型的 `selection` 状态标志；标志只表明是否已有可编辑目标、最近查看目标是否冲突，不包含内部单据 ID。`allowedFields` 在已有 Intake 或已选草稿时开放白名单字段。最终写入和提交仍由 Go 工具网关复核归属、状态、版本和确认令牌。
+
 `tests/fixtures/intent-eval/dev-v3.jsonl` 用于开发与调优；`holdout-v3.jsonl` 是锁定的回归保留集。旧版 `dev.jsonl` 和 `holdout.jsonl` 保留以便对比，不能将旧分数当成当前完整能力的成绩。
 
 1. 从本人已授权的自测会话或经同意的员工反馈中记录原始问法与必要的前两轮上下文。不要直接导出完整聊天记录。

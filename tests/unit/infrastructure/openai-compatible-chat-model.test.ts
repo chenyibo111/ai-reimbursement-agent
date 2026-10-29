@@ -102,6 +102,24 @@ describe("OpenAiCompatibleChatModel", () => {
     })).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
   });
 
+  it("classifies edits to an already selected draft using capability flags without sending claim IDs", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: '{"action":"COLLECT_FIELDS","reply":"保存","fields":{"purpose":"客户拜访"}}' } }],
+    }), { status: 200 }));
+    const model = new OpenAiCompatibleChatModel({ baseUrl: "https://model.example/v1", model: "demo-chat", apiKey: "secret", fetchImpl });
+    const decision = await model.decideConversation({
+      summary: { text: "", throughSequence: 0 },
+      messages: [{ sequence: 1, role: "USER", channel: "FEISHU", text: "把报销事由改成客户拜访" }],
+      intake: null, policyCitations: [], allowedFields: ["purpose", "expenseCategory", "participants", "projectCode"],
+      selection: { hasReadClaim: true, hasEditDraft: true, readEditConflict: false, readIntakeConflict: false },
+    });
+    expect(decision).toMatchObject({ action: "COLLECT_FIELDS", fields: { purpose: "客户拜访" } });
+    const body = JSON.parse(String(fetchImpl.mock.calls[0][1].body));
+    expect(body.messages[1].content).toContain('"hasEditDraft":true');
+    expect(body.messages[0].content).toContain("请提交这张报销单时用 PREPARE_SUBMISSION");
+    expect(String(fetchImpl.mock.calls[0][1].body)).not.toContain("claim-private-id");
+  });
+
   it.each([
     ["这张发票多少钱", "READ_RECEIPT_AMOUNT"],
     ["申请报销总额", "READ_CLAIM"],

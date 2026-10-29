@@ -46,3 +46,25 @@ it("uses deterministic limits and does not let a summary replace Intake facts", 
   expect(context.intake?.collectedFields).toEqual({ purpose: "客户拜访" });
   expect(context.allowedFields).toEqual(["purpose", "expenseCategory", "participants", "projectCode"]);
 });
+
+it("exposes selected draft capability without exposing internal claim identifiers", () => {
+  const context = buildConversationContext({
+    conversation: { summary: "", summaryThroughSequence: 0, selectedEditClaimId: "private-draft-id", selectedReadClaimId: "private-draft-id" },
+    messages: [{ sequence: 1, role: "USER", channel: "FEISHU", text: "把报销事由改成客户拜访" }],
+    intake: null,
+    policyCitations: [],
+  });
+  expect(context.selection).toEqual({ hasReadClaim: true, hasEditDraft: true, readEditConflict: false, readIntakeConflict: false });
+  expect(context.allowedFields).toEqual(["purpose", "expenseCategory", "participants", "projectCode"]);
+  expect(JSON.stringify(context)).not.toContain("private-draft-id");
+});
+
+it("marks a conflicting read target without exposing either claim ID", () => {
+  const context = buildConversationContext({
+    conversation: { summary: "", summaryThroughSequence: 0, selectedEditClaimId: "edit-private-id", selectedReadClaimId: "read-private-id" },
+    messages: [], intake: null, policyCitations: [],
+  });
+  expect(context.selection).toEqual({ hasReadClaim: true, hasEditDraft: true, readEditConflict: true, readIntakeConflict: false });
+  expect(JSON.stringify(context)).not.toContain("edit-private-id");
+  expect(JSON.stringify(context)).not.toContain("read-private-id");
+});
