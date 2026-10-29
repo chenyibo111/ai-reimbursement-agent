@@ -18,7 +18,7 @@ export function formatClaimFacts(kind: ClaimFactKind, workbench: Workbench, vali
   const issues = validation?.issues ?? [];
   const issueText = issues.length ? issues.map((issue) => `${issue.severity === "BLOCKING" ? "阻断" : "提醒"}：${issue.message}`).join("；") : "当前未返回校验问题";
   const receiptText = receipts.length ? receipts.map(receiptLine).join("；") : "尚无票据";
-  return `报销单 ${claimLabel} 的只读摘要：报销事由：${claim.purpose || "未填写"}；申请报销总额：${money(claim.requestedAmountCent)}；${receiptTotal}；票据 ${receipts.length} 张（${receiptText}）；提交条件：${issueText}。此摘要未申请提交确认，也未提交报销单。`;
+  return `报销单 ${claimLabel} 的只读摘要：报销事由：${claim.purpose || "未填写"}；申请报销总额：${money(claim.requestedAmountCent)}；${receiptTotal}；票据 ${receipts.length} 张（${receiptText}）；系统规则版本：${validation?.policyVersion || "未取得"}；提交条件：${issueText}。校验仅涵盖系统可自动判断的字段，未编码制度条款需人工核对。此摘要未申请提交确认，也未提交报销单。`;
 }
 
 function receiptTotalDescription({ claim, receipts }: Workbench): string {

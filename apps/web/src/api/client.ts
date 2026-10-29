@@ -11,6 +11,7 @@ export class ReimbursementApiError extends Error {
 }
 
 export type TokenProvider = { getAccessToken(): string | null; refreshAccessToken(): Promise<string> };
+export type PublishedPolicyRule = { code: string; name: string; type: "CLAIM_TOTAL_MAX" | "CATEGORY_ALLOWED" | "CATEGORY_REQUIRED_FIELD"; severity: "BLOCKING" | "WARNING"; config: { maxAmountCents: number } | { categories: string[] } | { category: string; field: "participants" | "projectCode" } };
 type RequestOptions = Omit<RequestInit, "body"> & { body?: unknown; idempotent?: boolean };
 type ApiClientDeps = { fetcher?: typeof fetch; randomId?: () => string };
 
@@ -64,7 +65,7 @@ export function createReimbursementApi(tokenProvider: TokenProvider, deps: ApiCl
     getValidation: (claimId: string) => request<ValidationResult>(`/api/v1/claims/${encodeURIComponent(claimId)}/validation`),
     requestSubmission: (claimId: string, version: number) => request<SubmissionRequest>(`/api/v1/claims/${encodeURIComponent(claimId)}/submission-requests`, { method: "POST", body: { version }, idempotent: true }),
     submit: (claimId: string, confirmationToken: string) => request<SubmissionSnapshot>(`/api/v1/claims/${encodeURIComponent(claimId)}/submit`, { method: "POST", body: { confirmationToken }, idempotent: true }),
-    publishPolicy: (id: string, effectiveDate: string) => request<{ id: string; status: string }>("/api/v1/admin/policies/publish", { method: "POST", body: { id, effectiveDate }, idempotent: true }),
+    publishPolicy: (id: string, effectiveDate: string, rules: PublishedPolicyRule[]) => request<{ id: string; status: string }>("/api/v1/admin/policies/publish", { method: "POST", body: { id, effectiveDate, rules }, idempotent: true }),
     listReviews: () => request<{ items: ReviewCase[] }>("/api/v1/admin/reviews"),
     getReview: (reviewId: string) => request<ReviewCase>(`/api/v1/admin/reviews/${encodeURIComponent(reviewId)}`),
     getReviewReceiptPreview: (reviewId: string) => request<ReceiptPreview>(`/api/v1/admin/reviews/${encodeURIComponent(reviewId)}/receipt-preview`),

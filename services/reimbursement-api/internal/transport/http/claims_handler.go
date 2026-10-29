@@ -464,6 +464,10 @@ func (handler *claimsHandler) patchClaim(response http.ResponseWriter, request *
 }
 
 func claimResponse(claim application.ClaimView) map[string]any {
+	warnings := make([]map[string]any, 0, len(claim.SubmissionWarnings))
+	for _, issue := range claim.SubmissionWarnings {
+		warnings = append(warnings, validationIssueResponse(issue, claim.SubmissionPolicyVersion))
+	}
 	return map[string]any{
 		"id":                        claim.ID,
 		"claimNumber":               claim.ClaimNumber,
@@ -482,6 +486,8 @@ func claimResponse(claim application.ClaimView) map[string]any {
 		"currency":                  claim.Currency,
 		"requestedAmountSource":     claim.RequestedAmountSource,
 		"remark":                    nullableString(claim.Remark),
+		"submissionPolicyVersion":   claim.SubmissionPolicyVersion,
+		"submissionWarnings":        warnings,
 		"createdAt":                 claim.CreatedAt,
 		"updatedAt":                 claim.UpdatedAt,
 	}
@@ -533,13 +539,22 @@ func (handler *claimsHandler) validateClaim(response http.ResponseWriter, reques
 	}
 	issues := make([]map[string]any, 0, len(result.Issues))
 	for _, issue := range result.Issues {
-		severity := "WARNING"
-		if issue.Blocking {
-			severity = "BLOCKING"
-		}
-		issues = append(issues, map[string]any{"code": issue.Code, "severity": severity, "message": issue.Message})
+		issues = append(issues, validationIssueResponse(issue, result.PolicyVersion))
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"claimId": result.ClaimID, "claimVersion": result.ClaimVersion, "policyVersion": result.PolicyVersion, "issues": issues})
+}
+
+func validationIssueResponse(issue domain.ValidationIssue, policyVersion string) map[string]any {
+	severity := "WARNING"
+	if issue.Blocking {
+		severity = "BLOCKING"
+	}
+	entry := map[string]any{"code": issue.Code, "severity": severity, "message": issue.Message}
+	if strings.HasPrefix(issue.Code, "POLICY_") {
+		entry["policyVersionId"] = policyVersion
+		entry["ruleCode"] = strings.TrimPrefix(issue.Code, "POLICY_")
+	}
+	return entry
 }
 
 func (handler *claimsHandler) requestSubmission(response http.ResponseWriter, request *http.Request) {
@@ -564,7 +579,11 @@ func (handler *claimsHandler) requestSubmission(response http.ResponseWriter, re
 		writeMappedError(response, err)
 		return
 	}
-	writeJSON(response, http.StatusCreated, map[string]any{"confirmationToken": confirmation.Token, "claimId": confirmation.ClaimID, "claimVersion": confirmation.ClaimVersion, "policyVersion": confirmation.PolicyVersion, "expiresAt": confirmation.ExpiresAt})
+	warnings := make([]map[string]any, 0, len(confirmation.Warnings))
+	for _, issue := range confirmation.Warnings {
+		warnings = append(warnings, validationIssueResponse(issue, confirmation.PolicyVersion))
+	}
+	writeJSON(response, http.StatusCreated, map[string]any{"confirmationToken": confirmation.Token, "claimId": confirmation.ClaimID, "claimVersion": confirmation.ClaimVersion, "policyVersion": confirmation.PolicyVersion, "expiresAt": confirmation.ExpiresAt, "warnings": warnings})
 }
 
 func writeJSON(response http.ResponseWriter, status int, value any) {

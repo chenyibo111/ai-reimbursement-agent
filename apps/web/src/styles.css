@@ -46,6 +46,9 @@ input::placeholder, textarea::placeholder { color: #94a3b8; }
 .form-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
 .field-error { margin: 10px 0 0; color: #c43a4a; line-height: 1.5; }
 .inline-notice { min-height: 1.5em; margin: 0 0 18px; color: #13806a; font-weight: 700; }
+.submission-warning { margin: 0 0 20px; padding: 14px 18px; border: 1px solid #edc987; border-radius: 12px; background: #fff7e8; color: #7b4200; line-height: 1.55; }
+.submission-warning ul { margin: 7px 0; padding-left: 1.35em; }
+.submission-warning p { margin: 0; }
 .claim-list { padding: 24px; }
 .claim-search-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-top: 20px; padding: 18px; border: 1px solid #dce4f0; border-radius: 14px; background: #f7f9fc; }
 .claim-search-form label { display: grid; align-content: start; gap: 6px; color: #334155; font-size: .84rem; }
@@ -88,6 +91,16 @@ input::placeholder, textarea::placeholder { color: #94a3b8; }
 .case-rail strong, .case-rail small { display: block; }
 .workbench-content { display: grid; gap: 20px; }
 .workbench-panel { padding: 24px; }
+.policy-publish-panel { max-width: 880px; }
+.policy-version-fields, .policy-rule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+.policy-rules-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
+.policy-rules-heading h3 { margin: 0; }
+.policy-rule-count { font-size: .8rem; color: #64748b; font-weight: 500; }
+.policy-empty-rule { padding: 18px; background: #f7f9fc; border: 1px dashed #cbd7e8; border-radius: 14px; color: #475569; }
+.policy-rules-list { display: grid; gap: 14px; }
+.policy-rule-card { border: 1px solid #dce4f0; border-radius: 14px; padding: 18px; margin: 0; background: #f7f9fc; }
+.policy-rule-card legend { padding: 0 6px; font-weight: 700; color: #13233d; }
+.policy-remove-rule { margin-top: 14px; }
 .review-layout { display: grid; grid-template-columns: minmax(260px, .8fr) minmax(0, 1.7fr); gap: 24px; align-items: start; }
 .review-list-panel { padding: 20px; border: 1px solid #dce4f0; border-radius: 20px; background: #fff; }
 .review-list { display: grid; gap: 8px; padding: 0; margin: 18px 0 0; list-style: none; }

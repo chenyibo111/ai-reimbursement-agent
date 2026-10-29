@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/application"
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/domain"
@@ -30,6 +31,32 @@ func (repository *PostgresSubmissionRepository) LoadSubmissionInput(ctx context.
 		return application.SubmissionInput{}, err
 	}
 	return application.SubmissionInput{Claim: claim, Receipts: receipts}, nil
+}
+
+func (repository *PostgresSubmissionRepository) LoadActivePolicy(ctx context.Context, at time.Time) (*application.PolicyVersion, error) {
+	return loadActivePolicy(ctx, repository.pool, at)
+}
+
+func loadActivePolicy(ctx context.Context, query queryRower, at time.Time) (*application.PolicyVersion, error) {
+	var policy application.PolicyVersion
+	var rules []byte
+	err := query.QueryRow(ctx, `
+		SELECT id, effective_date::text, rules
+		FROM reimbursement.policy_versions
+		WHERE status = 'PUBLISHED' AND effective_date <= $1::date
+		ORDER BY effective_date DESC, published_at DESC LIMIT 1
+	`, at.In(time.FixedZone("China Standard Time", 8*60*60)).Format("2006-01-02")).Scan(&policy.ID, &policy.EffectiveDate, &rules)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load active policy: %w", err)
+	}
+	policy.Status = application.PolicyStatusPublished
+	if err := json.Unmarshal(rules, &policy.Rules); err != nil {
+		return nil, fmt.Errorf("decode active policy rules: %w", err)
+	}
+	return &policy, nil
 }
 
 func (repository *PostgresSubmissionRepository) StoreConfirmation(ctx context.Context, confirmation application.SubmissionConfirmation) error {
@@ -67,12 +94,15 @@ func (repository *PostgresSubmissionRepository) FindSubmissionByIdempotencyKey(c
 	`, actorID, claimID, key))
 }
 
-func (repository *PostgresSubmissionRepository) Submit(ctx context.Context, input application.SubmissionInput, confirmation application.SubmissionConfirmation, idempotencyKey string, policyVersion string) (application.SubmissionSnapshot, error) {
+func (repository *PostgresSubmissionRepository) Submit(ctx context.Context, input application.SubmissionInput, confirmation application.SubmissionConfirmation, idempotencyKey string, policyVersion string, policyClock application.Clock) (application.SubmissionSnapshot, error) {
 	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return application.SubmissionSnapshot{}, fmt.Errorf("begin submission: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(4242424242)`); err != nil {
+		return application.SubmissionSnapshot{}, fmt.Errorf("lock active policy: %w", err)
+	}
 
 	if replay, replayErr := scanSubmissionSnapshot(tx.QueryRow(ctx, `
 		SELECT claim_id, submission_number, claim_version, policy_version, submitted_at
@@ -91,6 +121,27 @@ func (repository *PostgresSubmissionRepository) Submit(ctx context.Context, inpu
 	if claim.Status != domain.ClaimStatusDraft || claim.Version != confirmation.ClaimVersion {
 		return application.SubmissionSnapshot{}, application.ErrStaleSubmissionConfirmation
 	}
+	activePolicy, err := loadActivePolicy(ctx, tx, policyClock.Now())
+	if err != nil {
+		return application.SubmissionSnapshot{}, err
+	}
+	currentVersion := "baseline-v1"
+	var policyIssues []domain.ValidationIssue
+	if activePolicy != nil {
+		currentVersion = activePolicy.ID
+		policyIssues, err = application.EvaluatePolicyRules(*activePolicy, claim)
+		if err != nil {
+			return application.SubmissionSnapshot{}, fmt.Errorf("evaluate policy at submission: %w", err)
+		}
+	}
+	if currentVersion != confirmation.PolicyVersion || currentVersion != policyVersion {
+		return application.SubmissionSnapshot{}, application.ErrStaleSubmissionConfirmation
+	}
+	for _, issue := range policyIssues {
+		if issue.IsBlocking() {
+			return application.SubmissionSnapshot{}, application.ErrValidationBlocked
+		}
+	}
 	receipts, err := loadClaimReceipts(ctx, tx, claim.ID)
 	if err != nil {
 		return application.SubmissionSnapshot{}, err
@@ -101,10 +152,11 @@ func (repository *PostgresSubmissionRepository) Submit(ctx context.Context, inpu
 
 	submissionNumber := "SUB-" + strings.ReplaceAll(randomUUID(), "-", "")[:16]
 	payload, err := json.Marshal(struct {
-		Claim         domain.Claim     `json:"claim"`
-		Receipts      []domain.Receipt `json:"receipts"`
-		PolicyVersion string           `json:"policyVersion"`
-	}{claim, receipts, policyVersion})
+		Claim         domain.Claim             `json:"claim"`
+		Receipts      []domain.Receipt         `json:"receipts"`
+		PolicyVersion string                   `json:"policyVersion"`
+		PolicyIssues  []domain.ValidationIssue `json:"policyIssues"`
+	}{claim, receipts, policyVersion, policyIssues})
 	if err != nil {
 		return application.SubmissionSnapshot{}, fmt.Errorf("marshal submission snapshot: %w", err)
 	}
@@ -220,7 +272,7 @@ func scanSubmissionSnapshot(row receiptRow) (application.SubmissionSnapshot, err
 }
 
 func blockingSubmissionInput(claim domain.Claim, receipts []domain.Receipt) bool {
-	if claim.Status != domain.ClaimStatusDraft || strings.TrimSpace(claim.Purpose) == "" || len(receipts) == 0 {
+	if claim.Status != domain.ClaimStatusDraft || strings.TrimSpace(claim.Purpose) == "" || claim.RequestedAmountCent == nil || len(receipts) == 0 {
 		return true
 	}
 	for _, receipt := range receipts {

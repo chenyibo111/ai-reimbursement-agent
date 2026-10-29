@@ -18,6 +18,59 @@ import (
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/domain"
 )
 
+func TestAdminPolicyPublishAcceptsValidatedRules(t *testing.T) {
+	repository := application.NewMemoryPolicyRuleRepository()
+	handler := &adminHandler{services: AdminServices{Policies: application.NewPolicyRuleService(repository), Role: func(context.Context, string) (string, error) { return "ADMIN", nil }}}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/policies/publish", bytes.NewBufferString(`{"id":"policy-2","effectiveDate":"2026-10-01","rules":[{"code":"TOTAL","name":"整单限额","type":"CLAIM_TOTAL_MAX","severity":"BLOCKING","config":{"maxAmountCents":10000}}]}`))
+	request = request.WithContext(context.WithValue(request.Context(), actorContextKey{}, Actor{ID: "admin-1", Role: "ADMIN", Channel: "web"}))
+	response := httptest.NewRecorder()
+	handler.publishPolicy(response, request)
+	if response.Code != http.StatusCreated || len(repository.Versions["policy-2"].Rules) != 1 {
+		t.Fatalf("response=%d %s rules=%#v", response.Code, response.Body.String(), repository.Versions["policy-2"].Rules)
+	}
+}
+
+func TestAdminPolicyPublishRejectsExistingVersionWithActionableConflict(t *testing.T) {
+	repository := application.NewMemoryPolicyRuleRepository()
+	handler := &adminHandler{services: AdminServices{Policies: application.NewPolicyRuleService(repository), Role: func(context.Context, string) (string, error) { return "ADMIN", nil }}}
+	for attempt := 0; attempt < 2; attempt++ {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/policies/publish", bytes.NewBufferString(`{"id":"policy-2","effectiveDate":"2026-10-29","rules":[]}`))
+		request = request.WithContext(context.WithValue(request.Context(), actorContextKey{}, Actor{ID: "admin-1", Role: "ADMIN", Channel: "web"}))
+		response := httptest.NewRecorder()
+		handler.publishPolicy(response, request)
+		if attempt == 0 && response.Code != http.StatusCreated {
+			t.Fatalf("first publish=%d %s", response.Code, response.Body.String())
+		}
+		if attempt == 1 && (response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"code":"POLICY_VERSION_EXISTS"`) || !strings.Contains(response.Body.String(), "请使用新的版本编号")) {
+			t.Fatalf("duplicate publish=%d %s", response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestSubmissionRequestReturnsPolicyWarningsToEmployee(t *testing.T) {
+	handler := &claimsHandler{submissions: fakeSubmissions{confirmation: application.SubmissionConfirmation{
+		Token: "token-1", ClaimID: "claim-1", ActorID: "employee-1", ClaimVersion: 2, PolicyVersion: "warning-policy",
+		Warnings: []domain.ValidationIssue{{Code: "POLICY_TOTAL", Message: "整单上限：申请报销总额超过上限。", Blocking: false}},
+	}}}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/claims/claim-1/submission-requests", bytes.NewBufferString(`{"version":2}`))
+	request.Header.Set("Idempotency-Key", "request-1")
+	request = request.WithContext(context.WithValue(request.Context(), actorContextKey{}, Actor{ID: "employee-1", Role: "EMPLOYEE", Channel: "web"}))
+	response := httptest.NewRecorder()
+	handler.requestSubmission(response, request)
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"warnings":[{`) || !strings.Contains(response.Body.String(), `"ruleCode":"TOTAL"`) {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestClaimResponseIncludesSavedSubmissionWarnings(t *testing.T) {
+	claim := application.ClaimView{ID: "claim-1", Status: domain.ClaimStatusSubmitted, SubmissionWarnings: []domain.ValidationIssue{{Code: "POLICY_TOTAL", Message: "整单上限：申请报销总额超过上限。"}}}
+	response := claimResponse(claim)
+	warnings, ok := response["submissionWarnings"].([]map[string]any)
+	if !ok || len(warnings) != 1 || warnings[0]["severity"] != "WARNING" {
+		t.Fatalf("submission warnings=%#v", response["submissionWarnings"])
+	}
+}
+
 func TestCreateClaimRequiresAuthenticationAndIdempotencyKey(t *testing.T) {
 	handler := NewRouter(Dependencies{Claims: fakeClaims{}, Auth: StaticActorResolver{}})
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/claims", bytes.NewBufferString(`{"purpose":"客户拜访"}`))
@@ -790,13 +843,16 @@ func (fakeClaims) UpdateClaim(_ context.Context, actorID string, claimID string,
 	return application.ClaimView{ID: claimID, OwnerID: actorID, Status: domain.ClaimStatusDraft, Purpose: *command.Purpose, Version: 2}, nil
 }
 
-type fakeSubmissions struct{ err error }
+type fakeSubmissions struct {
+	err          error
+	confirmation application.SubmissionConfirmation
+}
 
 func (service fakeSubmissions) ValidateClaim(context.Context, string, string) (application.ValidationResult, error) {
 	return application.ValidationResult{}, service.err
 }
 func (service fakeSubmissions) RequestSubmission(context.Context, string, string, int64) (application.SubmissionConfirmation, error) {
-	return application.SubmissionConfirmation{}, service.err
+	return service.confirmation, service.err
 }
 func (service fakeSubmissions) SubmitClaim(context.Context, string, string, string, string) (application.SubmissionSnapshot, error) {
 	return application.SubmissionSnapshot{}, service.err

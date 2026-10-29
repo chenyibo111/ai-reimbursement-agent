@@ -15,6 +15,8 @@ export interface Claim {
   expenseCategory: string | null;
   participants: string[];
   projectCode: string | null;
+	submissionPolicyVersion?: string;
+	submissionWarnings?: ValidationIssue[];
 	receiptCount: number;
 	recognizedReceiptCount: number;
 	totalAmountCent: number | null;
@@ -45,6 +47,9 @@ export type ClaimSearchPage = { items: Claim[]; totalCount: number; nextCursor: 
 export interface ClaimPatch {
   version: number;
   purpose?: string;
+  expenseCategory?: string;
+  participants?: string[];
+  projectCode?: string;
   requestedAmountCent?: number;
   currency?: "CNY";
   remark?: string | null;
@@ -69,6 +74,8 @@ export interface ValidationIssue {
   code: string;
   severity: "BLOCKING" | "WARNING";
   message: string;
+  policyVersionId?: string;
+  ruleCode?: string;
 }
 
 export interface ValidationResult {
@@ -84,6 +91,7 @@ export interface SubmissionRequest {
   claimVersion: number;
   policyVersion: string;
   expiresAt: string;
+  warnings: ValidationIssue[];
 }
 
 export interface SubmissionSnapshot {

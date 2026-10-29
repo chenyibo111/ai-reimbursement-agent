@@ -28,6 +28,23 @@ function renderForm(claim: Claim = manualClaim) {
 }
 
 describe("ClaimApplicationForm", () => {
+  it("lets an employee set the expense category needed by published category rules", async () => {
+    const user = userEvent.setup();
+    const { container } = renderForm();
+    const form = within(container);
+    await user.type(form.getByLabelText("费用类别"), "住宿");
+    await user.click(form.getByRole("button", { name: "保存草稿" }));
+    expect(reimbursementApi.updateClaim).toHaveBeenCalledWith("claim-1", expect.objectContaining({ expenseCategory: "住宿" }));
+  });
+	it("saves project code and participants required by published category rules", async () => {
+		const user = userEvent.setup();
+		const { container } = renderForm();
+		const form = within(container);
+		await user.type(form.getByLabelText("项目编码"), "PROJ-42");
+		await user.type(form.getByLabelText("同行人"), "张三， 李四");
+		await user.click(form.getByRole("button", { name: "保存草稿" }));
+		expect(reimbursementApi.updateClaim).toHaveBeenCalledWith("claim-1", expect.objectContaining({ projectCode: "PROJ-42", participants: ["张三", "李四"] }));
+	});
 	afterEach(cleanup);
 	beforeEach(() => vi.clearAllMocks());
 

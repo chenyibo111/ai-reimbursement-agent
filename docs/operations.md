@@ -80,7 +80,19 @@ LIMIT 10;
 
 此迁移为前向兼容变更：回退应用镜像时不删除列、不回填旧字段、不删除提交快照。若发布异常，停止扩大灰度范围并恢复兼容的应用镜像；数据库恢复仅使用发布前已经验证的备份流程。
 
-## 政策规则发布与恢复
+### Go 政策规则版本升级
+
+`services/reimbursement-api/db/migrations/000015_enforce_policy_rules.sql` 为 Go 政策版本增加结构化 `rules`，并允许按生效日期保留多个已发布版本。旧版本默认没有规则。升级前先备份目标 PostgreSQL；本地 Compose 环境按序执行尚未应用的 Go 迁移，然后执行：
+
+```powershell
+Get-Content -Raw services/reimbursement-api/db/migrations/000015_enforce_policy_rules.sql |
+  docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U reimbursement -d reimbursement
+docker compose --profile migration up -d --build reimbursement-api reimbursement-web reimbursement-edge
+```
+
+迁移与重启后，在财务政策页发布测试版本，分别验证阻断规则、仅提示规则以及未来生效版本；员工提交以 Go 校验结果为准。飞书制度文档同步只更新问答依据，不会自动发布或更改 Go 规则。城市住宿限额、单笔费用上限仍需人工核对。若回退应用镜像，数据库新增列可保留；不要删除已发布版本或提交快照。
+
+## 旧 Next 政策规则发布与恢复
 
 部署政策功能前，先备份 PostgreSQL，再在目标环境执行已提交的 Prisma 迁移；不得通过重建数据库卷或删除 `PolicyVersion` / `SubmissionSnapshot` 来“初始化”政策数据。部署后在未提交的密钥环境文件中配置管理员白名单：
 

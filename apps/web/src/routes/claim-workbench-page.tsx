@@ -3,7 +3,7 @@ import { Link, useLocation, useParams } from "react-router-dom";
 
 import { shouldRefreshClaimAfterReceiptTransition, useClaim, useDeleteReceipt, useReceipts } from "../features/claims/use-claim";
 import { ClaimApplicationForm } from "../features/claims/claim-application-form";
-import type { Receipt } from "../api/generated/reimbursement";
+import type { Receipt, ValidationIssue } from "../api/generated/reimbursement";
 import { useReceiptUpload } from "../features/receipts/use-receipt-upload";
 import { claimAmountSummary, formatCNYFromCent } from "../features/claims/claim-display";
 
@@ -34,6 +34,7 @@ export function ClaimWorkbenchPage() {
   const deleteReceipt = useDeleteReceipt(claimId);
   const upload = useReceiptUpload(claimId);
   const [notice, setNotice] = useState<string>((location.state as { notice?: string } | null)?.notice ?? "");
+  const [latestSubmission, setLatestSubmission] = useState<{ claimId: string; warnings: ValidationIssue[] } | null>(null);
   const [receiptToDelete, setReceiptToDelete] = useState<Receipt | null>(null);
   const wasReceiptPending = useRef(false);
   const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -84,6 +85,7 @@ export function ClaimWorkbenchPage() {
   if (claimQuery.isLoading) return <main className="page-shell"><p className="empty-state" role="status">正在打开报销工作台…</p></main>;
   if (claimQuery.isError || !claimQuery.data) return <main className="page-shell"><p className="field-error" role="alert">{errorMessage(claimQuery.error)}</p><Link to="/claims">返回报销单列表</Link></main>;
   const claim = claimQuery.data;
+  const submissionWarnings = latestSubmission?.claimId === claim.id ? latestSubmission.warnings : claim.submissionWarnings ?? [];
 
   return (
     <>
@@ -101,6 +103,7 @@ export function ClaimWorkbenchPage() {
       </header>
 
       <p className="inline-notice" role="status" aria-live="polite">{notice}</p>
+      {submissionWarnings.length > 0 && <section className="submission-warning" aria-label="政策提醒" role="status" aria-live="polite"><strong>政策提醒</strong><ul>{submissionWarnings.map((issue) => <li key={issue.code}>{issue.message}</li>)}</ul><p>报销单已提交；这些提醒不会阻断提交，请按公司制度核对。</p></section>}
       <div className="workbench-layout">
         <aside className="case-rail" aria-label="报销处理脉络">
           <p className="eyebrow">处理脉络</p>
@@ -147,7 +150,7 @@ export function ClaimWorkbenchPage() {
             </ul>
           </section>
 
-				<ClaimApplicationForm claim={claim} recognizedAmountCent={claim.totalAmountCent} onSaved={() => setNotice("草稿已保存。")} onSubmitted={() => { setNotice("报销单已提交，系统已保存当前提交快照。"); void claimQuery.refetch(); }} />
+				<ClaimApplicationForm claim={claim} recognizedAmountCent={claim.totalAmountCent} onSaved={() => setNotice("草稿已保存。")} onSubmitted={(warnings) => { setNotice("报销单已提交，系统已保存当前提交快照。"); setLatestSubmission({ claimId: claim.id, warnings }); void claimQuery.refetch(); }} />
         </div>
       </div>
     </main>

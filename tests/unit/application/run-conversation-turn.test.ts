@@ -162,7 +162,10 @@ it("answers a policy question without creating an Intake or a claim", async () =
 
   const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "WEB", message: "住宿上限是多少" }, deps);
 
-  expect(result).toMatchObject({ reply: "住宿上限为 500 元。", citations: [{ id: "citation-1" }], intake: null });
+  expect(result.reply).toContain("住宿上限为 500 元。");
+  expect(result.reply).toContain("报销系统");
+  expect(result.reply).toContain("不代表本单已通过提交校验");
+  expect(result).toMatchObject({ citations: [{ id: "citation-1" }], intake: null });
   expect(createClaim).not.toHaveBeenCalled();
   expect(getIntake()).toBeNull();
   expect(searchPolicy).toHaveBeenCalledTimes(1);

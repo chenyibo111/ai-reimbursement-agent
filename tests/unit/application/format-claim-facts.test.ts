@@ -65,5 +65,7 @@ it("numbers receipts with duplicate filenames and missing invoice numbers", () =
 it("does not claim a submission was prepared when only formatting a summary", () => {
   const reply = formatClaimFacts("READ_SUBMISSION_SUMMARY", { claim, receipts: [receipt] }, { claimId: "claim-1", claimVersion: 2, policyVersion: "p1", issues: [] });
   expect(reply).toContain("只读摘要");
+  expect(reply).toContain("系统规则版本：p1");
+  expect(reply).toContain("未编码制度条款需人工核对");
   expect(reply).not.toContain("确认提交");
 });

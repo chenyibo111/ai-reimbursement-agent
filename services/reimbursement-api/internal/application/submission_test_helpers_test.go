@@ -14,10 +14,15 @@ func (clock fixedClock) Now() time.Time { return clock.now }
 
 type fakeSubmissionRepository struct {
 	claim         domain.Claim
+	activePolicy  *PolicyVersion
 	receipts      []domain.Receipt
 	confirmations map[string]SubmissionConfirmation
 	submissions   map[string]SubmissionSnapshot
 	submitCalls   int
+}
+
+func (repository *fakeSubmissionRepository) LoadActivePolicy(_ context.Context, _ time.Time) (*PolicyVersion, error) {
+	return repository.activePolicy, nil
 }
 
 func newFakeSubmissionRepository() *fakeSubmissionRepository {
@@ -52,7 +57,7 @@ func (repository *fakeSubmissionRepository) FindSubmissionByIdempotencyKey(_ con
 	return snapshot, nil
 }
 
-func (repository *fakeSubmissionRepository) Submit(_ context.Context, input SubmissionInput, confirmation SubmissionConfirmation, idempotencyKey string, policyVersion string) (SubmissionSnapshot, error) {
+func (repository *fakeSubmissionRepository) Submit(_ context.Context, input SubmissionInput, confirmation SubmissionConfirmation, idempotencyKey string, policyVersion string, _ Clock) (SubmissionSnapshot, error) {
 	if input.Claim.Version != confirmation.ClaimVersion {
 		return SubmissionSnapshot{}, ErrStaleSubmissionConfirmation
 	}
