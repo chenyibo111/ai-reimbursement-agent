@@ -14,6 +14,7 @@
     "test:watch": "vitest",
     "eval:intent": "tsx --env-file=.env.local scripts/eval-intent.ts",
     "eval:agent": "tsx scripts/eval-agent-workflow.ts",
+    "test:agent:live": "tsx scripts/run-agent-live-integration.ts",
     "test:e2e": "playwright test",
     "feishu:worker": "tsx --env-file=.env.local src/worker/feishu-bot.ts",
     "feishu:worker:container": "tsx src/worker/feishu-bot.ts",

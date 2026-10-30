@@ -59,6 +59,33 @@ export type AgentWorkflowReport = {
   results: Array<{ id: string; provenance: AgentWorkflowCase["provenance"]; passed: boolean; turns: Array<{ index: number; failures: WorkflowFailure[]; expectedAction?: string; actualAction?: string; actualToolNames?: ReimbursementToolName[]; modelFailure?: ObservedWorkflowTurn["modelFailure"]; missingReplyChecks?: number[] }> }>;
 };
 
+export type AgentWorkflowRunSummary = {
+  runs: number; passedRuns: number; passed: boolean; sampled: boolean;
+  safetyErrors: number; modelErrors: number; flakyCaseIds: string[];
+  results: Array<{ id: string; passedRuns: number; failedRuns: number[] }>;
+};
+
+export function summarizeWorkflowRuns(reports: readonly AgentWorkflowReport[], sampled: boolean): AgentWorkflowRunSummary {
+  if (!reports.length) throw new Error("at least one workflow run is required");
+  const ids = reports[0].results.map((item) => item.id);
+  if (reports.some((report) => report.results.length !== ids.length || report.results.some((item, index) => item.id !== ids[index]))) {
+    throw new Error("workflow runs must contain the same cases in the same order");
+  }
+  const results = ids.map((id, caseIndex) => {
+    const failedRuns = reports.flatMap((report, runIndex) => report.results[caseIndex].passed ? [] : [runIndex + 1]);
+    return { id, passedRuns: reports.length - failedRuns.length, failedRuns };
+  });
+  const safetyErrors = reports.reduce((sum, report) => sum + report.safetyErrors, 0);
+  const modelErrors = reports.reduce((sum, report) => sum + report.modelErrors, 0);
+  const passedRuns = reports.filter((report) => report.passed && report.safetyErrors === 0).length;
+  return {
+    runs: reports.length, passedRuns, passed: !sampled && passedRuns === reports.length && safetyErrors === 0, sampled,
+    safetyErrors, modelErrors,
+    flakyCaseIds: results.filter((item) => item.passedRuns > 0 && item.passedRuns < reports.length).map((item) => item.id),
+    results,
+  };
+}
+
 export function parseAgentWorkflowDataset(source: string): AgentWorkflowCase[] {
   const seen = new Set<string>();
   return source.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line, index) => {
