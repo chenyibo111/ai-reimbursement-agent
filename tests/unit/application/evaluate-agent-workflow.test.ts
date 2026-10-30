@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 
-import { evaluateAgentWorkflows, parseAgentWorkflowDataset } from "@/src/application/evaluate-agent-workflow";
+import { evaluateAgentWorkflows, parseAgentWorkflowDataset, summarizeWorkflowRuns } from "@/src/application/evaluate-agent-workflow";
 
 const caseLine = JSON.stringify({
   id: "amount-self-test",
@@ -77,4 +77,41 @@ it("treats spacing between a number and 元 as presentation only", async () => {
     action: "POLICY_QUERY", tools: [], reply: "每晚不超过600元", citationCount: 0, claimStates: {}, intakeStatus: null,
   }], false);
   expect(report.passed).toBe(true);
+});
+
+it("fails a repeated full gate when the middle run fails and identifies unstable cases", async () => {
+  const cases = parseAgentWorkflowDataset(caseLine);
+  let run = 0;
+  const reports = [];
+  for (let index = 0; index < 3; index++) {
+    run++;
+    reports.push(await evaluateAgentWorkflows(cases, async () => [{
+      action: run === 2 ? "CLARIFY" : "READ_RECEIPT_AMOUNT",
+      tools: run === 2 ? [] : [{ name: "get_claim_workbench", claimId: "claim-1" }],
+      reply: run === 2 ? "请说明" : "票据金额未识别",
+      citationCount: 0,
+      claimStates: { "claim-1": { status: "DRAFT", version: 2, purpose: "出差" } },
+      intakeStatus: null,
+    }], false));
+  }
+  expect(summarizeWorkflowRuns(reports, false)).toMatchObject({
+    runs: 3, passedRuns: 2, passed: false, flakyCaseIds: ["amount-self-test"],
+    results: [{ id: "amount-self-test", passedRuns: 2, failedRuns: [2] }],
+  });
+});
+
+it("never grants a full gate to sampled repeats or any unexpected write", async () => {
+  const cases = parseAgentWorkflowDataset(caseLine);
+  const good = await evaluateAgentWorkflows(cases, async () => [{
+    action: "READ_RECEIPT_AMOUNT", tools: [{ name: "get_claim_workbench", claimId: "claim-1" }],
+    reply: "票据金额未识别", citationCount: 0,
+    claimStates: { "claim-1": { status: "DRAFT", version: 2, purpose: "出差" } }, intakeStatus: null,
+  }], true);
+  expect(summarizeWorkflowRuns([good, good, good], true).passed).toBe(false);
+  const unsafe = await evaluateAgentWorkflows(cases, async () => [{
+    action: "READ_RECEIPT_AMOUNT", tools: [{ name: "submit_claim", claimId: "claim-1" }],
+    reply: "票据金额未识别", citationCount: 0,
+    claimStates: { "claim-1": { status: "DRAFT", version: 2, purpose: "出差" } }, intakeStatus: null,
+  }], false);
+  expect(summarizeWorkflowRuns([good, unsafe, good], false)).toMatchObject({ passed: false, safetyErrors: 1 });
 });

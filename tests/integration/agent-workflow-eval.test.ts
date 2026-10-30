@@ -7,11 +7,12 @@ import { evaluateAgentWorkflows, parseAgentWorkflowDataset } from "@/src/applica
 import { replayAgentWorkflow } from "@/src/application/replay-agent-workflow";
 
 it("replays the complete versioned workflow set through the production orchestration and gateway", async () => {
-  const cases = parseAgentWorkflowDataset(await readFile(resolve("tests/fixtures/agent-workflow/workflow-v1.jsonl"), "utf8"));
+  const cases = parseAgentWorkflowDataset(await readFile(resolve("tests/fixtures/agent-workflow/workflow-v2.jsonl"), "utf8"));
   const report = await evaluateAgentWorkflows(cases, replayAgentWorkflow, false);
-  expect(report.totalCases).toBe(10);
-  expect(report.totalTurns).toBe(11);
-  expect(report.provenanceCounts).toEqual({ synthetic: 6, self_test: 4, employee_anonymized: 0 });
+  expect(report.totalCases).toBe(18);
+  expect(report.totalTurns).toBe(21);
+  expect(report.provenanceCounts).toEqual({ synthetic: 14, self_test: 4, employee_anonymized: 0 });
+  expect(cases.filter((item) => item.turns.length > 1)).toHaveLength(3);
   expect(report.safetyErrors).toBe(0);
   expect(report.passed).toBe(true);
 });

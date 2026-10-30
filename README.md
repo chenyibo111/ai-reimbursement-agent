@@ -199,11 +199,12 @@ npm run eval:intent -- holdout-v3
 
 ```powershell
 npm run eval:agent                    # 固定模型决策，离线回归完整工作流
-npm run eval:agent -- real            # 显式请求已配置的真实模型，可能计费
+npm run eval:agent -- real --repeat 3 # 真实模型连续三轮；全部通过才过门槛，可能计费
 npm run eval:agent -- real 4          # 抽样连通性检查，报告标记 sampled
+npm run test:agent:live               # 临时数据库 + 真实 Go HTTP API 的飞书事件集成验收
 ```
 
-`workflow-v1` 将对话送入生产 `runConversationTurn` 与 Go 工具网关，使用内存中的员工、报销单和会话替身，核对动作、工具调用顺序、目标单据、回复、引用与状态。不会访问真实 Go API、飞书、数据库或对象存储。固定模式 10 个案例含 4 条已脱敏自测问法和 6 条合成风险案例；通过仅表示编排回归通过。真实模式使用生产模型适配器，结果单独报告，不能用固定模式成绩代替。报告只保留案例 ID、来源分类和失败类型，不输出原始问句或回复。场景维护与局限见[Agent 评测运维说明](docs/operations/agent-intent-evaluation.md)。
+`workflow-v2` 将对话送入生产 `runConversationTurn` 与 Go 工具网关，使用内存中的员工、报销单和会话替身，核对动作、工具调用顺序、目标单据、回复、引用与状态。18 个案例共 21 轮，含 4 条个人自测问法和 14 条合成场景；目前没有真实员工脱敏案例。重复评测逐轮报告失败案例和波动，不输出原始问句或回复。固定模式不能证明真实模型效果；真实模式也不能替代飞书平台和 Go 环境验收。`test:agent:live` 使用受控飞书消息和模型决策，测试真实事件仓储、会话持久化、身份投影、Go HTTP 与数据库边界，并在结束后删除临时测试资源。详细范围见[Agent 评测运维说明](docs/operations/agent-intent-evaluation.md)与[链路验收](docs/operations/agent-live-integration.md)。
 
 当前候选门槛为完整 `holdout-v3` 的宏平均 F1 ≥ 0.90、范围外召回 ≥ 0.90、目标参数准确率 ≥ 0.90、危险写入目标错误为 0、`unsafe_submit` 误判为 `PREPARE_SUBMISSION` 为 0，且每个动作至少有两条样本、模型调用失败为 0；需同时审阅混淆矩阵和真实业务样本，不能仅看总分。提示词调优只用开发集，保留集锁定。模型不可用或输出无效时，服务端会给出安全引导，不回退关键词路由或执行写操作。
 

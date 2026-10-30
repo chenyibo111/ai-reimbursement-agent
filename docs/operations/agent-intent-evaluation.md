@@ -2,13 +2,15 @@
 
 ## 端到端工作流回放
 
-`tests/fixtures/agent-workflow/workflow-v1.jsonl` 使用一行一个案例，必须标记 `provenance`（`synthetic`、`self_test` 或 `employee_anonymized`）。每一轮写入原始测试输入、固定模式的 `fixtureDecision`，以及期望动作、工具名称和目标单据、回复包含/排除片段、引用数量和单据/Intake 状态。确认提交等精确短语由服务端处理，不需要 `fixtureDecision`。
+`tests/fixtures/agent-workflow/workflow-v2.jsonl` 是当前完整工作流集：18 个案例、21 轮，其中 3 个案例包含连续对话；`workflow-v1.jsonl` 保留为旧基线。每行一个案例，必须标记 `provenance`（`synthetic`、`self_test` 或 `employee_anonymized`）。每轮写入输入、固定模式的 `fixtureDecision`，以及期望动作、工具名称和目标单据、回复片段、引用数量和单据/Intake 状态。确认提交等精确短语由服务端处理，不需要 `fixtureDecision`。当前 v2 新增案例均为合成场景，尚无经同意并脱敏的员工案例，不能将成绩表述为员工流量准确率。
 
 可用 `npm run eval:agent -- real self-submission-summary` 仅复测指定案例；按案例 ID 运行仍标记为 `sampled`，不会通过完整评测门槛。
 
-执行 `npm run eval:agent` 可离线验证完整回放；`npm run eval:agent -- real` 显式调用真实模型，可能计费。可以附加案例数量进行抽样，抽样结果的 `gate` 为 `null`。完整运行不通过时以非零状态退出。固定模式只验证编排与授权边界，不测模型准确率；真实模式在合成/自测集上的通过率也不能代表生产员工流量质量。录入员工案例前先移除姓名、单号、金额、发票号码、政策正文、会话历史等敏感信息，并由人工确认期望动作和业务结果；勿把真实凭据或原文写入仓库。报告只含 ID、来源分类、失败码、失败时的预期/实际动作和工具名称、模型失败阶段与错误码、未命中的回复断言序号，不包含输入、回复、工具参数或引用正文。`MODEL_ERROR` 的 `stage=decision` 表示意图判断调用失败，`stage=policy_answer` 表示已找到引用但生成政策答案的调用失败；`missingReplyChecks` 从 1 开始，对应场景中的 `replyIncludes` 顺序。金额数字与“元”之间的空格在回复断言中视为排版差异。
+执行 `npm run eval:agent` 可离线验证完整回放；`npm run eval:agent -- real --repeat 3` 用真实模型顺序运行三轮完整集，可能计费。重复次数限制为 1–10；只有每轮通过且安全误写为零，完整门槛才通过。`stability` 列出通过轮数、每案例失败轮次与 `flakyCaseIds`；`runReports` 只列失败案例与失败码。可在模式后附加案例 ID 或数量抽样，抽样结果的 `gate` 为 `null`，重复运行也不代表完整通过。完整运行不通过时以非零状态退出。固定模式只验证编排与授权边界；真实模式在合成/自测集上的通过率不能代表生产员工流量质量。录入员工案例前先移除姓名、单号、金额、发票号码、政策正文、会话历史等敏感信息，并由人工确认期望动作和业务结果；勿把真实凭据或原文写入仓库。报告不包含输入、回复、工具参数或引用正文。`MODEL_ERROR` 的 `stage=decision` 表示意图判断调用失败，`stage=policy_answer` 表示政策答案生成失败；`missingReplyChecks` 从 1 开始，对应 `replyIncludes` 顺序。金额数字与“元”之间的空格视为排版差异。
 
 回放使用生产会话编排和 Go 工具网关，但底层报销端口、会话存储、政策检索和上传目标均是内存替身。因此它无法验证网络故障、Go 持久化、实际权限配置、OCR/知识库检索质量或飞书事件交付；这些仍需独立集成和环境验收。
+
+`npm run test:agent:live` 在临时隔离数据库中验证飞书事件运行时、Prisma 会话与事件仓储、员工投影、真实 Go HTTP API、工具网关、Go 草稿持久化、跨员工访问拒绝和消息去重。模型回复和飞书平台网络在该测试中使用受控替身；真实模型由上述评测覆盖，飞书平台、OCR 与知识库现场验收见 [Agent 链路验收](agent-live-integration.md)。
 
 选中旧草稿后的“修改事由”和“请提交这张报销单”案例依赖服务端传给模型的 `selection` 状态标志；标志只表明是否已有可编辑目标、最近查看目标是否冲突，不包含内部单据 ID。`allowedFields` 在已有 Intake 或已选草稿时开放白名单字段。最终写入和提交仍由 Go 工具网关复核归属、状态、版本和确认令牌。
 
