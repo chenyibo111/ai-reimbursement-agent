@@ -56,7 +56,11 @@ func main() {
 	if os.Getenv("REIMBURSEMENT_DEV_AUTH") == "true" {
 		resolver = transport.StaticActorResolver{}
 	} else {
-		web, webErr := transport.NewWebBearerResolver(os.Getenv("REIMBURSEMENT_AUTH_HS256_SECRET"), "reimbursement-api", transport.EmployeeActivityFunc(store.EmployeeIsActive(pool)))
+		ssoSessions, ssoErr := transport.NewHTTPSSOSessionChecker(os.Getenv("SSO_INTERNAL_SESSION_STATUS_URL"), os.Getenv("SSO_SERVICE_KEY"))
+		if ssoErr != nil {
+			log.Fatalf("configure SSO session check: %v", ssoErr)
+		}
+		web, webErr := transport.NewWebBearerResolver(os.Getenv("REIMBURSEMENT_AUTH_HS256_SECRET"), "reimbursement-api", transport.EmployeeActivityFunc(store.EmployeeIsActive(pool)), ssoSessions)
 		if webErr != nil {
 			log.Fatalf("configure bearer authentication: %v", webErr)
 		}

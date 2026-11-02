@@ -92,18 +92,19 @@ func TestCreateClaimRequiresAuthenticationAndIdempotencyKey(t *testing.T) {
 }
 
 func TestWebBearerResolverRejectsCrossChannelMalformedAndUntrustedClaims(t *testing.T) {
-	resolver, err := NewWebBearerResolver("test-secret", "reimbursement-api")
+	resolver, err := NewWebBearerResolver("test-secret", "reimbursement-api", EmployeeActivityFunc(func(context.Context, string) (bool, error) { return true, nil }), SSOSessionFunc(func(context.Context, string) (bool, error) { return true, nil }))
 	if err != nil {
 		t.Fatalf("create resolver: %v", err)
 	}
 	resolver.now = func() int64 { return time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC).Unix() }
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
-	request.Header.Set("Authorization", "Bearer "+signedTestToken("test-secret", map[string]any{"sub": "employee-1", "role": "EMPLOYEE", "aud": "reimbursement-api", "iat": resolver.now() - 1, "channel": "web", "exp": resolver.now() + 60}))
+	request.Header.Set("Authorization", "Bearer "+signedTestToken("test-secret", map[string]any{"sub": "employee-1", "role": "EMPLOYEE", "aud": "reimbursement-api", "iat": resolver.now() - 1, "channel": "web", "sid": "hydra-session-1", "exp": resolver.now() + 60}))
 	actor, err := resolver.Resolve(request)
 	if err != nil || actor.ID != "employee-1" || actor.Role != "EMPLOYEE" || actor.Channel != "web" {
 		t.Fatalf("expected employee actor, got %#v err=%v", actor, err)
 	}
 	for _, claims := range []map[string]any{
+		{"sub": "employee-1", "role": "EMPLOYEE", "aud": "reimbursement-api", "iat": resolver.now() - 1, "channel": "web", "exp": resolver.now() + 60},
 		{"sub": "employee-1", "role": "EMPLOYEE", "aud": "other", "channel": "web", "exp": resolver.now() + 60},
 		{"sub": "employee-1", "role": "EMPLOYEE", "aud": "reimbursement-api", "channel": "agent", "exp": resolver.now() + 60},
 		{"sub": "employee-1", "role": "UNKNOWN", "aud": "reimbursement-api", "channel": "web", "exp": resolver.now() + 60},
@@ -122,13 +123,13 @@ func TestWebBearerResolverRejectsCrossChannelMalformedAndUntrustedClaims(t *test
 }
 
 func TestWebBearerResolverRejectsInactiveEmployee(t *testing.T) {
-	resolver, err := NewWebBearerResolver("test-secret", "reimbursement-api", EmployeeActivityFunc(func(context.Context, string) (bool, error) { return false, nil }))
+	resolver, err := NewWebBearerResolver("test-secret", "reimbursement-api", EmployeeActivityFunc(func(context.Context, string) (bool, error) { return false, nil }), SSOSessionFunc(func(context.Context, string) (bool, error) { return true, nil }))
 	if err != nil {
 		t.Fatalf("create resolver: %v", err)
 	}
 	resolver.now = func() int64 { return time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC).Unix() }
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/claims", nil)
-	request.Header.Set("Authorization", "Bearer "+signedTestToken("test-secret", map[string]any{"sub": "employee-1", "role": "EMPLOYEE", "aud": "reimbursement-api", "iat": resolver.now() - 1, "channel": "web", "exp": resolver.now() + 60}))
+	request.Header.Set("Authorization", "Bearer "+signedTestToken("test-secret", map[string]any{"sub": "employee-1", "role": "EMPLOYEE", "aud": "reimbursement-api", "iat": resolver.now() - 1, "channel": "web", "sid": "hydra-session-1", "exp": resolver.now() + 60}))
 	if _, err = resolver.Resolve(request); !errors.Is(err, ErrUnauthenticated) {
 		t.Fatalf("expected inactive employee rejection, got %v", err)
 	}
@@ -155,7 +156,7 @@ func TestDelegatedAgentResolverRequiresServiceKeyJTIChannelAndActiveEmployee(t *
 }
 
 func TestCombinedActorResolverDoesNotTreatWebTokenAsDelegatedAgent(t *testing.T) {
-	web, _ := NewWebBearerResolver("test-secret", "reimbursement-api")
+	web, _ := NewWebBearerResolver("test-secret", "reimbursement-api", EmployeeActivityFunc(func(context.Context, string) (bool, error) { return true, nil }), SSOSessionFunc(func(context.Context, string) (bool, error) { return true, nil }))
 	web.now = func() int64 { return time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC).Unix() }
 	base, _ := NewHS256BearerResolver("test-secret", "reimbursement-api")
 	base.now = web.now

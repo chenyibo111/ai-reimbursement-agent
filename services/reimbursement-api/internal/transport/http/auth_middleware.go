@@ -35,6 +35,15 @@ func (fn EmployeeActivityFunc) IsActive(ctx context.Context, employeeID string) 
 	return fn(ctx, employeeID)
 }
 
+type SSOSessionChecker interface {
+	IsActive(context.Context, string) (bool, error)
+}
+type SSOSessionFunc func(context.Context, string) (bool, error)
+
+func (fn SSOSessionFunc) IsActive(ctx context.Context, sid string) (bool, error) {
+	return fn(ctx, sid)
+}
+
 // StaticActorResolver is intentionally suitable only for tests and local
 // development wiring. Production replaces it with a signed OIDC resolver.
 type StaticActorResolver struct{}
@@ -56,6 +65,7 @@ type HS256BearerResolver struct {
 type WebBearerResolver struct {
 	*HS256BearerResolver
 	employees EmployeeActivityChecker
+	sessions  SSOSessionChecker
 }
 
 func NewHS256BearerResolver(secret string, audience string) (*HS256BearerResolver, error) {
@@ -65,16 +75,15 @@ func NewHS256BearerResolver(secret string, audience string) (*HS256BearerResolve
 	return &HS256BearerResolver{secret: []byte(secret), audience: audience, now: func() int64 { return time.Now().Unix() }}, nil
 }
 
-func NewWebBearerResolver(secret string, audience string, employees ...EmployeeActivityChecker) (*WebBearerResolver, error) {
+func NewWebBearerResolver(secret string, audience string, employees EmployeeActivityChecker, sessions SSOSessionChecker) (*WebBearerResolver, error) {
 	bearer, err := NewHS256BearerResolver(secret, audience)
 	if err != nil {
 		return nil, err
 	}
-	resolver := &WebBearerResolver{HS256BearerResolver: bearer}
-	if len(employees) > 0 {
-		resolver.employees = employees[0]
+	if employees == nil || sessions == nil {
+		return nil, fmt.Errorf("web employee and SSO session checks are required")
 	}
-	return resolver, nil
+	return &WebBearerResolver{HS256BearerResolver: bearer, employees: employees, sessions: sessions}, nil
 }
 
 func (resolver *HS256BearerResolver) Resolve(request *http.Request) (Actor, error) {
@@ -86,15 +95,20 @@ func (resolver *HS256BearerResolver) Resolve(request *http.Request) (Actor, erro
 }
 
 func (resolver *WebBearerResolver) Resolve(request *http.Request) (Actor, error) {
-	actor, err := resolver.HS256BearerResolver.Resolve(request)
-	if err != nil || actor.Channel != "web" {
+	claims, err := resolver.HS256BearerResolver.claims(request)
+	if err != nil || claims.Channel != "web" || strings.TrimSpace(claims.SID) == "" {
 		return Actor{}, ErrUnauthenticated
 	}
+	actor := Actor{ID: claims.Subject, Role: claims.Role, Channel: claims.Channel}
 	if resolver.employees != nil {
 		active, activityErr := resolver.employees.IsActive(request.Context(), actor.ID)
 		if activityErr != nil || !active {
 			return Actor{}, ErrUnauthenticated
 		}
+	}
+	active, sessionErr := resolver.sessions.IsActive(request.Context(), claims.SID)
+	if sessionErr != nil || !active {
+		return Actor{}, ErrUnauthenticated
 	}
 	return actor, nil
 }
@@ -107,6 +121,7 @@ type bearerClaims struct {
 	IssuedAt  int64  `json:"iat"`
 	ExpiresAt int64  `json:"exp"`
 	JTI       string `json:"jti"`
+	SID       string `json:"sid"`
 }
 
 func (resolver *HS256BearerResolver) claims(request *http.Request) (bearerClaims, error) {
