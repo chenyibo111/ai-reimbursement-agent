@@ -39,7 +39,7 @@ async function configuration(): Promise<oidc.Configuration> {
   };
   return oidc.discovery(new URL(issuer), clientId, { token_endpoint_auth_method: "none" }, oidc.None(), {
     [oidc.customFetch]: customFetch,
-    execute: [oidc.allowInsecureRequests],
+    execute: [oidc.allowInsecureRequests, oidc.enableNonRepudiationChecks],
   });
 }
 

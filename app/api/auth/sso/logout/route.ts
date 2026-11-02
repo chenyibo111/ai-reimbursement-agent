@@ -14,9 +14,7 @@ export async function GET(request: Request) {
     const service = createConfiguredSsoSessionService();
     const session = await service.active(cookie);
     const target = await ssoLogoutUrl(session.idToken);
-    await service.deleteBySid(session.sid);
     const response = NextResponse.redirect(target);
-    response.headers.append("Set-Cookie", clearSsoSessionCookie());
     response.headers.set("Cache-Control", "no-store");
     return response;
   } catch (error) {
