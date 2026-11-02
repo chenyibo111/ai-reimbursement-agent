@@ -154,6 +154,18 @@ model Employee {
   @@index([role])
 }
 
+model SsoWebSession {
+  idHash           String   @id @map("id_hash") @db.VarChar(64)
+  employeeId       String   @map("employee_id")
+  sid              String   @db.VarChar(255)
+  encryptedIdToken String   @map("encrypted_id_token")
+  expiresAt        DateTime @map("expires_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@index([sid])
+  @@map("sso_web_sessions")
+}
+
 model ClaimDraft {
   id                   String                @id @default(cuid())
   employeeId           String
