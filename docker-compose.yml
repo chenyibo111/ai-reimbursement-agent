@@ -9,7 +9,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB_NAME:-reimbursement}
       POSTGRES_USER: ${POSTGRES_USER_NAME:-reimbursement}
     ports:
-      - "5433:5432"
+      - "127.0.0.1:${REIMBURSEMENT_POSTGRES_PORT:-5433}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -26,8 +26,8 @@ services:
     environment:
       MINIO_API_CORS_ALLOW_ORIGIN: ${S3_CORS_ALLOWED_ORIGIN:-http://localhost:8088}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:${REIMBURSEMENT_MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${REIMBURSEMENT_MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio-data:/data
     healthcheck:
@@ -52,7 +52,7 @@ services:
   clamav:
     image: clamav/clamav:stable_base
     ports:
-      - "3310:3310"
+      - "127.0.0.1:${REIMBURSEMENT_CLAMAV_PORT:-3310}:3310"
 
   ocr:
     build: ./ocr-service
@@ -61,7 +61,7 @@ services:
     expose:
       - "8000"
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${REIMBURSEMENT_OCR_PORT:-8000}:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
@@ -91,10 +91,12 @@ services:
     entrypoint: ["node", "/app/scripts/docker-runtime.mjs"]
     environment:
       REIMBURSEMENT_AGENT_STORAGE_ENDPOINT: http://minio:9000
+      HYDRA_DIAL_ADDRESS: host.docker.internal:4444
+      SSO_STATUS_URL: http://host.docker.internal:9000/session-status
     secrets:
       - app_env
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${REIMBURSEMENT_NEXT_PORT:-3000}:3000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -158,10 +160,13 @@ services:
       CLAMAV_HOST: clamav
       CLAMAV_PORT: "3310"
       OCR_SERVICE_URL: http://ocr:8000
+      SSO_INTERNAL_SESSION_STATUS_URL: http://host.docker.internal:9000/internal/session-status
       REIMBURSEMENT_ALLOW_DUPLICATE_CONTENT_FOR_TESTING: ${REIMBURSEMENT_ALLOW_DUPLICATE_CONTENT_FOR_TESTING:-false}
       REIMBURSEMENT_ALLOW_DUPLICATE_INVOICES_FOR_TESTING: ${REIMBURSEMENT_ALLOW_DUPLICATE_INVOICES_FOR_TESTING:-false}
     secrets:
       - app_env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     expose:
       - "8080"
     depends_on:

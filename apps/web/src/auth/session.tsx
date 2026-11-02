@@ -5,12 +5,13 @@ import { configureReimbursementApiTokenProvider, type TokenProvider } from "../a
 export type AuthenticatedEmployee = { id: string; displayName: string; role: "EMPLOYEE" | "FINANCE_REVIEWER" | "ADMIN" };
 export type AuthSessionSnapshot =
   | { status: "loading" }
+  | { status: "logging-out" }
   | { status: "unauthenticated" }
   | { status: "error"; message: string }
   | { status: "authenticated"; accessToken: string; expiresAt: string; employee: AuthenticatedEmployee };
 
 type AuthSessionResponse = { accessToken: string; expiresAt: string; employee: AuthenticatedEmployee };
-type AuthSessionManagerDeps = { fetcher?: typeof fetch; now?: () => Date };
+type AuthSessionManagerDeps = { fetcher?: typeof fetch; now?: () => Date; navigate?: (url: string) => void };
 
 export class AuthSessionError extends Error {
   constructor(public readonly code: "UNAUTHENTICATED" | "SESSION_UNAVAILABLE", message: string) {
@@ -21,6 +22,7 @@ export class AuthSessionError extends Error {
 export function createAuthSessionManager(deps: AuthSessionManagerDeps = {}) {
   const fetcher = deps.fetcher ?? fetch;
   const now = deps.now ?? (() => new Date());
+  const navigate = deps.navigate ?? ((url: string) => window.location.assign(url));
   let snapshot: AuthSessionSnapshot = { status: "loading" };
   const listeners = new Set<() => void>();
   const notify = () => listeners.forEach((listener) => listener());
@@ -67,8 +69,8 @@ export function createAuthSessionManager(deps: AuthSessionManagerDeps = {}) {
       return () => { listeners.delete(listener); };
     },
     async logout() {
-      setSnapshot({ status: "unauthenticated" });
-      await fetcher("/api/auth/logout", { method: "POST", credentials: "same-origin" });
+      setSnapshot({ status: "logging-out" });
+      navigate("/api/auth/sso/logout");
     },
   };
 }
@@ -84,7 +86,7 @@ export function AuthSessionProvider({ children }: PropsWithChildren) {
   const [session, setSession] = useState<AuthSessionSnapshot>(manager.snapshot());
 
   useEffect(() => manager.subscribe(() => setSession(manager.snapshot())), [manager]);
-  useEffect(() => { void manager.initialize().catch(() => undefined); }, [manager]);
+  useEffect(() => { if (window.location.pathname !== "/logged-out") void manager.initialize().catch(() => undefined); }, [manager]);
   useEffect(() => { configureReimbursementApiTokenProvider(manager); }, [manager]);
   useEffect(() => {
     if (session.status !== "authenticated") return;
@@ -111,9 +113,9 @@ export function useAuthSession() {
 }
 
 function createLoginUrl() {
-  if (typeof window === "undefined") return "/api/auth/feishu/login?returnTo=%2Fclaims";
+  if (typeof window === "undefined") return "/api/auth/sso/login?returnTo=%2Fclaims";
   const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-  return `/api/auth/feishu/login?returnTo=${encodeURIComponent(returnTo)}`;
+  return `/api/auth/sso/login?returnTo=${encodeURIComponent(returnTo)}`;
 }
 
 function isSessionResponse(value: Partial<AuthSessionResponse>): value is AuthSessionResponse {

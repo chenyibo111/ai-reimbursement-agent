@@ -16,3 +16,15 @@ it("holds protected routes behind a stable login verification status", () => {
   expect(screen.getByRole("status")).toHaveTextContent("正在验证登录状态");
   expect(screen.queryByRole("heading", { name: "我的凭证卷宗" })).not.toBeInTheDocument();
 });
+
+it("keeps the logged-out page available without starting another login", () => {
+  window.history.pushState({}, "", "/logged-out");
+  mocks.useAuthSession.mockReturnValue({ session: { status: "unauthenticated" }, loginUrl: "/api/auth/sso/login?returnTo=%2Fclaims" });
+  try {
+    render(<QueryClientProvider client={new QueryClient()}><MemoryRouter initialEntries={["/logged-out"]}><App /></MemoryRouter></QueryClientProvider>);
+    expect(screen.getByRole("heading", { name: "已退出所有项目" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "重新登录" })).toHaveAttribute("href", "/api/auth/sso/login?returnTo=%2Fclaims");
+  } finally {
+    window.history.pushState({}, "", "/");
+  }
+});

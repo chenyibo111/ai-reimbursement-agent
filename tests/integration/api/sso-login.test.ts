@@ -55,3 +55,11 @@ it("provisions a verified SSO member and creates an opaque React session", async
   expect(mocks.createSession).toHaveBeenCalledWith(expect.objectContaining({ employeeId: "employee-1", sid: "sid-1", idToken: "signed-id-token" }));
   expect(response.headers.getSetCookie().join("\n")).toContain("reimbursement_sso_session=opaque-session-key");
 });
+
+it("uses the registered edge callback URI when Next sees its container URL", async () => {
+  mocks.complete.mockResolvedValue({ idToken: "signed-id-token", identity: { subject: "fs_alice", sid: "sid-1", openId: "ou_alice", expiresAt: new Date("2026-11-02T01:00:00Z") } });
+  mocks.ensureEmployee.mockResolvedValue({ id: "employee-1" });
+  mocks.createSession.mockResolvedValue("opaque-session-key");
+  await callback(new Request("http://localhost:3000/api/auth/sso/callback?code=code&state=state-1", { headers: { cookie: "sso_oauth_state=state-1; sso_oauth_nonce=nonce-1; sso_oauth_verifier=verifier-1" } }));
+  expect(mocks.complete.mock.calls[0]?.[0].toString()).toBe("http://localhost:8088/api/auth/sso/callback?code=code&state=state-1");
+});

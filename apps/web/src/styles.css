@@ -26,7 +26,7 @@ h2 { margin-bottom: 0; font-size: 1.35rem; letter-spacing: -.015em; }
 .primary-action { padding: 0 18px; background: #3569e8; color: #fff; box-shadow: 0 8px 20px rgba(53, 105, 232, .18); }
 .primary-action:hover:not(:disabled) { background: #2857cb; transform: translateY(-1px); }
 .new-claim-action, .new-claim-cancel { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
-.secondary-action { padding: 0 16px; background: #fff; border-color: #dce4f0; color: #13233d; }
+.secondary-action { display: inline-flex; align-items: center; justify-content: center; padding: 0 16px; background: #fff; border-color: #dce4f0; color: #13233d; text-decoration: none; }
 .secondary-action:hover:not(:disabled) { border-color: #3569e8; background: #eaf0ff; }
 .danger-action { min-height: 36px; padding: 0 11px; border: 1px solid #edc3ca; border-radius: 9px; background: #fff; color: #a32336; font-weight: 700; }
 .danger-action:hover:not(:disabled) { border-color: #c43a4a; background: #fff0f1; }

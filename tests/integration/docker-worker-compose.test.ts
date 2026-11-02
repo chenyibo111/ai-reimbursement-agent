@@ -73,6 +73,6 @@ it("configures a browser-reachable S3 endpoint with a narrow upload CORS origin"
   expect(compose).toContain('S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}');
   expect(compose).toContain('MINIO_API_CORS_ALLOW_ORIGIN: ${S3_CORS_ALLOWED_ORIGIN:-http://localhost:8088}');
   expect(compose).not.toContain("mc cors set local/$$S3_BUCKET -");
-  expect(example).toContain('S3_PUBLIC_ENDPOINT="http://localhost:9000"');
+  expect(example).toContain('S3_PUBLIC_ENDPOINT="http://localhost:19000"');
   expect(example).toContain('S3_CORS_ALLOWED_ORIGIN="http://localhost:8088"');
 });

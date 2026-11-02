@@ -40,16 +40,17 @@ describe("createAuthSessionManager", () => {
 
   it("clears in-memory authentication state when logging out", async () => {
     const fetcher = vi.fn<typeof fetch>()
-      .mockResolvedValueOnce(tokenResponse("token-1", "2026-10-08T01:00:00.000Z"))
-      .mockResolvedValueOnce(new Response(null, { status: 204 }));
-    const manager = createAuthSessionManager({ fetcher });
+      .mockResolvedValueOnce(tokenResponse("token-1", "2026-10-08T01:00:00.000Z"));
+    const navigate = vi.fn();
+    const manager = createAuthSessionManager({ fetcher, navigate });
     await manager.initialize();
 
     await manager.logout();
 
-    expect(manager.snapshot()).toEqual({ status: "unauthenticated" });
+    expect(manager.snapshot()).toEqual({ status: "logging-out" });
     expect(manager.getAccessToken()).toBeNull();
-    expect(fetcher).toHaveBeenLastCalledWith("/api/auth/logout", { method: "POST", credentials: "same-origin" });
+    expect(navigate).toHaveBeenCalledWith("/api/auth/sso/logout");
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 });
 

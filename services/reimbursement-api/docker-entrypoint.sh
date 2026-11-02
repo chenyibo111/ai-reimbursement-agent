@@ -13,7 +13,7 @@ fi
 
 # .env.local addresses local development ports; containers use the private
 # Compose network and must never attempt to reconnect through the host.
-REIMBURSEMENT_DATABASE_URL="$(printf '%s' "$REIMBURSEMENT_DATABASE_URL" | sed -e 's/@localhost:5433\//@postgres:5432\//' -e 's/@127\.0\.0\.1:5433\//@postgres:5432\//')"
+REIMBURSEMENT_DATABASE_URL="$(printf '%s' "$REIMBURSEMENT_DATABASE_URL" | sed -e 's/@localhost:5433\//@postgres:5432\//' -e 's/@127\.0\.0\.1:5433\//@postgres:5432\//' -e 's/@localhost:15433\//@postgres:5432\//' -e 's/@127\.0\.0\.1:15433\//@postgres:5432\//')"
 export REIMBURSEMENT_DATABASE_URL
 export S3_ENDPOINT="http://minio:9000"
 export CLAMAV_HOST="clamav"

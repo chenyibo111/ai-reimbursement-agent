@@ -32,6 +32,7 @@ export function PolicyRulesPage() {
   async function publish(event: FormEvent) {
     event.preventDefault(); setError(""); setNotice("");
     try {
+      if (!id.trim() || !date) throw new Error("请填写政策版本号和生效日期。");
       const payload = rules.map(asRule);
       if (new Set(payload.map((rule) => rule.code)).size !== payload.length) throw new Error("规则编号不能重复。");
       setSaving(true);
@@ -45,7 +46,7 @@ export function PolicyRulesPage() {
     <section className="workbench-panel policy-publish-panel" aria-labelledby="publish-title">
       <h2 id="publish-title">发布可执行规则</h2>
       <p className="field-hint">飞书文档用于制度问答。发布前请对照制度原文核对规则；文档更新不会自动修改这些规则。城市住宿档位、单笔费用上限暂缺对应单据字段，需人工核对。</p>
-      <form onSubmit={(event) => void publish(event)}>
+      <form noValidate onSubmit={(event) => void publish(event)}>
         <div className="policy-version-fields">
           <div className="field-stack"><label htmlFor="policy-id">版本编号</label><input id="policy-id" value={id} onChange={(event) => { setId(event.target.value); setNotice(""); }} required maxLength={80} placeholder="例如：2026-Q4" aria-describedby="policy-id-hint" disabled={saving} /><p id="policy-id-hint" className="field-hint">已发布版本不能覆盖；调整规则时请填写新的版本编号。</p></div>
           <div className="field-stack"><label htmlFor="policy-date">生效日期</label><input id="policy-date" type="date" value={date} onChange={(event) => { setDate(event.target.value); setNotice(""); }} required disabled={saving} /></div>
