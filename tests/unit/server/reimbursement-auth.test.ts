@@ -34,16 +34,21 @@ it("allows an administrator to also appear in the finance reviewer list", () => 
 });
 
 it("issues a fifteen minute Web JWT with the reimbursement audience", () => {
-  const token = createReimbursementJwt({ subject: "employee-1", role: "EMPLOYEE", channel: "web" }, "signing-secret", new Date("2026-10-07T00:00:00Z"));
+  const token = createReimbursementJwt({ subject: "employee-1", role: "EMPLOYEE", channel: "web", sid: "hydra-session-1" }, "signing-secret", new Date("2026-10-07T00:00:00Z"));
 
   expect(claims(token)).toMatchObject({
     sub: "employee-1",
     role: "EMPLOYEE",
     aud: "reimbursement-api",
     channel: "web",
+    sid: "hydra-session-1",
     iat: 1_791_331_200,
     exp: 1_791_332_100,
   });
+});
+
+it("requires a Hydra sid for Web JWTs", () => {
+  expect(() => createReimbursementJwt({ subject: "employee-1", role: "EMPLOYEE", channel: "web" }, "signing-secret")).toThrow("web sid is required");
 });
 
 it("requires an agent JWT to carry a stable tool-call JTI", () => {

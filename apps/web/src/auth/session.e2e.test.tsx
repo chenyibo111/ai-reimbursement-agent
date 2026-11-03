@@ -5,8 +5,18 @@ import { AuthSessionProvider, useAuthSession } from "./session";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  window.history.pushState({}, "", "/");
   window.localStorage.clear();
   window.sessionStorage.clear();
+});
+
+it("does not request an access token on the public logged-out page", async () => {
+  window.history.pushState({}, "", "/logged-out");
+  const fetcher = vi.fn<typeof fetch>();
+  vi.stubGlobal("fetch", fetcher);
+  render(<AuthSessionProvider><Probe /></AuthSessionProvider>);
+  await waitFor(() => expect(screen.getByText("loading")).toBeInTheDocument());
+  expect(fetcher).not.toHaveBeenCalled();
 });
 
 it("recovers an in-memory session after a reload only by calling the Auth BFF", async () => {

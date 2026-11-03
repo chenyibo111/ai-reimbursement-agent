@@ -7,6 +7,7 @@ export type ReimbursementJwtInput = {
   subject: string;
   role: EmployeeRole;
   channel: ReimbursementChannel;
+  sid?: string;
   jti?: string;
 };
 
@@ -32,6 +33,7 @@ export function createReimbursementJwt(input: ReimbursementJwtInput, secret: str
   if (!isRole(input.role)) throw new Error("jwt role is invalid");
   if (input.channel !== "web" && input.channel !== "agent") throw new Error("jwt channel is invalid");
   if (input.channel === "agent" && !input.jti?.trim()) throw new Error("agent jti is required");
+  if (input.channel === "web" && !input.sid?.trim()) throw new Error("web sid is required");
   if (!secret) throw new Error("reimbursement jwt secret is required");
 
   const iat = Math.floor(now.getTime() / 1000);
@@ -41,6 +43,7 @@ export function createReimbursementJwt(input: ReimbursementJwtInput, secret: str
     role: input.role,
     aud: "reimbursement-api",
     channel: input.channel,
+    ...(input.channel === "web" ? { sid: input.sid!.trim() } : {}),
     ...(input.jti?.trim() ? { jti: input.jti.trim() } : {}),
     iat,
     exp: iat + jwtLifetimeSeconds,

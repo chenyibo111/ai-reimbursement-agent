@@ -29,6 +29,18 @@ it("starts the container Feishu worker from its injected environment instead of 
   expect(compose).toMatch(/feishu-bot-worker:[\s\S]*?command: npm run feishu:worker:container/);
 });
 
+it("keeps Node workers in ordinary Compose while retiring the legacy Next Web runtime", async () => {
+  const compose = await readFile(new URL("../../docker-compose.yml", import.meta.url), "utf8");
+  const legacyWeb = compose.slice(compose.indexOf("  web:"), compose.indexOf("  feishu-bot-worker:"));
+  const bot = compose.slice(compose.indexOf("  feishu-bot-worker:"), compose.indexOf("  job-worker:"));
+  const jobs = compose.slice(compose.indexOf("  job-worker:"), compose.indexOf("  reimbursement-api:"));
+  expect(legacyWeb).toContain('profiles: ["legacy-web"]');
+  expect(bot).not.toContain("profiles:");
+  expect(jobs).not.toContain("profiles:");
+  expect(bot).toContain("npm run feishu:worker:container");
+  expect(jobs).toContain("npm run job:worker:container");
+});
+
 it("keeps the TypeScript path configuration in the worker runtime image", async () => {
   const dockerfile = await readFile(new URL("../../Dockerfile", import.meta.url), "utf8");
 
@@ -73,6 +85,6 @@ it("configures a browser-reachable S3 endpoint with a narrow upload CORS origin"
   expect(compose).toContain('S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}');
   expect(compose).toContain('MINIO_API_CORS_ALLOW_ORIGIN: ${S3_CORS_ALLOWED_ORIGIN:-http://localhost:8088}');
   expect(compose).not.toContain("mc cors set local/$$S3_BUCKET -");
-  expect(example).toContain('S3_PUBLIC_ENDPOINT="http://localhost:9000"');
+  expect(example).toContain('S3_PUBLIC_ENDPOINT="http://localhost:19000"');
   expect(example).toContain('S3_CORS_ALLOWED_ORIGIN="http://localhost:8088"');
 });

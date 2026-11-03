@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/application"
+	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/auth"
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/infrastructure"
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/store"
 	transport "github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/transport/http"
@@ -53,10 +54,37 @@ func main() {
 	}
 
 	var resolver transport.ActorResolver
+	var authBFF http.Handler
 	if os.Getenv("REIMBURSEMENT_DEV_AUTH") == "true" {
 		resolver = transport.StaticActorResolver{}
 	} else {
-		web, webErr := transport.NewWebBearerResolver(os.Getenv("REIMBURSEMENT_AUTH_HS256_SECRET"), "reimbursement-api", transport.EmployeeActivityFunc(store.EmployeeIsActive(pool)))
+		ssoSessions, ssoErr := transport.NewHTTPSSOSessionChecker(os.Getenv("SSO_INTERNAL_SESSION_STATUS_URL"), os.Getenv("SSO_SERVICE_KEY"))
+		if ssoErr != nil {
+			log.Fatalf("configure SSO session check: %v", ssoErr)
+		}
+		redirectURI := strings.TrimSpace(os.Getenv("REIMBURSEMENT_SSO_REDIRECT_URI"))
+		oidcClient, oidcErr := auth.NewOIDCClient(auth.OIDCConfig{
+			IssuerURL: "http://localhost:4444/", ClientID: "reimbursement-web", RedirectURI: redirectURI,
+			PostLogoutURI: os.Getenv("REIMBURSEMENT_SSO_POST_LOGOUT_URI"), DialAddress: os.Getenv("HYDRA_DIAL_ADDRESS"),
+		})
+		if oidcErr != nil {
+			log.Fatalf("configure Go OIDC client: %v", oidcErr)
+		}
+		webAuthRepository := store.NewWebAuthRepository(pool)
+		webSessions, sessionErr := auth.NewSessionService(webAuthRepository, ssoSessions, os.Getenv("SESSION_SECRET"), time.Now)
+		if sessionErr != nil {
+			log.Fatalf("configure Go Web sessions: %v", sessionErr)
+		}
+		redirectURL, _ := url.Parse(redirectURI)
+		authBFF, err = transport.NewAuthBFF(oidcClient, webSessions, webAuthRepository, transport.AuthBFFConfig{
+			SigningSecret: os.Getenv("REIMBURSEMENT_AUTH_HS256_SECRET"), AdminOpenIDs: os.Getenv("FEISHU_ADMIN_OPEN_IDS"),
+			FinanceOpenIDs: os.Getenv("FEISHU_FINANCE_REVIEWER_OPEN_IDS"), SecureCookie: redirectURL != nil && redirectURL.Scheme == "https",
+			PostLogoutURI: os.Getenv("REIMBURSEMENT_SSO_POST_LOGOUT_URI"), LogoutVerifier: auth.NewLogoutTokenVerifier(oidcClient, "http://localhost:4444/", "reimbursement-web"),
+		})
+		if err != nil {
+			log.Fatalf("configure Go Auth BFF: %v", err)
+		}
+		web, webErr := transport.NewWebBearerResolver(os.Getenv("REIMBURSEMENT_AUTH_HS256_SECRET"), "reimbursement-api", transport.EmployeeActivityFunc(store.EmployeeIsActive(pool)), ssoSessions)
 		if webErr != nil {
 			log.Fatalf("configure bearer authentication: %v", webErr)
 		}
@@ -93,6 +121,7 @@ func main() {
 		EmployeeIdentities: application.NewEmployeeIdentityService(store.NewPostgresEmployeeIdentityRepository(pool)),
 		ProvisioningKey:    provisioningKey,
 		Auth:               resolver,
+		AuthBFF:            authBFF,
 	})
 	address := os.Getenv("PORT")
 	if address == "" {
