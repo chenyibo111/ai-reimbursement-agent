@@ -27,7 +27,7 @@ type AuthOIDC interface {
 }
 
 type AuthEmployees interface {
-	ResolveEmployee(context.Context, string, string, string) (store.EmployeeIdentity, error)
+	ResolveMember(context.Context, store.MemberIdentity) (store.EmployeeIdentity, error)
 	FindEmployeeByID(context.Context, string) (*store.EmployeeIdentity, error)
 }
 
@@ -42,6 +42,8 @@ type AuthBFFConfig struct {
 	SecureCookie   bool
 	PostLogoutURI  string
 	LogoutVerifier AuthLogoutVerifier
+	SSOAppID       string
+	TenantKey      string
 }
 
 type AuthBFF struct {
@@ -53,7 +55,7 @@ type AuthBFF struct {
 }
 
 func NewAuthBFF(oidc AuthOIDC, sessions *auth.SessionService, employees AuthEmployees, config AuthBFFConfig) (*AuthBFF, error) {
-	if oidc == nil || sessions == nil || employees == nil || len(config.SigningSecret) < 32 || config.PostLogoutURI == "" || config.LogoutVerifier == nil {
+	if oidc == nil || sessions == nil || employees == nil || len(config.SigningSecret) < 32 || config.PostLogoutURI == "" || config.LogoutVerifier == nil || config.SSOAppID == "" || config.TenantKey == "" {
 		return nil, fmt.Errorf("Go Auth BFF is not configured")
 	}
 	return &AuthBFF{oidc: oidc, sessions: sessions, employees: employees, config: config, now: time.Now}, nil
@@ -169,11 +171,15 @@ func (handler *AuthBFF) callback(response http.ResponseWriter, request *http.Req
 		writeAuthError(response, http.StatusBadGateway, "sso_login_failed")
 		return
 	}
+	if identity.FeishuAppID != handler.config.SSOAppID || identity.FeishuTenantKey != handler.config.TenantKey || identity.FeishuUserID == "" {
+		writeAuthError(response, http.StatusForbidden, "sso_identity_not_allowed")
+		return
+	}
 	displayName := strings.TrimSpace(identity.DisplayName)
 	if displayName == "" {
 		displayName = "飞书员工"
 	}
-	employee, err := handler.employees.ResolveEmployee(request.Context(), identity.FeishuOpenID, displayName, handler.roleFor(identity.FeishuOpenID))
+	employee, err := handler.employees.ResolveMember(request.Context(), store.MemberIdentity{TenantKey: identity.FeishuTenantKey, UserID: identity.FeishuUserID, AppID: identity.FeishuAppID, OpenID: identity.FeishuOpenID, DisplayName: displayName, Role: handler.roleFor(identity.FeishuOpenID)})
 	if err != nil {
 		writeAuthError(response, http.StatusServiceUnavailable, "identity_provisioning_unavailable")
 		return

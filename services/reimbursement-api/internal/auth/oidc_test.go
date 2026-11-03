@@ -80,7 +80,7 @@ func (f *oidcFixture) serve(response http.ResponseWriter, request *http.Request)
 		}
 		claims := map[string]any{
 			"iss": issuer, "aud": "reimbursement-web", "sub": "fs_test_member", "sid": "hydra-sid-1",
-			"feishu_open_id": "ou_test_member", "name": "测试成员", "nonce": f.nonce,
+			"feishu_open_id": "ou_test_member", "feishu_user_id": "u_test_member", "feishu_tenant_key": "tenant-test", "feishu_app_id": "cli_sso", "name": "测试成员", "nonce": f.nonce,
 			"iat": time.Now().Add(-time.Minute).Unix(), "exp": time.Now().Add(time.Hour).Unix(),
 		}
 		switch f.variant {
@@ -96,6 +96,12 @@ func (f *oidcFixture) serve(response http.ResponseWriter, request *http.Request)
 			delete(claims, "sid")
 		case "open_id":
 			delete(claims, "feishu_open_id")
+		case "user_id":
+			delete(claims, "feishu_user_id")
+		case "tenant_key":
+			delete(claims, "feishu_tenant_key")
+		case "app_id":
+			delete(claims, "feishu_app_id")
 		}
 		raw := signFixtureIDToken(f.t, key, claims)
 		response.Header().Set("Content-Type", "application/json")
@@ -154,13 +160,13 @@ func TestOIDCExchangeAcceptsOnlyVerifiedFeishuIdentity(t *testing.T) {
 	}
 	f.nonce = authorization.Pending.Nonce
 	identity, err := f.client.Exchange(context.Background(), "code-1", authorization.Pending)
-	if err != nil || identity.Subject != "fs_test_member" || identity.SID != "hydra-sid-1" || identity.FeishuOpenID != "ou_test_member" || identity.DisplayName != "测试成员" || identity.IDToken == "" {
+	if err != nil || identity.Subject != "fs_test_member" || identity.SID != "hydra-sid-1" || identity.FeishuOpenID != "ou_test_member" || identity.FeishuUserID != "u_test_member" || identity.FeishuTenantKey != "tenant-test" || identity.FeishuAppID != "cli_sso" || identity.DisplayName != "测试成员" || identity.IDToken == "" {
 		t.Fatalf("verified identity not accepted: %+v, %v", identity, err)
 	}
 }
 
 func TestOIDCExchangeRejectsForgedAndIncompleteTokens(t *testing.T) {
-	for _, variant := range []string{"forged", "issuer", "audience", "expired", "nonce", "sid", "open_id"} {
+	for _, variant := range []string{"forged", "issuer", "audience", "expired", "nonce", "sid", "open_id", "user_id", "tenant_key", "app_id"} {
 		t.Run(variant, func(t *testing.T) {
 			f := newOIDCFixture(t)
 			authorization, err := f.client.Begin(context.Background(), "/claims")

@@ -71,6 +71,14 @@ func (repository *authBFFSessionRows) DeleteSessionsBySID(_ context.Context, sid
 type authBFFEmployees struct {
 	rows     map[string]store.EmployeeIdentity
 	disabled bool
+	member   store.MemberIdentity
+}
+
+func (employees *authBFFEmployees) ResolveMember(_ context.Context, member store.MemberIdentity) (store.EmployeeIdentity, error) {
+	employees.member = member
+	identity := store.EmployeeIdentity{ID: "employee-web-1", OpenID: member.OpenID, DisplayName: member.DisplayName, Role: member.Role, IsActive: !employees.disabled}
+	employees.rows[identity.ID] = identity
+	return identity, nil
 }
 
 func (employees *authBFFEmployees) ResolveEmployee(_ context.Context, openID, displayName, role string) (store.EmployeeIdentity, error) {
@@ -99,7 +107,7 @@ func newAuthBFFFixture(t *testing.T, adminIDs string) *authBFFFixture {
 	t.Helper()
 	now := time.Now()
 	status := "active"
-	oidc := &authBFFOIDC{identity: auth.VerifiedIdentity{Subject: "fs_member", SID: "hydra-sid-1", FeishuOpenID: "ou_member", DisplayName: "测试成员", ExpiresAt: now.Add(time.Hour), IDToken: "signed-id-token"}}
+	oidc := &authBFFOIDC{identity: auth.VerifiedIdentity{Subject: "fs_member", SID: "hydra-sid-1", FeishuOpenID: "ou_member", FeishuUserID: "u_member", FeishuTenantKey: "tenant-test", FeishuAppID: "cli_sso", DisplayName: "测试成员", ExpiresAt: now.Add(time.Hour), IDToken: "signed-id-token"}}
 	rows := &authBFFSessionRows{rows: make(map[string]store.SessionRecord)}
 	sessions, err := auth.NewSessionService(rows, SSOSessionFunc(func(context.Context, string) (bool, error) {
 		switch status {
@@ -117,7 +125,7 @@ func newAuthBFFFixture(t *testing.T, adminIDs string) *authBFFFixture {
 	employees := &authBFFEmployees{rows: make(map[string]store.EmployeeIdentity)}
 	verifier := &authBFFLogoutVerifier{sid: "hydra-sid-1"}
 	bff, err := NewAuthBFF(oidc, sessions, employees, AuthBFFConfig{
-		SigningSecret: strings.Repeat("j", 32), AdminOpenIDs: adminIDs, FinanceOpenIDs: "ou_finance", SecureCookie: false, LogoutVerifier: verifier, PostLogoutURI: "http://localhost:8088/logged-out",
+		SigningSecret: strings.Repeat("j", 32), AdminOpenIDs: adminIDs, FinanceOpenIDs: "ou_finance", SecureCookie: false, LogoutVerifier: verifier, PostLogoutURI: "http://localhost:8088/logged-out", SSOAppID: "cli_sso", TenantKey: "tenant-test",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -150,6 +158,14 @@ func TestAuthBFFLogoutKeepsRetryableSessionUntilHydraRevokes(t *testing.T) {
 	response = authBFFRequest(fixture.router, "http://localhost:8088/api/auth/access-token", cookie)
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("revoked session still active: %d", response.Code)
+	}
+}
+
+func TestAuthBFFCallbackResolvesCanonicalTenantMember(t *testing.T) {
+	fixture := newAuthBFFFixture(t, "ou_member")
+	callback := authBFFLoginAndCallback(t, fixture, "/claims")
+	if callback.Code != http.StatusFound || fixture.employees.member.TenantKey != "tenant-test" || fixture.employees.member.UserID != "u_member" || fixture.employees.member.AppID != "cli_sso" || fixture.employees.member.Role != "ADMIN" {
+		t.Fatalf("Web callback did not resolve the signed tenant member: %+v status=%d", fixture.employees.member, callback.Code)
 	}
 }
 

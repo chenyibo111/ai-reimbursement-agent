@@ -36,12 +36,15 @@ type Authorization struct {
 }
 
 type VerifiedIdentity struct {
-	Subject      string
-	SID          string
-	FeishuOpenID string
-	DisplayName  string
-	ExpiresAt    time.Time
-	IDToken      string
+	Subject         string
+	SID             string
+	FeishuOpenID    string
+	FeishuUserID    string
+	FeishuTenantKey string
+	FeishuAppID     string
+	DisplayName     string
+	ExpiresAt       time.Time
+	IDToken         string
 }
 
 type OIDCClient struct {
@@ -133,17 +136,20 @@ func (client *OIDCClient) Exchange(ctx context.Context, code string, pending Pen
 		return VerifiedIdentity{}, fmt.Errorf("OIDC nonce mismatch")
 	}
 	var claims struct {
-		SID          string `json:"sid"`
-		FeishuOpenID string `json:"feishu_open_id"`
-		Name         string `json:"name"`
+		SID             string `json:"sid"`
+		FeishuOpenID    string `json:"feishu_open_id"`
+		FeishuUserID    string `json:"feishu_user_id"`
+		FeishuTenantKey string `json:"feishu_tenant_key"`
+		FeishuAppID     string `json:"feishu_app_id"`
+		Name            string `json:"name"`
 	}
 	if err := verified.Claims(&claims); err != nil {
 		return VerifiedIdentity{}, err
 	}
-	if !strings.HasPrefix(verified.Subject, "fs_") || strings.TrimSpace(claims.SID) == "" || !strings.HasPrefix(claims.FeishuOpenID, "ou_") || !verified.Expiry.After(time.Now()) {
+	if !strings.HasPrefix(verified.Subject, "fs_") || strings.TrimSpace(claims.SID) == "" || !strings.HasPrefix(claims.FeishuOpenID, "ou_") || strings.TrimSpace(claims.FeishuUserID) == "" || strings.TrimSpace(claims.FeishuTenantKey) == "" || strings.TrimSpace(claims.FeishuAppID) == "" || !verified.Expiry.After(time.Now()) {
 		return VerifiedIdentity{}, fmt.Errorf("incomplete SSO identity")
 	}
-	return VerifiedIdentity{Subject: verified.Subject, SID: claims.SID, FeishuOpenID: claims.FeishuOpenID, DisplayName: claims.Name, ExpiresAt: verified.Expiry, IDToken: raw}, nil
+	return VerifiedIdentity{Subject: verified.Subject, SID: claims.SID, FeishuOpenID: claims.FeishuOpenID, FeishuUserID: claims.FeishuUserID, FeishuTenantKey: claims.FeishuTenantKey, FeishuAppID: claims.FeishuAppID, DisplayName: claims.Name, ExpiresAt: verified.Expiry, IDToken: raw}, nil
 }
 
 func (client *OIDCClient) EndSession(ctx context.Context, idToken string) (url.URL, error) {

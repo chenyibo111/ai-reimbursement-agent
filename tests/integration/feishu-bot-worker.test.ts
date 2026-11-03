@@ -77,6 +77,7 @@ function createRuntime(messages: Map<string, FeishuInboundMessage>, replies: str
   const conversations = new AgentConversationRepository(prisma);
   const turns: Array<{ conversationId: string; channelMessageId: string; chatType: string }> = [];
   const client: FeishuBotClient = {
+    async getMemberUserID() { return "u_employee"; },
     async getMessage(messageId) {
       const message = messages.get(messageId);
       if (!message) throw new Error("message unavailable");

@@ -6,6 +6,7 @@ import { searchPolicyKnowledge } from "@/src/application/search-policy-knowledge
 import { createAgentReimbursementRuntime } from "@/src/agent/reimbursement-runtime";
 import { createEmbeddingProvider } from "@/src/infrastructure/embedding/embedding-provider-factory";
 import { createFeishuBotClient } from "@/src/infrastructure/feishu/feishu-bot-client";
+import { createMemberIdentityClient } from "@/src/infrastructure/reimbursement/member-identity-client";
 import { createChatModel } from "@/src/infrastructure/model/chat-model-factory";
 import { AgentConversationRepository } from "@/src/infrastructure/prisma/agent-conversation-repository";
 import { createPrismaClient } from "@/src/infrastructure/prisma/client";
@@ -14,7 +15,6 @@ import { PrismaPolicyKnowledgeRepository } from "@/src/infrastructure/prisma/pol
 import { createLogger } from "@/src/observability/logger";
 import { createWorkerHeartbeat } from "@/src/observability/worker-heartbeat";
 import { loadConfig, validateFeishuWorkerEnvironment } from "@/src/server/config";
-import { createFeishuIdentityEnsurer } from "@/src/server/employee-identity";
 import { createFeishuBotRuntime } from "@/src/worker/feishu-bot-runtime";
 
 const logger = createLogger("feishu-worker");
@@ -84,14 +84,19 @@ function createProcessDeps(input: {
   const config = loadConfig(process.env);
   const conversations = new AgentConversationRepository(input.prisma);
   const tools = createAgentReimbursementRuntime(input.prisma, process.env, fetch, "feishu-worker");
-  const ensureFeishuIdentity = createFeishuIdentityEnsurer(input.prisma);
+  const memberIdentity = createMemberIdentityClient({
+    baseUrl: process.env.REIMBURSEMENT_API_URL ?? "",
+    serviceKey: process.env.REIMBURSEMENT_AUTH_PROVISIONING_KEY ?? "",
+    appId: config.feishuBot?.appId ?? "",
+    tenantKey: process.env.FEISHU_TENANT_KEY ?? "",
+  });
   return {
     botOpenId: input.botOpenId,
     publicAppUrl: input.publicAppUrl,
     events: input.repository,
     identities: { ensureEmployeeForInboundMessage: async ({ openId, displayName }) => {
-      const employee = await ensureFeishuIdentity({ openId, displayName });
-      return { id: employee.id, role: employee.role };
+      const userId = await input.client.getMemberUserID(openId);
+      return memberIdentity.resolve(openId, userId, displayName?.trim() || "飞书员工");
     } },
     conversations,
     client: input.client,

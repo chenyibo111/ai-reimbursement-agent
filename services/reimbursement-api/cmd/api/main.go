@@ -80,6 +80,7 @@ func main() {
 			SigningSecret: os.Getenv("REIMBURSEMENT_AUTH_HS256_SECRET"), AdminOpenIDs: os.Getenv("FEISHU_ADMIN_OPEN_IDS"),
 			FinanceOpenIDs: os.Getenv("FEISHU_FINANCE_REVIEWER_OPEN_IDS"), SecureCookie: redirectURL != nil && redirectURL.Scheme == "https",
 			PostLogoutURI: os.Getenv("REIMBURSEMENT_SSO_POST_LOGOUT_URI"), LogoutVerifier: auth.NewLogoutTokenVerifier(oidcClient, "http://localhost:4444/", "reimbursement-web"),
+			SSOAppID: os.Getenv("FEISHU_SSO_APP_ID"), TenantKey: os.Getenv("FEISHU_TENANT_KEY"),
 		})
 		if err != nil {
 			log.Fatalf("configure Go Auth BFF: %v", err)
@@ -119,9 +120,10 @@ func main() {
 		Receipts:           application.NewReceiptServiceWithOptions(claimRepository, receiptRepository, objects, infrastructure.NewClamAVScanner(clamAddress), infrastructure.NewHTTPReceiptOCRClient(ocrURL), application.SecureIDGenerator{}, application.ReceiptServiceOptions{AllowDuplicateContentForTesting: allowDuplicateContentForTesting, AllowDuplicateSubmittedInvoiceForTesting: allowDuplicateSubmittedInvoiceForTesting}, ocrSuggestionRefresher),
 		Admin:              transport.AdminServices{Policies: application.NewPolicyRuleService(store.NewPostgresPolicyRuleRepository(pool)), Reviews: application.NewReviewCaseService(reviewCaseRepository), Previews: application.NewReceiptPreviewService(reviewCaseRepository, receiptRepository, objects), Role: store.EmployeeRole(pool)},
 		EmployeeIdentities: application.NewEmployeeIdentityService(store.NewPostgresEmployeeIdentityRepository(pool)),
-		ProvisioningKey:    provisioningKey,
-		Auth:               resolver,
-		AuthBFF:            authBFF,
+		Members:            store.NewWebAuthRepository(pool), BotAppID: os.Getenv("FEISHU_APP_ID"), TenantKey: os.Getenv("FEISHU_TENANT_KEY"),
+		ProvisioningKey: provisioningKey,
+		Auth:            resolver,
+		AuthBFF:         authBFF,
 	})
 	address := os.Getenv("PORT")
 	if address == "" {

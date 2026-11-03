@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -64,6 +65,128 @@ func TestWebAuthFirstLoginCreatesOneIdentityInBothTables(t *testing.T) {
 	second, err := repository.ResolveEmployee(context.Background(), openID, "更新姓名", "ADMIN")
 	if err != nil || second.ID != identity.ID || second.Role != "ADMIN" {
 		t.Fatalf("repeat login should reuse ID and refresh Go role: %+v, %v", second, err)
+	}
+}
+
+func TestCrossAppMemberUsesOneEmployeeID(t *testing.T) {
+	pool := webAuthTestPool(t)
+	ctx := context.Background()
+	member := fmt.Sprintf("u_cross_app_%d", time.Now().UnixNano())
+	repository := NewWebAuthRepository(pool)
+	web, err := repository.ResolveMember(ctx, MemberIdentity{TenantKey: "tenant-test", UserID: member, AppID: "cli_sso", OpenID: "ou_web_" + member, DisplayName: "测试成员", Role: "EMPLOYEE"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bot, err := repository.ResolveMember(ctx, MemberIdentity{TenantKey: "tenant-test", UserID: member, AppID: "cli_bot", OpenID: "ou_bot_" + member, DisplayName: "测试成员"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if web.ID != bot.ID {
+		t.Fatalf("same member split across applications: %q != %q", web.ID, bot.ID)
+	}
+	otherTenant, err := repository.ResolveMember(ctx, MemberIdentity{TenantKey: "other-tenant", UserID: member, AppID: "cli_other", OpenID: "ou_other_" + member, DisplayName: "同名成员"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if otherTenant.ID == web.ID {
+		t.Fatal("different tenants were merged")
+	}
+}
+
+func TestCrossAppMemberConcurrentFirstUse(t *testing.T) {
+	pool := webAuthTestPool(t)
+	ctx := context.Background()
+	userID := fmt.Sprintf("u_concurrent_member_%d", time.Now().UnixNano())
+	repository := NewWebAuthRepository(pool)
+	start := make(chan struct{})
+	results := make(chan EmployeeIdentity, 8)
+	errors := make(chan error, 8)
+	var workers sync.WaitGroup
+	for index := 0; index < 8; index++ {
+		workers.Add(1)
+		go func(index int) {
+			defer workers.Done()
+			<-start
+			member := MemberIdentity{TenantKey: "tenant-test", UserID: userID, AppID: "cli_bot", OpenID: "ou_bot_" + userID, DisplayName: "成员"}
+			if index%2 == 0 {
+				member.AppID = "cli_sso"
+				member.OpenID = "ou_sso_" + userID
+				member.Role = "EMPLOYEE"
+			}
+			resolved, err := repository.ResolveMember(ctx, member)
+			results <- resolved
+			errors <- err
+		}(index)
+	}
+	close(start)
+	workers.Wait()
+	close(results)
+	close(errors)
+	for err := range errors {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var canonical string
+	for result := range results {
+		if canonical == "" {
+			canonical = result.ID
+		} else if canonical != result.ID {
+			t.Fatalf("concurrent member split into %s and %s", canonical, result.ID)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM reimbursement.employee_identity_links WHERE tenant_key='tenant-test' AND user_id=$1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM reimbursement.employee_members WHERE tenant_key='tenant-test' AND user_id=$1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM public."Employee" WHERE id=$1`, canonical)
+		_, _ = pool.Exec(ctx, `DELETE FROM reimbursement.employees WHERE id=$1`, canonical)
+	})
+}
+
+func TestCrossAppMemberRejectsConflictingLegacyOwner(t *testing.T) {
+	pool := webAuthTestPool(t)
+	ctx := context.Background()
+	member := fmt.Sprintf("u_conflict_%d", time.Now().UnixNano())
+	repository := NewWebAuthRepository(pool)
+	web, err := repository.ResolveMember(ctx, MemberIdentity{TenantKey: "tenant-test", UserID: member, AppID: "cli_sso", OpenID: "ou_web_" + member, DisplayName: "成员", Role: "EMPLOYEE"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyID, err := newWebAuthUUID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	botOpenID := "ou_bot_" + member
+	if _, err = pool.Exec(ctx, `INSERT INTO public."Employee" (id,"displayName","feishuUserId") VALUES ($1,'旧机器人员工',$2)`, legacyID, botOpenID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `INSERT INTO reimbursement.employees (id,display_name,feishu_user_id,role,is_active) VALUES ($1,'旧机器人员工',$2,'EMPLOYEE',true)`, legacyID, botOpenID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = repository.ResolveMember(ctx, MemberIdentity{TenantKey: "tenant-test", UserID: member, AppID: "cli_bot", OpenID: botOpenID, DisplayName: "成员"}); !errors.Is(err, ErrEmployeeIdentityConflict) {
+		t.Fatalf("legacy owner should require reconciliation: %v", err)
+	}
+	var owner string
+	if err = pool.QueryRow(ctx, `SELECT employee_id FROM reimbursement.employee_members WHERE tenant_key='tenant-test' AND user_id=$1`, member).Scan(&owner); err != nil || owner != web.ID {
+		t.Fatalf("canonical owner changed: %q %v", owner, err)
+	}
+}
+
+func TestCrossAppMemberPreservesInactiveEmployee(t *testing.T) {
+	pool := webAuthTestPool(t)
+	ctx := context.Background()
+	member := fmt.Sprintf("u_inactive_%d", time.Now().UnixNano())
+	repository := NewWebAuthRepository(pool)
+	web, err := repository.ResolveMember(ctx, MemberIdentity{TenantKey: "tenant-test", UserID: member, AppID: "cli_sso", OpenID: "ou_web_" + member, DisplayName: "成员", Role: "ADMIN"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `UPDATE reimbursement.employees SET is_active=false WHERE id=$1`, web.ID); err != nil {
+		t.Fatal(err)
+	}
+	bot, err := repository.ResolveMember(ctx, MemberIdentity{TenantKey: "tenant-test", UserID: member, AppID: "cli_bot", OpenID: "ou_bot_" + member, DisplayName: "成员"})
+	if err != nil || bot.IsActive || bot.Role != "ADMIN" {
+		t.Fatalf("bot reactivated employee or changed role: %+v %v", bot, err)
 	}
 }
 

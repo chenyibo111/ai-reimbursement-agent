@@ -31,6 +31,7 @@ it.skipIf(!goUrl || !databaseUrl)("persists Feishu turns through the Go HTTP too
     const messages = new Map<string, FeishuInboundMessage>();
     const replies: Array<{ messageId: string; text: string }> = [];
     const client: FeishuBotClient = {
+      async getMemberUserID() { return "u_employee"; },
       async getMessage(messageId) {
         const found = messages.get(messageId);
         if (!found) throw new Error("missing controlled Feishu message");

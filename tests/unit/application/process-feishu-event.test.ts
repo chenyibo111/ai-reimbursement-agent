@@ -30,6 +30,7 @@ function fixture(overrides: Partial<ProcessFeishuEventDeps> = {}) {
     },
     client: {
       getMessage: async () => ({ messageId: "om-1", chatId: "oc-1", chatType: "p2p", senderOpenId: "ou-employee", messageType: "text", text: "住宿报销规则是什么", mentions: [], attachments: [] }),
+      getMemberUserID: async () => "u_employee",
       downloadResource: async () => {
         calls.download += 1;
         return { bytes: new Uint8Array([0xff, 0xd8, 0xff, 0]), filename: "receipt.jpg", mimeType: "image/jpeg" };
@@ -194,6 +195,7 @@ it("downloads an attachment and delegates draft creation and extraction to the s
     client: {
       ...fixture().deps.client,
       getMessage: async () => ({ messageId: "om-1", chatId: "oc-1", chatType: "p2p", senderOpenId: "ou-employee", messageType: "image", text: "", mentions: [], attachments: [{ fileKey: "file-1", resourceType: "image", filename: "receipt.jpg" }] }),
+      getMemberUserID: async () => "u_employee",
       downloadResource: async () => {
         calls.download += 1;
         return { bytes: new Uint8Array([0xff, 0xd8, 0xff, 0]), filename: "receipt.jpg", mimeType: "image/jpeg" };

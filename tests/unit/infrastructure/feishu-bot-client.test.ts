@@ -2,6 +2,35 @@ import { expect, it } from "vitest";
 
 import { createFeishuBotClient, FeishuBotClientError } from "@/src/infrastructure/feishu/feishu-bot-client";
 
+it("resolves a sender to the tenant member ID using the bot application's token", async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const client = createFeishuBotClient({
+    appId: "cli_bot",
+    appSecret: "secret",
+    fetch: async (url, init) => {
+      calls.push({ url: url.toString(), init });
+      return calls.length === 1
+        ? json({ code: 0, tenant_access_token: "bot-token", expire: 7200 })
+        : json({ code: 0, data: { user: { open_id: "ou_sender", user_id: "u_employee" } } });
+    },
+  });
+  await expect(client.getMemberUserID("ou_sender")).resolves.toBe("u_employee");
+  expect(calls[1]).toMatchObject({
+    url: "https://open.feishu.cn/open-apis/contact/v3/users/ou_sender?user_id_type=open_id",
+    init: { headers: { authorization: "Bearer bot-token" } },
+  });
+});
+
+it("rejects a contact response without a matching open ID and member ID", async () => {
+  const client = createFeishuBotClient({
+    appId: "cli_bot", appSecret: "secret",
+    fetch: async (_url, init) => init?.method === "POST"
+      ? json({ code: 0, tenant_access_token: "bot-token", expire: 7200 })
+      : json({ code: 0, data: { user: { open_id: "ou_other" } } }),
+  });
+  await expect(client.getMemberUserID("ou_sender")).rejects.toEqual(new FeishuBotClientError("INVALID_RESPONSE"));
+});
+
 it("downloads a message resource with the tenant token only in the authorization header", async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const client = createFeishuBotClient({

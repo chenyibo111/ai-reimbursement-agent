@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/application"
+	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/store"
 )
 
 type ClaimService interface {
@@ -43,6 +44,11 @@ type Dependencies struct {
 	Admin              AdminServices
 	EmployeeIdentities EmployeeIdentityService
 	ProvisioningKey    string
+	Members            interface {
+		ResolveMember(context.Context, store.MemberIdentity) (store.EmployeeIdentity, error)
+	}
+	BotAppID  string
+	TenantKey string
 }
 
 func NewRouter(dependencies Dependencies) http.Handler {
@@ -81,6 +87,10 @@ func NewRouter(dependencies Dependencies) http.Handler {
 	if dependencies.EmployeeIdentities != nil && strings.TrimSpace(dependencies.ProvisioningKey) != "" {
 		handler := &internalEmployeeHandler{service: dependencies.EmployeeIdentities, provisioningKey: []byte(dependencies.ProvisioningKey)}
 		internal.HandleFunc("PUT /internal/v1/employees/{employeeId}", handler.upsert)
+	}
+	if dependencies.Members != nil && strings.TrimSpace(dependencies.ProvisioningKey) != "" {
+		memberHandler := &internalMemberHandler{members: dependencies.Members, serviceKey: []byte(dependencies.ProvisioningKey), botAppID: dependencies.BotAppID, tenantKey: dependencies.TenantKey}
+		internal.HandleFunc("POST /internal/v1/employee-identities/resolve", memberHandler.resolve)
 	}
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if strings.HasPrefix(request.URL.Path, "/api/auth/") && dependencies.AuthBFF != nil {

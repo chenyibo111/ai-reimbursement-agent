@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { FeishuMessageContent, FeishuReplyCard } from "@/src/domain/feishu-bot";
 
 export type FeishuBotClient = {
+  getMemberUserID(openId: string): Promise<string>;
   getMessage(messageId: string): Promise<FeishuMessageContent>;
   downloadResource(messageId: string, fileKey: string, type: "image" | "file"): Promise<{ bytes: Uint8Array; filename: string; mimeType: string }>;
   sendText(chatId: string, text: string, uuid: string): Promise<void>;
@@ -53,6 +54,16 @@ export function createFeishuBotClient(config: {
   }
 
   return {
+    async getMemberUserID(openId) {
+      if (!/^ou_[A-Za-z0-9_]+$/.test(openId)) throw new FeishuBotClientError("INVALID_RESPONSE");
+      const response = await authorizedFetch(`/open-apis/contact/v3/users/${encodeURIComponent(openId)}?user_id_type=open_id`);
+      const payload = await parseJson(response);
+      if (!response.ok) throw providerError(response.status);
+      if (isProviderFailure(payload)) throw providerRejection(payload);
+      const parsed = z.object({ data: z.object({ user: z.object({ open_id: z.string(), user_id: z.string().min(1) }) }) }).safeParse(payload);
+      if (!parsed.success || parsed.data.data.user.open_id !== openId) throw new FeishuBotClientError("INVALID_RESPONSE");
+      return parsed.data.data.user.user_id;
+    },
     async getMessage(messageId) {
       const response = await authorizedFetch(`/open-apis/im/v1/messages/${encodeURIComponent(messageId)}`);
       const payload = await parseJson(response);
