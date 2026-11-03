@@ -14,6 +14,7 @@ import (
 
 type EmployeeIdentity struct {
 	ID          string
+	OpenID      string
 	DisplayName string
 	Role        string
 	IsActive    bool
@@ -89,7 +90,20 @@ func (repository *WebAuthRepository) ResolveEmployee(ctx context.Context, openID
 	if err = tx.Commit(ctx); err != nil {
 		return EmployeeIdentity{}, err
 	}
-	return EmployeeIdentity{ID: id, DisplayName: displayName, Role: role, IsActive: true}, nil
+	return EmployeeIdentity{ID: id, OpenID: openID, DisplayName: displayName, Role: role, IsActive: true}, nil
+}
+
+func (repository *WebAuthRepository) FindEmployeeByID(ctx context.Context, id string) (*EmployeeIdentity, error) {
+	var employee EmployeeIdentity
+	err := repository.pool.QueryRow(ctx, `SELECT id,feishu_user_id,display_name,role,is_active FROM reimbursement.employees WHERE id=$1`, id).
+		Scan(&employee.ID, &employee.OpenID, &employee.DisplayName, &employee.Role, &employee.IsActive)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &employee, nil
 }
 
 func (repository *WebAuthRepository) PutSession(ctx context.Context, record SessionRecord) error {

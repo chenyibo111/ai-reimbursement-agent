@@ -39,6 +39,7 @@ type Dependencies struct {
 	Progress           ClaimProgressService
 	Receipts           ReceiptService
 	Auth               ActorResolver
+	AuthBFF            http.Handler
 	Admin              AdminServices
 	EmployeeIdentities EmployeeIdentityService
 	ProvisioningKey    string
@@ -82,6 +83,10 @@ func NewRouter(dependencies Dependencies) http.Handler {
 		internal.HandleFunc("PUT /internal/v1/employees/{employeeId}", handler.upsert)
 	}
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if strings.HasPrefix(request.URL.Path, "/api/auth/") && dependencies.AuthBFF != nil {
+			dependencies.AuthBFF.ServeHTTP(response, request)
+			return
+		}
 		if strings.HasPrefix(request.URL.Path, "/internal/") {
 			internal.ServeHTTP(response, request)
 			return

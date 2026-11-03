@@ -170,3 +170,20 @@ func TestWebAuthSessionCRUDAndDeleteBySID(t *testing.T) {
 		t.Fatalf("backchannel sid cleanup failed: %+v, %v", loaded, err)
 	}
 }
+
+func TestWebAuthFindEmployeeByIDReturnsCurrentRoleAndActivity(t *testing.T) {
+	pool := webAuthTestPool(t)
+	openID := webAuthOpenID(t, pool)
+	repository := NewWebAuthRepository(pool)
+	identity, err := repository.ResolveEmployee(context.Background(), openID, "会话成员", "EMPLOYEE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(context.Background(), `UPDATE reimbursement.employees SET role='ADMIN',is_active=false WHERE id=$1`, identity.ID); err != nil {
+		t.Fatal(err)
+	}
+	current, err := repository.FindEmployeeByID(context.Background(), identity.ID)
+	if err != nil || current == nil || current.ID != identity.ID || current.OpenID != openID || current.Role != "ADMIN" || current.IsActive {
+		t.Fatalf("current employee status not loaded: %+v, %v", current, err)
+	}
+}
