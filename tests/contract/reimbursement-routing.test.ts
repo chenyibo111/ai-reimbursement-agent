@@ -12,6 +12,7 @@ describe("reimbursement migration routing", () => {
     expect(nginx).toMatch(/location \^~ \/internal\/\s*\{\s*return 404;/);
     expect(nginx).toContain("location ^~ /api/auth/");
     expect(nginx).toContain("resolver 127.0.0.11 valid=10s ipv6=off;");
+    expect(nginx).toMatch(/set \$auth_bff_upstream reimbursement-api:8080;/);
     expect(nginx).toContain("proxy_pass http://$auth_bff_upstream");
     expect(nginx).toContain("proxy_set_header Host $http_host;");
     expect(nginx).toContain("proxy_set_header X-Forwarded-Host $http_host;");
@@ -30,10 +31,14 @@ describe("reimbursement migration routing", () => {
     ]);
 
     const apiService = compose.slice(compose.indexOf("  reimbursement-api:"), compose.indexOf("  reimbursement-web:"));
-    const authBffService = compose.slice(compose.indexOf("  web:"), compose.indexOf("  feishu-bot-worker:"));
+    const legacyWebService = compose.slice(compose.indexOf("  web:"), compose.indexOf("  feishu-bot-worker:"));
     expect(apiService).toMatch(/expose:\s*\n\s*- "8080"/);
     expect(apiService).not.toContain("ports:");
-    expect(authBffService).toContain('"127.0.0.1:${REIMBURSEMENT_NEXT_PORT:-3000}:3000"');
+    expect(legacyWebService).toContain('profiles: ["legacy-web"]');
+    expect(legacyWebService).toContain('"127.0.0.1:${REIMBURSEMENT_NEXT_PORT:-3000}:3000"');
+    const edgeService = compose.slice(compose.indexOf("  reimbursement-edge:"), compose.indexOf("  nats:"));
+    expect(edgeService).not.toMatch(/\n\s+web:\s*\n/);
+    expect(edgeService).toContain("reimbursement-api:");
     expect(`${nginx}\n${runbook}`).not.toMatch(/(?:REIMBURSEMENT_AUTH_HS256_SECRET|REIMBURSEMENT_AUTH_PROVISIONING_KEY)=\S+/);
   });
 });

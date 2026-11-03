@@ -29,6 +29,18 @@ it("starts the container Feishu worker from its injected environment instead of 
   expect(compose).toMatch(/feishu-bot-worker:[\s\S]*?command: npm run feishu:worker:container/);
 });
 
+it("keeps Node workers in ordinary Compose while retiring the legacy Next Web runtime", async () => {
+  const compose = await readFile(new URL("../../docker-compose.yml", import.meta.url), "utf8");
+  const legacyWeb = compose.slice(compose.indexOf("  web:"), compose.indexOf("  feishu-bot-worker:"));
+  const bot = compose.slice(compose.indexOf("  feishu-bot-worker:"), compose.indexOf("  job-worker:"));
+  const jobs = compose.slice(compose.indexOf("  job-worker:"), compose.indexOf("  reimbursement-api:"));
+  expect(legacyWeb).toContain('profiles: ["legacy-web"]');
+  expect(bot).not.toContain("profiles:");
+  expect(jobs).not.toContain("profiles:");
+  expect(bot).toContain("npm run feishu:worker:container");
+  expect(jobs).toContain("npm run job:worker:container");
+});
+
 it("keeps the TypeScript path configuration in the worker runtime image", async () => {
   const dockerfile = await readFile(new URL("../../Dockerfile", import.meta.url), "utf8");
 

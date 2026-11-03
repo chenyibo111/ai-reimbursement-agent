@@ -1,6 +1,6 @@
 # React + Go 本地统一登录
 
-本说明仅适用于迁移中的 React 工作台与 Go API。旧 Next.js 入口和飞书机器人仍使用原有身份链路。
+本说明适用于 React 工作台与 Go API。Go 负责浏览器认证；旧 Next.js Web 服务默认不启动。飞书机器人和 Node 任务 Worker 继续独立运行，身份链路不变。
 
 ## 启动前
 
@@ -14,17 +14,19 @@
 在报销项目目录运行：
 
 ```powershell
-docker compose --env-file .env.local -p reimbursement-sso --profile migration up -d --build postgres minio minio-init clamav ocr web reimbursement-api reimbursement-web reimbursement-edge
+docker compose --env-file .env.local -p reimbursement-sso --profile migration up -d --build postgres minio minio-init clamav ocr reimbursement-api reimbursement-web reimbursement-edge feishu-bot-worker job-worker
 npx prisma migrate deploy --config prisma7.config.ts
 ```
 
-首次创建数据库时，再按文件名顺序对 `reimbursement` 数据库执行 Go SQL 迁移：
+先运行 Prisma 迁移，再按文件名顺序对 `reimbursement` 数据库执行 Go SQL 迁移。已有数据库也必须执行新增的 `000016_go_sso_auth.sql`；迁移使用 `IF NOT EXISTS`，重复执行不会删除员工或单据：
 
 ```powershell
 Get-ChildItem services/reimbursement-api/db/migrations/*.sql | Sort-Object Name | ForEach-Object { Get-Content -Raw $_.FullName | docker exec -i reimbursement-sso-postgres-1 psql -U reimbursement -d reimbursement -v ON_ERROR_STOP=1 -q; if ($LASTEXITCODE -ne 0) { throw "Go migration failed: $($_.Name)" } }
 ```
 
 `prisma migrate deploy` 在宿主机运行时使用 `.env.local` 的 `DATABASE_URL`。首次启动需要等待 OCR 镜像与模型准备。打开 `http://localhost:8088/claims`。报销项目的 Go API 只在 Compose 内网暴露；BFF 和 Go 在每次受保护请求时查询 SSO，查询失败时拒绝访问。
+
+从 Next.js Web 切到 Go 认证后，旧浏览器会话不会迁移；首次打开 React 工作台请重新登录。普通 Compose 启动不会运行 `web`。需要临时启动旧入口时，单独使用 `docker compose --env-file .env.local -p reimbursement-sso --profile legacy-web up -d web`；它仍使用本机 `localhost:3000`。回滚网关时需将 `infra/nginx/reimbursement-routes.conf` 的 `$auth_bff_upstream` 指回 `web:3000`，然后重建 `reimbursement-edge`。Node Worker 服务无需切换。
 
 ## 验收
 
