@@ -19,6 +19,7 @@ import (
 type authBFFOIDC struct {
 	identity    auth.VerifiedIdentity
 	exchangeErr error
+	endErr      error
 }
 
 func (fake *authBFFOIDC) Begin(_ context.Context, returnTo string) (auth.Authorization, error) {
@@ -31,7 +32,16 @@ func (fake *authBFFOIDC) Exchange(_ context.Context, _ string, _ auth.PendingAut
 	return fake.identity, fake.exchangeErr
 }
 func (fake *authBFFOIDC) EndSession(_ context.Context, _ string) (url.URL, error) {
-	return url.URL{Scheme: "http", Host: "localhost:4444", Path: "/oauth2/sessions/logout"}, nil
+	return url.URL{Scheme: "http", Host: "localhost:4444", Path: "/oauth2/sessions/logout"}, fake.endErr
+}
+
+type authBFFLogoutVerifier struct {
+	sid string
+	err error
+}
+
+func (verifier *authBFFLogoutVerifier) Verify(_ context.Context, _ string) (string, error) {
+	return verifier.sid, verifier.err
 }
 
 type authBFFSessionRows struct {
@@ -81,6 +91,7 @@ type authBFFFixture struct {
 	employees   *authBFFEmployees
 	sessionRows *authBFFSessionRows
 	status      *string
+	verifier    *authBFFLogoutVerifier
 }
 
 func newAuthBFFFixture(t *testing.T, adminIDs string) *authBFFFixture {
@@ -103,13 +114,67 @@ func newAuthBFFFixture(t *testing.T, adminIDs string) *authBFFFixture {
 		t.Fatal(err)
 	}
 	employees := &authBFFEmployees{rows: make(map[string]store.EmployeeIdentity)}
+	verifier := &authBFFLogoutVerifier{sid: "hydra-sid-1"}
 	bff, err := NewAuthBFF(oidc, sessions, employees, AuthBFFConfig{
-		SigningSecret: strings.Repeat("j", 32), AdminOpenIDs: adminIDs, FinanceOpenIDs: "ou_finance", SecureCookie: false,
+		SigningSecret: strings.Repeat("j", 32), AdminOpenIDs: adminIDs, FinanceOpenIDs: "ou_finance", SecureCookie: false, LogoutVerifier: verifier, PostLogoutURI: "http://localhost:8088/logged-out",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &authBFFFixture{router: NewRouter(Dependencies{AuthBFF: bff, Auth: StaticActorResolver{}}), oidc: oidc, employees: employees, sessionRows: rows, status: &status}
+	return &authBFFFixture{router: NewRouter(Dependencies{AuthBFF: bff, Auth: StaticActorResolver{}}), oidc: oidc, employees: employees, sessionRows: rows, status: &status, verifier: verifier}
+}
+
+func TestAuthBFFLogoutKeepsRetryableSessionUntilHydraRevokes(t *testing.T) {
+	fixture := newAuthBFFFixture(t, "")
+	callback := authBFFLoginAndCallback(t, fixture, "/claims")
+	var cookie *http.Cookie
+	for _, item := range callback.Result().Cookies() {
+		if item.Name == ssoSessionCookieName {
+			cookie = item
+		}
+	}
+	if cookie == nil {
+		t.Fatal("missing session cookie")
+	}
+	response := authBFFRequest(fixture.router, "http://localhost:8088/api/auth/sso/logout", cookie)
+	if response.Code != http.StatusFound || !strings.Contains(response.Result().Header.Get("Location"), "/oauth2/sessions/logout") || len(fixture.sessionRows.rows) != 1 {
+		t.Fatalf("logout lost retryable session: %d", response.Code)
+	}
+	fixture.oidc.endErr = errors.New("Hydra outage")
+	response = authBFFRequest(fixture.router, "http://localhost:8088/api/auth/sso/logout", cookie)
+	if response.Code != http.StatusServiceUnavailable || len(fixture.sessionRows.rows) != 1 {
+		t.Fatalf("Hydra outage lost retryable session: %d", response.Code)
+	}
+	*fixture.status = "revoked"
+	response = authBFFRequest(fixture.router, "http://localhost:8088/api/auth/access-token", cookie)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("revoked session still active: %d", response.Code)
+	}
+}
+
+func TestAuthBFFBackchannelDeletesOnlyVerifiedSIDAndIsIdempotent(t *testing.T) {
+	fixture := newAuthBFFFixture(t, "")
+	authBFFLoginAndCallback(t, fixture, "/claims")
+	request := func(body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, "http://localhost:8088/api/auth/sso/backchannel-logout", strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		response := httptest.NewRecorder()
+		fixture.router.ServeHTTP(response, r)
+		return response
+	}
+	if response := request("logout_token=bad&logout_token=duplicate"); response.Code != http.StatusBadRequest || len(fixture.sessionRows.rows) != 1 {
+		t.Fatalf("duplicate token accepted: %d", response.Code)
+	}
+	fixture.verifier.err = errors.New("bad signature")
+	if response := request("logout_token=forged"); response.Code != http.StatusUnauthorized || len(fixture.sessionRows.rows) != 1 {
+		t.Fatalf("forged token deleted session: %d", response.Code)
+	}
+	fixture.verifier.err = nil
+	for range 2 {
+		if response := request("logout_token=signed"); response.Code != http.StatusNoContent || len(fixture.sessionRows.rows) != 0 {
+			t.Fatalf("verified logout failed: %d", response.Code)
+		}
+	}
 }
 
 func authBFFRequest(router http.Handler, target string, cookies ...*http.Cookie) *httptest.ResponseRecorder {

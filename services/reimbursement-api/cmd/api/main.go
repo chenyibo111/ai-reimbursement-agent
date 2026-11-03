@@ -79,6 +79,7 @@ func main() {
 		authBFF, err = transport.NewAuthBFF(oidcClient, webSessions, webAuthRepository, transport.AuthBFFConfig{
 			SigningSecret: os.Getenv("REIMBURSEMENT_AUTH_HS256_SECRET"), AdminOpenIDs: os.Getenv("FEISHU_ADMIN_OPEN_IDS"),
 			FinanceOpenIDs: os.Getenv("FEISHU_FINANCE_REVIEWER_OPEN_IDS"), SecureCookie: redirectURL != nil && redirectURL.Scheme == "https",
+			PostLogoutURI: os.Getenv("REIMBURSEMENT_SSO_POST_LOGOUT_URI"), LogoutVerifier: auth.NewLogoutTokenVerifier(oidcClient, "http://localhost:4444/", "reimbursement-web"),
 		})
 		if err != nil {
 			log.Fatalf("configure Go Auth BFF: %v", err)

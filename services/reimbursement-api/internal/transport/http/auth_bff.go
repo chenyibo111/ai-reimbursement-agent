@@ -31,11 +31,17 @@ type AuthEmployees interface {
 	FindEmployeeByID(context.Context, string) (*store.EmployeeIdentity, error)
 }
 
+type AuthLogoutVerifier interface {
+	Verify(context.Context, string) (string, error)
+}
+
 type AuthBFFConfig struct {
 	SigningSecret  string
 	AdminOpenIDs   string
 	FinanceOpenIDs string
 	SecureCookie   bool
+	PostLogoutURI  string
+	LogoutVerifier AuthLogoutVerifier
 }
 
 type AuthBFF struct {
@@ -47,7 +53,7 @@ type AuthBFF struct {
 }
 
 func NewAuthBFF(oidc AuthOIDC, sessions *auth.SessionService, employees AuthEmployees, config AuthBFFConfig) (*AuthBFF, error) {
-	if oidc == nil || sessions == nil || employees == nil || len(config.SigningSecret) < 32 {
+	if oidc == nil || sessions == nil || employees == nil || len(config.SigningSecret) < 32 || config.PostLogoutURI == "" || config.LogoutVerifier == nil {
 		return nil, fmt.Errorf("Go Auth BFF is not configured")
 	}
 	return &AuthBFF{oidc: oidc, sessions: sessions, employees: employees, config: config, now: time.Now}, nil
@@ -61,9 +67,69 @@ func (handler *AuthBFF) ServeHTTP(response http.ResponseWriter, request *http.Re
 		handler.callback(response, request)
 	case request.Method == http.MethodGet && request.URL.Path == "/api/auth/access-token":
 		handler.accessToken(response, request)
+	case request.Method == http.MethodGet && request.URL.Path == "/api/auth/sso/logout":
+		handler.logout(response, request)
+	case request.Method == http.MethodPost && request.URL.Path == "/api/auth/sso/backchannel-logout":
+		handler.backchannelLogout(response, request)
 	default:
 		http.NotFound(response, request)
 	}
+}
+
+func (handler *AuthBFF) logout(response http.ResponseWriter, request *http.Request) {
+	cookie := readAuthCookie(request, ssoSessionCookieName)
+	if cookie == "" {
+		http.Redirect(response, request, handler.config.PostLogoutURI, http.StatusFound)
+		return
+	}
+	session, err := handler.sessions.Active(request.Context(), cookie)
+	if errors.Is(err, auth.ErrUnauthenticated) {
+		handler.clearSession(response)
+		http.Redirect(response, request, handler.config.PostLogoutURI, http.StatusFound)
+		return
+	}
+	if err != nil {
+		writeAuthError(response, http.StatusServiceUnavailable, "sso_logout_unavailable")
+		return
+	}
+	target, err := handler.oidc.EndSession(request.Context(), session.IDToken)
+	if err != nil {
+		writeAuthError(response, http.StatusServiceUnavailable, "sso_logout_unavailable")
+		return
+	}
+	response.Header().Set("Cache-Control", "no-store")
+	http.Redirect(response, request, target.String(), http.StatusFound)
+}
+
+func (handler *AuthBFF) backchannelLogout(response http.ResponseWriter, request *http.Request) {
+	if !strings.HasPrefix(request.Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
+		writeAuthError(response, http.StatusBadRequest, "invalid_logout_request")
+		return
+	}
+	request.Body = http.MaxBytesReader(response, request.Body, 16*1024)
+	if err := request.ParseForm(); err != nil {
+		writeAuthError(response, http.StatusBadRequest, "invalid_logout_request")
+		return
+	}
+	tokens := request.PostForm["logout_token"]
+	if len(tokens) != 1 || tokens[0] == "" {
+		writeAuthError(response, http.StatusBadRequest, "invalid_logout_request")
+		return
+	}
+	sid, err := handler.config.LogoutVerifier.Verify(request.Context(), tokens[0])
+	if err != nil {
+		writeAuthError(response, http.StatusUnauthorized, "invalid_logout_token")
+		return
+	}
+	if err := handler.sessions.DeleteBySID(request.Context(), sid); err != nil {
+		writeAuthError(response, http.StatusServiceUnavailable, "session_store_unavailable")
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
+func (handler *AuthBFF) clearSession(response http.ResponseWriter) {
+	http.SetCookie(response, &http.Cookie{Name: ssoSessionCookieName, Path: "/api/auth", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: handler.config.SecureCookie})
 }
 
 func (handler *AuthBFF) login(response http.ResponseWriter, request *http.Request) {
