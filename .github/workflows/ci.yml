@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.6-pg16
+        env:
+          POSTGRES_USER: reimbursement
+          POSTGRES_PASSWORD: reimbursement
+          POSTGRES_DB: reimbursement_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U reimbursement -d reimbursement_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://reimbursement:reimbursement@127.0.0.1:5432/reimbursement_test
+      TEST_DATABASE_URL: postgresql://reimbursement:reimbursement@127.0.0.1:5432/reimbursement_test
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate --config prisma7.config.ts
+      - run: npm run db:test:migrate
+      - run: npm run lint
+      - run: node node_modules/typescript/bin/tsc --noEmit
+      - run: npm test
+      - run: npm run build
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+  api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: services/reimbursement-api
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.6-pg16
+        env:
+          POSTGRES_USER: reimbursement
+          POSTGRES_PASSWORD: reimbursement
+          POSTGRES_DB: reimbursement_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U reimbursement -d reimbursement_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      TEST_REIMBURSEMENT_DATABASE_URL: postgresql://reimbursement:reimbursement@127.0.0.1:5432/reimbursement_test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: services/reimbursement-api/go.mod
+          cache: true
+      - name: Apply Go schema migrations
+        run: |
+          command -v psql || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+          for file in db/migrations/*.sql; do
+            psql "$TEST_REIMBURSEMENT_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$file"
+          done
+      - run: go test ./...
+      - run: go vet ./...
+      - run: go build ./cmd/...

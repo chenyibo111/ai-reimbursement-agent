@@ -13,29 +13,40 @@
 
 ## 启动报销项目
 
-在已有报销项目目录运行前，先用 `docker compose ls` 确认当前 Compose 项目名。下面命令以 `ai-reimbursement-agent` 为示例；如果现有项目名是 `reimbursement-sso`，所有命令都要统一改为 `-p reimbursement-sso`，并沿用该项目原有的 `-f` 覆盖文件。不要混用项目名：不同项目名会创建独立的容器和数据卷，即使使用同一个代码目录。
+在已有报销项目目录运行前，先用 `docker compose ls` 确认当前 Compose 项目名，并在 `.env.local` 中设置相同的 `COMPOSE_PROJECT_NAME`。本机现有报销项目为 `reimbursement-sso`，所有报销核心服务及 Loki/Alloy/Grafana/Alertmanager 都使用它。现在只需根目录的 `docker-compose.yml` 和 `.env.local`；旧 `.local-sso/compose.override.yaml` 不再参与启动。不同项目名会创建独立容器和数据卷，即使使用同一个代码目录。
 
 ```powershell
-docker compose --env-file .env.local -p ai-reimbursement-agent --profile migration --profile knowledge up -d postgres
+docker compose --env-file .env.local --profile migration --profile knowledge up -d postgres
 npx prisma migrate deploy --config prisma7.config.ts
 ```
 
-现有数据库先运行 Prisma 迁移，再执行本次需要的三份 Go SQL 迁移（`000016` 至 `000018`）；这些迁移可重复执行。全新数据库需要从 `000001` 按顺序执行所有 Go SQL 迁移：
+现有数据库先运行尚未部署的 Prisma 迁移；Go SQL 只执行尚未应用的文件，不要把全量脚本对已有业务库重放。下面的 `000016` 至 `000018` 示例只适用于尚未接入统一登录的旧库；本机当前 `reimbursement-sso` 已完成这些迁移，无需再次执行。全新空库应从 `000001` 按文件名顺序执行所有 Go SQL 迁移。
 
 ```powershell
+# 仅用于尚未应用 000016-000018 的旧库；本机当前库跳过此循环。
 $files = @('000016_go_sso_auth.sql', '000017_employee_identity_links.sql', '000018_employee_identity_merges.sql')
 foreach ($file in $files) {
   Get-Content -Raw "services/reimbursement-api/db/migrations/$file" |
-    docker compose --env-file .env.local -p ai-reimbursement-agent exec -T postgres psql -U reimbursement -d reimbursement -v ON_ERROR_STOP=1 -q
+    docker compose --env-file .env.local exec -T postgres psql -U reimbursement -d reimbursement -v ON_ERROR_STOP=1 -q
   if ($LASTEXITCODE -ne 0) { throw "Go migration failed: $file" }
 }
-docker compose --env-file .env.local -p ai-reimbursement-agent --profile migration --profile knowledge build reimbursement-api feishu-bot-worker
-docker compose --env-file .env.local -p ai-reimbursement-agent --profile migration --profile knowledge up -d minio minio-init clamav ocr embedding-service nats reimbursement-api reimbursement-web reimbursement-edge feishu-bot-worker job-worker reimbursement-worker agent-event-worker
+```
+
+全新空库执行 Go SQL 时，将上例中的 `$files` 换成以下按文件名排序的清单，再运行同一个 `foreach` 循环。完成迁移后启动服务：
+
+```powershell
+$files = Get-ChildItem services/reimbursement-api/db/migrations/*.sql |
+  Sort-Object Name | ForEach-Object Name
+```
+
+```powershell
+docker compose --env-file .env.local --profile migration --profile knowledge --profile observability build reimbursement-api feishu-bot-worker
+docker compose --env-file .env.local --profile migration --profile knowledge --profile observability up -d minio minio-init clamav ocr embedding-service nats reimbursement-api reimbursement-web reimbursement-edge feishu-bot-worker job-worker reimbursement-worker agent-event-worker loki alloy grafana alertmanager alert-relay
 ```
 
 `prisma migrate deploy` 在宿主机运行时使用 `.env.local` 的 `DATABASE_URL`。首次启动需要等待 OCR 镜像与模型准备。打开 `http://localhost:8088/claims`。报销项目的 Go API 只在 Compose 内网暴露；BFF 和 Go 在每次受保护请求时查询 SSO，查询失败时拒绝访问。
 
-从 Next.js Web 切到 Go 认证后，旧浏览器会话不会迁移；首次打开 React 工作台请重新登录。普通 Compose 启动不会运行 `web`。需要临时启动旧入口时，单独使用 `docker compose --env-file .env.local -p ai-reimbursement-agent --profile legacy-web up -d web`；它仍使用本机 `localhost:3000`。回滚网关时需将 `infra/nginx/reimbursement-routes.conf` 的 `$auth_bff_upstream` 指回 `web:3000`，然后重建 `reimbursement-edge`。Node Worker 服务无需切换。
+从 Next.js Web 切到 Go 认证后，旧浏览器会话不会迁移；首次打开 React 工作台请重新登录。普通 Compose 启动不会运行 `web`。需要临时启动旧入口时，单独使用 `docker compose --env-file .env.local --profile legacy-web up -d web`；它使用 `.env.local` 中的 `REIMBURSEMENT_NEXT_PORT`（本机为 13000）。回滚网关时需将 `infra/nginx/reimbursement-routes.conf` 的 `$auth_bff_upstream` 指回 `web:3000`，然后重建 `reimbursement-edge`。Node Worker 服务无需切换。
 
 ## 验收
 
