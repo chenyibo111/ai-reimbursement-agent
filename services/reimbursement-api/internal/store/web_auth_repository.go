@@ -77,10 +77,11 @@ func (repository *WebAuthRepository) ResolveEmployee(ctx context.Context, openID
 	}
 	id = savedPublicID
 	var savedGoID string
+	var isActive bool
 	err = tx.QueryRow(ctx, `INSERT INTO reimbursement.employees (id,display_name,feishu_user_id,role,is_active)
 		VALUES ($1,$2,$3,$4,true)
-		ON CONFLICT (feishu_user_id) DO UPDATE SET display_name=EXCLUDED.display_name,role=EXCLUDED.role,is_active=true
-		RETURNING id`, id, displayName, openID, role).Scan(&savedGoID)
+		ON CONFLICT (feishu_user_id) DO UPDATE SET display_name=EXCLUDED.display_name,role=EXCLUDED.role
+		RETURNING id,is_active`, id, displayName, openID, role).Scan(&savedGoID, &isActive)
 	if err != nil {
 		return EmployeeIdentity{}, err
 	}
@@ -90,7 +91,7 @@ func (repository *WebAuthRepository) ResolveEmployee(ctx context.Context, openID
 	if err = tx.Commit(ctx); err != nil {
 		return EmployeeIdentity{}, err
 	}
-	return EmployeeIdentity{ID: id, OpenID: openID, DisplayName: displayName, Role: role, IsActive: true}, nil
+	return EmployeeIdentity{ID: id, OpenID: openID, DisplayName: displayName, Role: role, IsActive: isActive}, nil
 }
 
 func (repository *WebAuthRepository) FindEmployeeByID(ctx context.Context, id string) (*EmployeeIdentity, error) {

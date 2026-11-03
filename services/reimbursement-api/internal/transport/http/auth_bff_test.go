@@ -69,11 +69,12 @@ func (repository *authBFFSessionRows) DeleteSessionsBySID(_ context.Context, sid
 }
 
 type authBFFEmployees struct {
-	rows map[string]store.EmployeeIdentity
+	rows     map[string]store.EmployeeIdentity
+	disabled bool
 }
 
 func (employees *authBFFEmployees) ResolveEmployee(_ context.Context, openID, displayName, role string) (store.EmployeeIdentity, error) {
-	identity := store.EmployeeIdentity{ID: "employee-web-1", OpenID: openID, DisplayName: displayName, Role: role, IsActive: true}
+	identity := store.EmployeeIdentity{ID: "employee-web-1", OpenID: openID, DisplayName: displayName, Role: role, IsActive: !employees.disabled}
 	employees.rows[identity.ID] = identity
 	return identity, nil
 }
@@ -233,6 +234,15 @@ func TestAuthBFFCallbackRejectsInvalidIDTokenBeforeProvisioning(t *testing.T) {
 	callback := authBFFLoginAndCallback(t, fixture, "/claims")
 	if callback.Code != http.StatusBadGateway || len(fixture.employees.rows) != 0 || len(fixture.sessionRows.rows) != 0 {
 		t.Fatalf("invalid ID Token created identity or session: %d", callback.Code)
+	}
+}
+
+func TestAuthBFFCallbackRejectsDisabledEmployee(t *testing.T) {
+	fixture := newAuthBFFFixture(t, "")
+	fixture.employees.disabled = true
+	response := authBFFLoginAndCallback(t, fixture, "/claims")
+	if response.Code != http.StatusForbidden || len(fixture.sessionRows.rows) != 0 {
+		t.Fatalf("disabled employee received session: %d", response.Code)
 	}
 }
 

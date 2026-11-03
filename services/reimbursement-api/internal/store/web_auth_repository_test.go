@@ -84,6 +84,26 @@ func TestWebAuthReusesNextBFFEmployeeID(t *testing.T) {
 	}
 }
 
+func TestWebAuthLoginDoesNotReactivateDisabledEmployee(t *testing.T) {
+	pool := webAuthTestPool(t)
+	openID := webAuthOpenID(t, pool)
+	repository := NewWebAuthRepository(pool)
+	first, err := repository.ResolveEmployee(context.Background(), openID, "测试成员", "EMPLOYEE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(context.Background(), `UPDATE reimbursement.employees SET is_active=false WHERE id=$1`, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	second, err := repository.ResolveEmployee(context.Background(), openID, "测试成员", "EMPLOYEE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.IsActive {
+		t.Fatal("disabled employee was reactivated by SSO login")
+	}
+}
+
 func TestWebAuthRejectsConflictingEmployeeIDs(t *testing.T) {
 	pool := webAuthTestPool(t)
 	openID := webAuthOpenID(t, pool)

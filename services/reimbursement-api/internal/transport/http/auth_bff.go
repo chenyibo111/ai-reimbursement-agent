@@ -178,6 +178,10 @@ func (handler *AuthBFF) callback(response http.ResponseWriter, request *http.Req
 		writeAuthError(response, http.StatusServiceUnavailable, "identity_provisioning_unavailable")
 		return
 	}
+	if !employee.IsActive {
+		writeAuthError(response, http.StatusForbidden, "employee_inactive")
+		return
+	}
 	cookie, err := handler.sessions.Create(request.Context(), employee.ID, identity.SID, identity.IDToken, identity.ExpiresAt)
 	if err != nil {
 		writeAuthError(response, http.StatusServiceUnavailable, "session_store_unavailable")
