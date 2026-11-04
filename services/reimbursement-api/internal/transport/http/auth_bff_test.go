@@ -20,13 +20,31 @@ type authBFFOIDC struct {
 	identity    auth.VerifiedIdentity
 	exchangeErr error
 	endErr      error
+	silent      bool
 }
 
-func (fake *authBFFOIDC) Begin(_ context.Context, returnTo string) (auth.Authorization, error) {
+func (fake *authBFFOIDC) Begin(_ context.Context, returnTo string, silent bool) (auth.Authorization, error) {
+	fake.silent = silent
 	return auth.Authorization{
 		URL:     "http://localhost:4444/oauth2/auth?state=expected-state",
 		Pending: auth.PendingAuth{State: "expected-state", Nonce: "expected-nonce", Verifier: strings.Repeat("v", 43), ReturnTo: returnTo},
 	}, nil
+}
+
+func TestAuthBFFSilentErrorFallsBackToInteractiveLogin(t *testing.T) {
+	for _, oidcError := range []string{"login_required", "consent_required"} {
+		t.Run(oidcError, func(t *testing.T) {
+			fixture := newAuthBFFFixture(t, "")
+			login := authBFFRequest(fixture.router, "http://localhost:8088/api/auth/sso/silent?returnTo=%2Fclaims")
+			if login.Code != http.StatusFound || !fixture.oidc.silent {
+				t.Fatalf("silent login not started: %d", login.Code)
+			}
+			callback := authBFFRequest(fixture.router, "http://localhost:8088/api/auth/sso/callback?error="+oidcError+"&state=expected-state", login.Result().Cookies()...)
+			if callback.Code != http.StatusFound || callback.Header().Get("Location") != "/api/auth/sso/login?returnTo=%2Fclaims" || len(fixture.sessionRows.rows) != 0 {
+				t.Fatalf("silent fallback failed: status=%d location=%q", callback.Code, callback.Header().Get("Location"))
+			}
+		})
+	}
 }
 func (fake *authBFFOIDC) Exchange(_ context.Context, _ string, _ auth.PendingAuth) (auth.VerifiedIdentity, error) {
 	return fake.identity, fake.exchangeErr
@@ -221,8 +239,8 @@ func TestAuthBFFLoginUsesPrivatePendingCookiesAndSafeReturnPath(t *testing.T) {
 		t.Fatalf("login did not redirect to Hydra: %d %s", login.Code, login.Result().Header.Get("Location"))
 	}
 	cookies := login.Result().Cookies()
-	if len(cookies) != 4 {
-		t.Fatalf("expected four pending cookies, got %d", len(cookies))
+	if len(cookies) != 5 {
+		t.Fatalf("expected five pending cookies, got %d", len(cookies))
 	}
 	for _, cookie := range cookies {
 		if !cookie.HttpOnly || cookie.Path != "/api/auth/sso" || cookie.SameSite != http.SameSiteLaxMode || cookie.MaxAge <= 0 {

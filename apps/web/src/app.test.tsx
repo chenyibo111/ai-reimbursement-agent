@@ -28,3 +28,18 @@ it("keeps the logged-out page available without starting another login", () => {
     window.history.pushState({}, "", "/");
   }
 });
+
+it("starts a silent authorization when the app has no local session", () => {
+	window.history.pushState({}, "", "/claims");
+	mocks.useAuthSession.mockReturnValue({ session: { status: "unauthenticated" }, loginUrl: "/api/auth/sso/login?returnTo=%2Fclaims", silentLoginUrl: "/api/auth/sso/silent?returnTo=%2Fclaims" });
+	const assign = vi.fn();
+	const originalLocation = window.location;
+	Object.defineProperty(window, "location", { configurable: true, value: { ...originalLocation, pathname: "/claims", assign } });
+	try {
+		render(<QueryClientProvider client={new QueryClient()}><MemoryRouter initialEntries={["/claims"]}><App /></MemoryRouter></QueryClientProvider>);
+		expect(assign).toHaveBeenCalledWith("/api/auth/sso/silent?returnTo=%2Fclaims");
+	} finally {
+		Object.defineProperty(window, "location", { configurable: true, value: originalLocation });
+		window.history.pushState({}, "", "/");
+	}
+});

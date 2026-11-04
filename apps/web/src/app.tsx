@@ -9,12 +9,12 @@ import { ReviewCenterPage } from "./routes/review-center-page";
 import { useAuthSession } from "./auth/session";
 
 export function App() {
-  const { session, loginUrl, refreshAccessToken } = useAuthSession();
+  const { session, silentLoginUrl, refreshAccessToken } = useAuthSession();
   const loggedOut = window.location.pathname === "/logged-out";
 
   useEffect(() => {
-    if (!loggedOut && session.status === "unauthenticated") window.location.assign(loginUrl);
-  }, [loggedOut, loginUrl, session.status]);
+    if (!loggedOut && session.status === "unauthenticated") window.location.assign(silentLoginUrl);
+  }, [loggedOut, silentLoginUrl, session.status]);
 
   if (loggedOut) {
     return <main className="page-shell"><section className="workbench-panel" aria-labelledby="logged-out-title"><h1 id="logged-out-title">已退出所有项目</h1><p className="page-summary">当前登录已结束。需要继续使用报销工作台时，请重新登录。</p><a className="secondary-action" href="/api/auth/sso/login?returnTo=%2Fclaims">重新登录</a></section></main>;

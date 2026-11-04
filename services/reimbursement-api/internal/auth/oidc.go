@@ -93,7 +93,7 @@ func (client *OIDCClient) provider(ctx context.Context) (*oidc.Provider, *oauth2
 	return provider, config, nil
 }
 
-func (client *OIDCClient) Begin(ctx context.Context, returnTo string) (Authorization, error) {
+func (client *OIDCClient) Begin(ctx context.Context, returnTo string, silent bool) (Authorization, error) {
 	_, config, err := client.provider(ctx)
 	if err != nil {
 		return Authorization{}, err
@@ -107,7 +107,11 @@ func (client *OIDCClient) Begin(ctx context.Context, returnTo string) (Authoriza
 		return Authorization{}, err
 	}
 	verifier := oauth2.GenerateVerifier()
-	url := config.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier), oauth2.SetAuthURLParam("nonce", nonce))
+	options := []oauth2.AuthCodeOption{oauth2.S256ChallengeOption(verifier), oauth2.SetAuthURLParam("nonce", nonce)}
+	if silent {
+		options = append(options, oauth2.SetAuthURLParam("prompt", "none"))
+	}
+	url := config.AuthCodeURL(state, options...)
 	return Authorization{URL: url, Pending: PendingAuth{State: state, Nonce: nonce, Verifier: verifier, ReturnTo: returnTo}}, nil
 }
 
