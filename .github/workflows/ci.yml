@@ -57,6 +57,7 @@ jobs:
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
       - run: npm ci
+      - run: node node_modules/typescript/bin/tsc --noEmit
       - run: npm test
       - run: npm run build
 

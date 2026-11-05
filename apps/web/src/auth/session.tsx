@@ -76,7 +76,7 @@ export function createAuthSessionManager(deps: AuthSessionManagerDeps = {}) {
 }
 
 type AuthSessionManager = ReturnType<typeof createAuthSessionManager>;
-type AuthSessionContextValue = { session: AuthSessionSnapshot; getAccessToken(): string | null; refreshAccessToken(): Promise<string>; logout(): Promise<void>; loginUrl: string };
+type AuthSessionContextValue = { session: AuthSessionSnapshot; getAccessToken(): string | null; refreshAccessToken(): Promise<string>; logout(): Promise<void>; loginUrl: string; silentLoginUrl: string };
 const AuthSessionContext = createContext<AuthSessionContextValue | null>(null);
 
 export function AuthSessionProvider({ children }: PropsWithChildren) {
@@ -101,6 +101,7 @@ export function AuthSessionProvider({ children }: PropsWithChildren) {
     refreshAccessToken: manager.refreshAccessToken,
     logout: manager.logout,
     loginUrl: createLoginUrl(),
+    silentLoginUrl: createLoginUrl(true),
   }), [manager, session]);
 
   return <AuthSessionContext.Provider value={value}>{children}</AuthSessionContext.Provider>;
@@ -112,10 +113,11 @@ export function useAuthSession() {
   return value;
 }
 
-function createLoginUrl() {
-  if (typeof window === "undefined") return "/api/auth/sso/login?returnTo=%2Fclaims";
+function createLoginUrl(silent = false) {
+  const route = silent ? "silent" : "login";
+  if (typeof window === "undefined") return `/api/auth/sso/${route}?returnTo=%2Fclaims`;
   const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-  return `/api/auth/sso/login?returnTo=${encodeURIComponent(returnTo)}`;
+  return `/api/auth/sso/${route}?returnTo=${encodeURIComponent(returnTo)}`;
 }
 
 function isSessionResponse(value: Partial<AuthSessionResponse>): value is AuthSessionResponse {

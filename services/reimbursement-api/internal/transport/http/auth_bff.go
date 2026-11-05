@@ -21,7 +21,7 @@ import (
 const ssoSessionCookieName = "reimbursement_sso_session"
 
 type AuthOIDC interface {
-	Begin(context.Context, string) (auth.Authorization, error)
+	Begin(context.Context, string, bool) (auth.Authorization, error)
 	Exchange(context.Context, string, auth.PendingAuth) (auth.VerifiedIdentity, error)
 	EndSession(context.Context, string) (url.URL, error)
 }
@@ -64,6 +64,8 @@ func NewAuthBFF(oidc AuthOIDC, sessions *auth.SessionService, employees AuthEmpl
 func (handler *AuthBFF) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	switch {
 	case request.Method == http.MethodGet && request.URL.Path == "/api/auth/sso/login":
+		handler.login(response, request)
+	case request.Method == http.MethodGet && request.URL.Path == "/api/auth/sso/silent":
 		handler.login(response, request)
 	case request.Method == http.MethodGet && request.URL.Path == "/api/auth/sso/callback":
 		handler.callback(response, request)
@@ -135,7 +137,12 @@ func (handler *AuthBFF) clearSession(response http.ResponseWriter) {
 }
 
 func (handler *AuthBFF) login(response http.ResponseWriter, request *http.Request) {
-	authorization, err := handler.oidc.Begin(request.Context(), safeReturnTo(request.URL.Query().Get("returnTo")))
+	silent := request.URL.Path == "/api/auth/sso/silent"
+	silentValue := "0"
+	if silent {
+		silentValue = "1"
+	}
+	authorization, err := handler.oidc.Begin(request.Context(), safeReturnTo(request.URL.Query().Get("returnTo")), silent)
 	if err != nil {
 		writeAuthError(response, http.StatusServiceUnavailable, "sso_unavailable")
 		return
@@ -145,6 +152,7 @@ func (handler *AuthBFF) login(response http.ResponseWriter, request *http.Reques
 		{"sso_oauth_nonce", authorization.Pending.Nonce},
 		{"sso_oauth_verifier", authorization.Pending.Verifier},
 		{"sso_oauth_return_to", url.QueryEscape(authorization.Pending.ReturnTo)},
+		{"sso_oauth_silent", silentValue},
 	} {
 		http.SetCookie(response, &http.Cookie{Name: item.name, Value: item.value, Path: "/api/auth/sso", MaxAge: 600, HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: handler.config.SecureCookie})
 	}
@@ -161,8 +169,22 @@ func (handler *AuthBFF) callback(response http.ResponseWriter, request *http.Req
 		pending.ReturnTo = safeReturnTo(decodedReturnTo)
 	}
 	code := request.URL.Query().Get("code")
+	silent := readAuthCookie(request, "sso_oauth_silent") == "1"
 	handler.clearPending(response)
-	if state == "" || received == "" || len(state) != len(received) || subtle.ConstantTimeCompare([]byte(state), []byte(received)) != 1 || pending.Nonce == "" || pending.Verifier == "" || code == "" {
+	if state == "" || received == "" || len(state) != len(received) || subtle.ConstantTimeCompare([]byte(state), []byte(received)) != 1 || pending.Nonce == "" || pending.Verifier == "" {
+		writeAuthError(response, http.StatusBadRequest, "invalid_sso_callback")
+		return
+	}
+	if oidcError := request.URL.Query().Get("error"); oidcError != "" {
+		if silent && (oidcError == "login_required" || oidcError == "consent_required" || oidcError == "interaction_required" || oidcError == "account_selection_required") {
+			response.Header().Set("Cache-Control", "no-store")
+			http.Redirect(response, request, "/api/auth/sso/login?returnTo="+url.QueryEscape(safeReturnTo(pending.ReturnTo)), http.StatusFound)
+			return
+		}
+		writeAuthError(response, http.StatusBadRequest, "sso_login_failed")
+		return
+	}
+	if code == "" {
 		writeAuthError(response, http.StatusBadRequest, "invalid_sso_callback")
 		return
 	}
@@ -254,7 +276,7 @@ func listedOpenID(csv, value string) bool {
 }
 
 func (handler *AuthBFF) clearPending(response http.ResponseWriter) {
-	for _, name := range []string{"sso_oauth_state", "sso_oauth_nonce", "sso_oauth_verifier", "sso_oauth_return_to"} {
+	for _, name := range []string{"sso_oauth_state", "sso_oauth_nonce", "sso_oauth_verifier", "sso_oauth_return_to", "sso_oauth_silent"} {
 		http.SetCookie(response, &http.Cookie{Name: name, Path: "/api/auth/sso", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: handler.config.SecureCookie})
 	}
 }

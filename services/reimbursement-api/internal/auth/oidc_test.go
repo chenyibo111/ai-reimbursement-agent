@@ -129,7 +129,7 @@ func signFixtureIDToken(t *testing.T, key *rsa.PrivateKey, claims map[string]any
 
 func TestOIDCBeginUsesPKCEStateNonceAndRegisteredCallback(t *testing.T) {
 	f := newOIDCFixture(t)
-	authorization, err := f.client.Begin(context.Background(), "/claims")
+	authorization, err := f.client.Begin(context.Background(), "/claims", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestOIDCBeginUsesPKCEStateNonceAndRegisteredCallback(t *testing.T) {
 	if query.Get("client_id") != "reimbursement-web" || query.Get("redirect_uri") != "http://localhost:8088/api/auth/sso/callback" || query.Get("scope") != "openid profile feishu_identity" || query.Get("state") != authorization.Pending.State || query.Get("nonce") != authorization.Pending.Nonce || query.Get("code_challenge_method") != "S256" || query.Get("code_challenge") != base64.RawURLEncoding.EncodeToString(challenge[:]) || len(authorization.Pending.Verifier) < 43 || authorization.Pending.ReturnTo != "/claims" {
 		t.Fatalf("incomplete OIDC authorization: %s, pending=%+v", parsed.String(), authorization.Pending)
 	}
-	second, err := f.client.Begin(context.Background(), "/claims")
+	second, err := f.client.Begin(context.Background(), "/claims", false)
 	if err != nil || second.Pending.State == authorization.Pending.State || second.Pending.Nonce == authorization.Pending.Nonce {
 		t.Fatal("each authorization must use fresh state and nonce")
 	}
@@ -152,9 +152,24 @@ func TestOIDCBeginUsesPKCEStateNonceAndRegisteredCallback(t *testing.T) {
 	}
 }
 
+func TestOIDCBeginSilentRequestsPromptNone(t *testing.T) {
+	f := newOIDCFixture(t)
+	authorization, err := f.client.Begin(context.Background(), "/claims", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(authorization.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Query().Get("prompt") != "none" || parsed.Query().Get("code_challenge_method") != "S256" {
+		t.Fatalf("silent authorization missing prompt or PKCE: %s", parsed)
+	}
+}
+
 func TestOIDCExchangeAcceptsOnlyVerifiedFeishuIdentity(t *testing.T) {
 	f := newOIDCFixture(t)
-	authorization, err := f.client.Begin(context.Background(), "/claims")
+	authorization, err := f.client.Begin(context.Background(), "/claims", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +184,7 @@ func TestOIDCExchangeRejectsForgedAndIncompleteTokens(t *testing.T) {
 	for _, variant := range []string{"forged", "issuer", "audience", "expired", "nonce", "sid", "open_id", "user_id", "tenant_key", "app_id"} {
 		t.Run(variant, func(t *testing.T) {
 			f := newOIDCFixture(t)
-			authorization, err := f.client.Begin(context.Background(), "/claims")
+			authorization, err := f.client.Begin(context.Background(), "/claims", false)
 			if err != nil {
 				t.Fatal(err)
 			}
