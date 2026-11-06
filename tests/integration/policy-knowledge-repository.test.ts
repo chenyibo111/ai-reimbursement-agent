@@ -11,6 +11,7 @@ beforeAll(async () => prisma.$connect());
 beforeEach(async () => {
   await prisma.policyChunk.deleteMany();
   await prisma.policyDocumentSnapshot.deleteMany();
+  await prisma.policySourceAuditEvent.deleteMany();
   await prisma.policySource.deleteMany();
 });
 afterAll(async () => prisma.$disconnect());

@@ -503,9 +503,24 @@ model PolicySource {
   updatedAt            DateTime                 @updatedAt
   snapshots            PolicyDocumentSnapshot[]
   asyncJobs            AsyncJob[]
+  auditEvents          PolicySourceAuditEvent[]
   reviewCases          ReviewCase[]
 
   @@index([enabled, updatedAt])
+}
+
+model PolicySourceAuditEvent {
+  id        String       @id @default(cuid())
+  sourceId  String
+  source    PolicySource @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  actorId   String
+  action    String
+  outcome   String
+  jobId     String?
+  createdAt DateTime     @default(now())
+
+  @@index([sourceId, createdAt])
+  @@index([jobId])
 }
 
 model AsyncJob {
@@ -517,6 +532,7 @@ model AsyncJob {
   receiptId      String?
   receipt        Receipt?       @relation(fields: [receiptId], references: [id], onDelete: SetNull)
   policySourceId String?
+  requestedByEmployeeId String?
   policySource   PolicySource?  @relation(fields: [policySourceId], references: [id], onDelete: SetNull)
   attemptCount   Int            @default(0)
   maxAttempts    Int            @default(3)

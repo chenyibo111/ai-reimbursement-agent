@@ -151,6 +151,22 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  agent-admin:
+    build: .
+    profiles: ["migration"]
+    command: npm run agent:admin:container
+    entrypoint: ["node", "/app/scripts/docker-runtime.mjs"]
+    environment:
+      PORT: "8083"
+    secrets:
+      - app_env
+    expose:
+      - "8083"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   reimbursement-api:
     build: ./services/reimbursement-api
     profiles: ["migration"]
@@ -161,6 +177,7 @@ services:
       CLAMAV_HOST: clamav
       CLAMAV_PORT: "3310"
       OCR_SERVICE_URL: http://ocr:8000
+      AGENT_ADMIN_URL: http://agent-admin:8083
       SSO_INTERNAL_SESSION_STATUS_URL: http://host.docker.internal:9000/internal/session-status
       HYDRA_DIAL_ADDRESS: host.docker.internal:4444
       REIMBURSEMENT_ALLOW_DUPLICATE_CONTENT_FOR_TESTING: ${REIMBURSEMENT_ALLOW_DUPLICATE_CONTENT_FOR_TESTING:-false}

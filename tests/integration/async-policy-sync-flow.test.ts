@@ -17,6 +17,7 @@ async function cleanup() {
   await prisma.reviewCase.deleteMany({ where: { policySource: { createdByEmployeeId: employeeId } } });
   await prisma.asyncJob.deleteMany({ where: { policySource: { createdByEmployeeId: employeeId } } });
   await prisma.policyDocumentSnapshot.deleteMany({ where: { source: { createdByEmployeeId: employeeId } } });
+  await prisma.policySourceAuditEvent.deleteMany({ where: { source: { createdByEmployeeId: employeeId } } });
   await prisma.policySource.deleteMany({ where: { createdByEmployeeId: employeeId } });
   await prisma.employee.deleteMany({ where: { id: employeeId } });
 }
@@ -34,12 +35,13 @@ it("moves an enqueued policy source sync through one durable worker poll to succ
     process: (claimed) => processAsyncJob(claimed, {
       jobs,
       extractReceipt: async () => { throw new Error("must not extract a policy source"); },
-      syncPolicySource: async ({ sourceId }) => { synchronized = sourceId === source.id; },
+      syncPolicySource: async ({ sourceId }) => { synchronized = sourceId === source.id; return { status: "UNCHANGED" as const, sectionCount: 0, chunkCount: 0 }; },
     }),
     now: () => new Date("2001-01-01T00:05:00.000Z"),
     leaseMs: 60_000,
   })).toBe(true);
 
   expect(synchronized).toBe(true);
-  await expect(prisma.asyncJob.findUniqueOrThrow({ where: { id: job.id } })).resolves.toMatchObject({ status: "SUCCEEDED", attemptCount: 1 });
+  await expect(prisma.asyncJob.findUniqueOrThrow({ where: { id: job.id } })).resolves.toMatchObject({ status: "SUCCEEDED", attemptCount: 1, result: { status: "UNCHANGED" } });
+  await expect(prisma.policySourceAuditEvent.findFirst({ where: { jobId: job.id, action: "SYNC_COMPLETED" } })).resolves.toMatchObject({ sourceId: source.id, outcome: "UNCHANGED" });
 });

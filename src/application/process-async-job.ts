@@ -13,7 +13,7 @@ export type ProcessAsyncJobDeps = {
     createOcrReviewCase(input: { jobId: string; claimId: string; receiptId: string; reasonCode: string }): Promise<void>;
   };
   extractReceipt(input: { actorId: string; claimId: string; receiptId: string; system: true }): Promise<ExtractReceiptResult>;
-  syncPolicySource(input: { actorId: string; sourceId: string }): Promise<unknown>;
+  syncPolicySource(input: { actorId: string; sourceId: string }): Promise<{ status: "SYNCED" | "UNCHANGED"; sectionCount: number; chunkCount: number } | void>;
 };
 
 export async function processAsyncJob(job: { id: string; kind: AsyncJobKind }, deps: ProcessAsyncJobDeps): Promise<AsyncJobProcessResult> {
@@ -22,8 +22,8 @@ export async function processAsyncJob(job: { id: string; kind: AsyncJobKind }, d
   if (stored.kind === "POLICY_SOURCE_SYNC") {
     if (!stored.policySourceId) return { type: "CLOSED" };
     try {
-      await deps.syncPolicySource({ actorId: "async-job-worker", sourceId: stored.policySourceId });
-      return { type: "SUCCEEDED" };
+      const result = await deps.syncPolicySource({ actorId: "async-job-worker", sourceId: stored.policySourceId });
+      return result ? { type: "SUCCEEDED", result } : { type: "SUCCEEDED" };
     } catch (error) {
       return { type: "RETRY_WAIT", failureCode: error instanceof PolicySourceSyncError ? error.code : "SYNC_FAILED" };
     }

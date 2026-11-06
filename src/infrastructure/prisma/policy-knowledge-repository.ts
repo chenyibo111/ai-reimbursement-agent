@@ -11,6 +11,14 @@ export class PrismaPolicyKnowledgeRepository {
     return this.prisma.policySource.create({ data: { type: input.type, resourceToken: input.token, canonicalUrl: input.canonicalUrl, title: input.title.trim(), createdByEmployeeId: input.actorId } });
   }
 
+  async createSourceWithAudit(input: { type: PolicySourceType; token: string; canonicalUrl: string; title: string; actorId: string }) {
+    return this.prisma.$transaction(async (tx) => {
+      const source = await tx.policySource.create({ data: { type: input.type, resourceToken: input.token, canonicalUrl: input.canonicalUrl, title: input.title.trim(), createdByEmployeeId: input.actorId } });
+      await tx.policySourceAuditEvent.create({ data: { sourceId: source.id, actorId: input.actorId, action: "CREATED", outcome: "SUCCEEDED" } });
+      return source;
+    });
+  }
+
   async getEnabledSourceForSync(sourceId: string) {
     return this.prisma.policySource.findFirst({ where: { id: sourceId, enabled: true } });
   }

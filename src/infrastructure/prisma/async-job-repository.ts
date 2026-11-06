@@ -7,7 +7,9 @@ const claimableStatuses = ["PENDING", "RETRY_WAIT"] as const;
 
 export type EnqueueAsyncJobInput =
   | { kind: "RECEIPT_EXTRACTION"; claimId: string; receiptId: string }
-  | { kind: "POLICY_SOURCE_SYNC"; policySourceId: string };
+  | { kind: "POLICY_SOURCE_SYNC"; policySourceId: string; actorId?: string };
+
+type PolicySyncResult = { status: "SYNCED" | "UNCHANGED"; sectionCount: number; chunkCount: number };
 
 export class PrismaAsyncJobRepository {
   constructor(private readonly prisma: PrismaClient) {}
@@ -20,7 +22,7 @@ export class PrismaAsyncJobRepository {
       return await this.prisma.asyncJob.create({
         data: input.kind === "RECEIPT_EXTRACTION"
           ? { kind: input.kind, claimId: input.claimId, receiptId: input.receiptId }
-          : { kind: input.kind, policySourceId: input.policySourceId },
+          : { kind: input.kind, policySourceId: input.policySourceId, requestedByEmployeeId: input.actorId },
       });
     } catch (error) {
       if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
@@ -53,10 +55,15 @@ export class PrismaAsyncJobRepository {
     return recovered.count;
   }
 
-  async markSucceeded(jobId: string): Promise<void> {
-    await this.prisma.asyncJob.updateMany({
-      where: { id: jobId, status: "RUNNING" },
-      data: { status: "SUCCEEDED", leaseUntil: null, failureCode: null },
+  async markSucceeded(jobId: string, result?: PolicySyncResult): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const job = await tx.asyncJob.findFirst({ where: { id: jobId, status: "RUNNING" }, select: { policySourceId: true, requestedByEmployeeId: true } });
+      if (!job) return;
+      const updated = await tx.asyncJob.updateMany({
+        where: { id: jobId, status: "RUNNING" },
+        data: { status: "SUCCEEDED", leaseUntil: null, failureCode: null, result: result ?? undefined },
+      });
+      if (updated.count && job.policySourceId) await tx.policySourceAuditEvent.create({ data: { sourceId: job.policySourceId, actorId: job.requestedByEmployeeId ?? "async-job-worker", action: "SYNC_COMPLETED", outcome: result?.status ?? "SUCCEEDED", jobId } });
     });
   }
 
@@ -70,16 +77,18 @@ export class PrismaAsyncJobRepository {
       }
       return;
     }
-    await this.prisma.asyncJob.updateMany({
-      where: { id: jobId, status: "RUNNING" },
-      data: { status: "RETRY_WAIT", availableAt: nextRetryAt(job.attemptCount, now), leaseUntil: null, failureCode },
+    await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.asyncJob.updateMany({ where: { id: jobId, status: "RUNNING" }, data: { status: "RETRY_WAIT", availableAt: nextRetryAt(job.attemptCount, now), leaseUntil: null, failureCode } });
+      if (updated.count && job.policySourceId) await tx.policySourceAuditEvent.create({ data: { sourceId: job.policySourceId, actorId: job.requestedByEmployeeId ?? "async-job-worker", action: "SYNC_RETRY", outcome: failureCode, jobId } });
     });
   }
 
   async markReviewRequired(jobId: string, failureCode: string): Promise<void> {
-    await this.prisma.asyncJob.updateMany({
-      where: { id: jobId, status: "RUNNING" },
-      data: { status: "REVIEW_REQUIRED", leaseUntil: null, failureCode },
+    await this.prisma.$transaction(async (tx) => {
+      const job = await tx.asyncJob.findFirst({ where: { id: jobId, status: "RUNNING" }, select: { policySourceId: true, requestedByEmployeeId: true } });
+      if (!job) return;
+      const updated = await tx.asyncJob.updateMany({ where: { id: jobId, status: "RUNNING" }, data: { status: "REVIEW_REQUIRED", leaseUntil: null, failureCode } });
+      if (updated.count && job.policySourceId) await tx.policySourceAuditEvent.create({ data: { sourceId: job.policySourceId, actorId: job.requestedByEmployeeId ?? "async-job-worker", action: "SYNC_REVIEW_REQUIRED", outcome: failureCode, jobId } });
     });
   }
 

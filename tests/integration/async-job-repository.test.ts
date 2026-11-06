@@ -131,6 +131,7 @@ it("creates an admin-only policy review case when a policy sync exhausts retries
   await prisma.asyncJob.deleteMany({ where: { kind: "POLICY_SOURCE_SYNC" } });
   await prisma.policyChunk.deleteMany();
   await prisma.policyDocumentSnapshot.deleteMany();
+  await prisma.policySourceAuditEvent.deleteMany();
   await prisma.policySource.deleteMany();
   const source = await prisma.policySource.create({
     data: { type: "FEISHU_DOCX", canonicalUrl: "https://acme.feishu.cn/docx/POLICY_RETRY_001", resourceToken: "POLICY_RETRY_001", title: "重试制度", createdByEmployeeId: "admin" },

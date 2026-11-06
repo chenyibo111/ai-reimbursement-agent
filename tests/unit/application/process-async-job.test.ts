@@ -67,3 +67,16 @@ it("dispatches a policy sync job through the existing policy sync use case", asy
   )).resolves.toEqual({ type: "SUCCEEDED" });
   expect(synchronizedSourceId).toBe("source-1");
 });
+
+it("keeps the policy sync result so administrators can distinguish unchanged documents", async () => {
+  const result = await processAsyncJob({ id: "job-policy-result", kind: "POLICY_SOURCE_SYNC" }, {
+    jobs: {
+      getById: async () => ({ id: "job-policy-result", kind: "POLICY_SOURCE_SYNC" as const, claimId: null, receiptId: null, policySourceId: "source-1", employeeId: null }),
+      needsOcrReview: async () => false,
+      createOcrReviewCase: async () => undefined,
+    },
+    extractReceipt: async () => { throw new Error("must not extract"); },
+    syncPolicySource: async () => ({ status: "UNCHANGED" as const, sectionCount: 0, chunkCount: 0 }),
+  });
+  expect(result).toEqual({ type: "SUCCEEDED", result: { status: "UNCHANGED", sectionCount: 0, chunkCount: 0 } });
+});

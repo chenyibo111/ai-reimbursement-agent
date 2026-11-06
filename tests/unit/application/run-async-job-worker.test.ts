@@ -73,3 +73,20 @@ it("emits lifecycle events with the job correlation fields", async () => {
     { event: "job.completed", fields: { jobId: "job-2", jobKind: "RECEIPT_EXTRACTION", status: "SUCCEEDED" } },
   ]);
 });
+
+it("persists the policy sync result alongside the successful job status", async () => {
+  const recorded: unknown[] = [];
+  await runAsyncJobWorkerOnce({
+    jobs: {
+      recoverExpiredLeases: async () => 0,
+      claimNextJob: async () => ({ id: "job-policy", kind: "POLICY_SOURCE_SYNC" as const, status: "RUNNING" as const }),
+      markSucceeded: async (...args) => { recorded.push(args); },
+      markRetryWait: async () => undefined,
+      markReviewRequired: async () => undefined,
+      closeMissingTarget: async () => undefined,
+    },
+    process: async () => ({ type: "SUCCEEDED" as const, result: { status: "SYNCED" as const, sectionCount: 2, chunkCount: 4 } }),
+    now: () => new Date("2026-11-06T00:00:00Z"), leaseMs: 60_000,
+  });
+  expect(recorded).toEqual([["job-policy", { status: "SYNCED", sectionCount: 2, chunkCount: 4 }]]);
+});

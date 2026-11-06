@@ -2,7 +2,7 @@ import type { AsyncJob, AsyncJobKind } from "@/generated/prisma/client";
 import type { Logger } from "@/src/observability/logger";
 
 export type AsyncJobProcessResult =
-  | { type: "SUCCEEDED" }
+  | { type: "SUCCEEDED"; result?: { status: "SYNCED" | "UNCHANGED"; sectionCount: number; chunkCount: number } }
   | { type: "RETRY_WAIT"; failureCode: string }
   | { type: "REVIEW_REQUIRED"; failureCode: string }
   | { type: "CLOSED" };
@@ -11,7 +11,7 @@ export type AsyncJobWorkerDependencies = {
   jobs: {
     recoverExpiredLeases(now: Date): Promise<number>;
     claimNextJob(now: Date, leaseMs: number): Promise<Pick<AsyncJob, "id" | "kind" | "status"> & { createdAt?: Date } | null>;
-    markSucceeded(jobId: string): Promise<void>;
+    markSucceeded(jobId: string, result?: { status: "SYNCED" | "UNCHANGED"; sectionCount: number; chunkCount: number }): Promise<void>;
     markRetryWait(jobId: string, failureCode: string, now: Date): Promise<void>;
     markReviewRequired(jobId: string, failureCode: string): Promise<void>;
     closeMissingTarget(jobId: string): Promise<void>;
@@ -35,7 +35,10 @@ export async function runAsyncJobWorkerOnce(deps: AsyncJobWorkerDependencies): P
     ...(job.createdAt ? { durationMs: Math.max(0, now.getTime() - job.createdAt.getTime()) } : {}),
   });
   const result = await deps.process({ id: job.id, kind: job.kind });
-  if (result.type === "SUCCEEDED") await deps.jobs.markSucceeded(job.id);
+  if (result.type === "SUCCEEDED") {
+    if (result.result) await deps.jobs.markSucceeded(job.id, result.result);
+    else await deps.jobs.markSucceeded(job.id);
+  }
   if (result.type === "RETRY_WAIT") await deps.jobs.markRetryWait(job.id, result.failureCode, deps.now());
   if (result.type === "REVIEW_REQUIRED") await deps.jobs.markReviewRequired(job.id, result.failureCode);
   if (result.type === "CLOSED") await deps.jobs.closeMissingTarget(job.id);
