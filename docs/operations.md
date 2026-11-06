@@ -92,19 +92,13 @@ docker compose --profile migration up -d --build reimbursement-api reimbursement
 
 迁移与重启后，在财务政策页发布测试版本，分别验证阻断规则、仅提示规则以及未来生效版本；员工提交以 Go 校验结果为准。飞书制度文档同步只更新问答依据，不会自动发布或更改 Go 规则。城市住宿限额、单笔费用上限仍需人工核对。若回退应用镜像，数据库新增列可保留；不要删除已发布版本或提交快照。
 
-## 旧 Next 政策规则发布与恢复
+## 政策管理与知识来源
 
-部署政策功能前，先备份 PostgreSQL，再在目标环境执行已提交的 Prisma 迁移；不得通过重建数据库卷或删除 `PolicyVersion` / `SubmissionSnapshot` 来“初始化”政策数据。部署后在未提交的密钥环境文件中配置管理员白名单：
+Go Auth BFF 根据 `FEISHU_ADMIN_OPEN_IDS` 和企业成员身份签发管理员会话；Go API 每次管理请求重新核对当前数据库角色。`/admin/policies` 发布可执行规则，`/admin/policy-sources` 登记飞书 Docx/Wiki 来源。两者独立：来源同步更新问答证据，不会自动修改提交校验规则。规则版本发布后不能覆盖；修订时发布新版本，提交摘要保留当时的政策结果。
 
-```dotenv
-POLICY_ADMIN_FEISHU_OPEN_IDS="ou_finance_a,ou_finance_b"
-```
+政策来源由 React 经 Go `/api/v1/admin/policy-sources` 调用内网 `agent-admin` 服务。Go 只转发经过认证的管理员 ID，并使用单独的 `AGENT_ADMIN_SERVICE_KEY`；该密钥只放在未提交的环境 Secret，不能写入浏览器响应或 URL。来源新增、启停、请求同步和任务结果均写审计事实。同步返回任务 ID 和排队状态；`job-worker` 执行后，管理页轮询任务并在刷新后从最近任务恢复状态。只有任务成功且存在数值时才显示索引数量；失败保留最近一次成功的活动快照。
 
-仅格式正确的 `ou_...` 飞书 `open_id` 会被接受。空白、重复或无效值不会授予权限；白名单为空时是安全的只读状态，不会影响员工报销草稿和基础校验。该白名单仅是角色迁移期间的兼容方案；完成首次管理员初始化后，角色以数据库 `Employee.role` 为准。
-
-发布前由管理员在 `/admin/policies` 核对草稿规则、规则级别和生效日期。`BLOCKING` 会阻止确认与提交，`WARNING` 仅提示但会留在确认摘要和提交快照中。发布后不能直接修改版本；若需要撤回或修正制度，创建一份新的草稿并发布。这样会归档旧的已发布版本，但不会改写已提交报销单中的政策快照。
-
-应用回滚只回滚应用镜像或执行经验证的数据库恢复流程；不要删除迁移记录、政策审计或提交快照。若新版本政策不应继续生效，优先发布一份经核对的替代版本；在没有有效发布版本时，系统仍保留基础校验，不会把员工提交视作已符合政策。
+运维排查：先检查 `agent-admin`、`reimbursement-api`、`job-worker` 和数据库，再根据来源 ID / job ID 查看安全失败分类。`DOCUMENT_UNAUTHORIZED` 需要核对飞书应用权限与文档授权；`EMBEDDING_UNAVAILABLE` 需要恢复向量化服务。不要删除来源、任务、审计或活动快照来重试。旧 `/api/admin/policy-sources` 路由和旧 Next 管理员白名单已退役；边缘代理对其他旧 `/api/*` 路径明确返回 404。
 
 本地开发使用 `MODEL_PROVIDER="fixture"`。生产必须设置 `MODEL_PROVIDER="openai-compatible"`、`MODEL_BASE_URL`、`MODEL_NAME`、`MODEL_PROVIDER_API_KEY` 和可选 `MODEL_TIMEOUT_MS`。
 
@@ -116,11 +110,11 @@ POLICY_ADMIN_FEISHU_OPEN_IDS="ou_finance_a,ou_finance_b"
 
 Agent 报销办理仅调用 Go API。部署前确认 Go API、NATS、MinIO 与 `REIMBURSEMENT_API_URL`、`REIMBURSEMENT_AGENT_SERVICE_KEY`、`REIMBURSEMENT_AUTH_HS256_SECRET` 已就绪；容器内预签名上传通过 `REIMBURSEMENT_AGENT_STORAGE_ENDPOINT` 访问 MinIO。Go 服务故障时先恢复服务，不能让 Agent 切换到旧 Prisma 报销写入路径；需要回滚时应整体回滚 Web、飞书 Worker 与 Go API 的兼容镜像版本。
 
-部署前先执行 Prisma 迁移，再启动 `web`、`feishu-bot-worker` 与 `job-worker`。三个进程必须使用同一份受控密钥环境和同一 PostgreSQL 数据库；`job-worker` 领取 OCR 与政策来源同步任务，Web 只负责创建和查询任务。
+部署前先执行 Prisma 迁移，再启动 `reimbursement-web`、`reimbursement-api`、`agent-admin`、`feishu-bot-worker` 与 `job-worker`。Node Worker 使用单独的运行依赖锁文件和镜像；`job-worker` 领取历史 OCR 与政策来源同步任务，React 经 Go 创建和查询任务。
 
 ```powershell
-docker compose up -d --build web feishu-bot-worker job-worker
-docker compose logs -f job-worker
+docker compose --env-file .env.local --profile migration --profile knowledge up -d --build reimbursement-web reimbursement-api agent-admin feishu-bot-worker job-worker
+docker compose --env-file .env.local logs --tail=100 job-worker agent-admin
 ```
 
 首次启用数据库角色时，确认目标员工 ID 后执行一次：
@@ -208,7 +202,7 @@ Grafana Explore 选择 `Loki` 数据源，以 `{service="job-worker"} | json | j
 容器部署：
 
 ```powershell
-docker compose --profile migration up -d --build web feishu-bot-worker agent-event-worker reimbursement-api reimbursement-worker reimbursement-edge
+docker compose --env-file .env.local --profile migration up -d --build feishu-bot-worker agent-event-worker reimbursement-api reimbursement-worker reimbursement-web reimbursement-edge
 docker compose logs -f feishu-bot-worker
 docker compose restart feishu-bot-worker
 ```
@@ -234,12 +228,12 @@ docker compose exec -T postgres psql -U reimbursement -d reimbursement -c 'SELEC
 
 验收：在已绑定的飞书账号单聊机器人上传一张完整票据，应先收到“正在识别”、后收到字段摘要；上传字段不完整的票据，应收到待确认字段和人工复核提示；从 Web 工作台上传同类文件不应新增通知记录或发送飞书消息。飞书机器人必须拥有发送消息权限，并保持 `APP_PUBLIC_URL` 为员工可访问的 HTTPS 地址。
 
-### 跨渠道会话迁移、留存与回滚
+### 飞书会话留存与回滚
 
-部署包含 `AgentConversation`、`AgentMessage` 和 `ReimbursementIntake` 的版本时，先备份 PostgreSQL，再执行 `npx prisma migrate deploy --config prisma7.config.ts`，随后同时滚动重启 `web` 与 `feishu-bot-worker`。Worker 与 Web 必须连接同一数据库，才能让员工私有 Web 会话和飞书单聊共享历史。群聊按员工和群聊 ID 隔离，排障时不得把群聊消息导出到员工私有会话或日志。
+`AgentConversation`、`AgentMessage` 和 `ReimbursementIntake` 是飞书 Agent 会话与办理状态。部署相关 Prisma 迁移前先备份 PostgreSQL，再执行 `npx prisma migrate deploy --config prisma7.config.ts`，并更新 `feishu-bot-worker`。React 工作台没有 Agent 对话入口。群聊按员工和群聊 ID 隔离，排障时不得把群聊消息导出到私有会话或日志。
 
 会话、消息和 Intake 随员工删除级联清理；删除草稿只会将关联 Intake 的草稿引用置空，不删除会话历史。不要通过清空会话表来处理单一失败：对于 OCR/模型/回复失败，保留已保存消息和 Intake，以服务端安全错误分类提示重试或回到 Web。需要缩短留存期时，应先制定员工、审计和政策依据的保留策略并经数据负责人审批，再执行可验证的分批清理。
 
-应用回滚只能回滚应用镜像；已经执行的会话迁移保持在数据库中，不回退或手改 Prisma 迁移记录。旧 Worker 版本不认识新会话契约，因此发布后如必须回滚，应先停止 Worker、回滚 Web 与 Worker 到同一兼容版本，并验证没有待领取的飞书事件，再恢复长连接。
+应用回滚只能回滚应用镜像；已经执行的会话迁移保持在数据库中，不回退或手改 Prisma 迁移记录。若必须回滚会话契约，应先停止飞书 Worker，检查待处理事件，再恢复兼容版本的长连接。
 
-发布前在测试企业逐项核对：发布应用版本；单聊文本；群聊仅 `@机器人`；JPG/PNG/PDF；未绑定 OAuth 用户；相同消息重投；Worker 重启；飞书下载、OCR、模型和回复失败；以及 Web 仍是建议确认、删除和提交的唯一入口。自动化测试只使用伪造飞书消息和附件，不使用真实 App Secret 或真实发票。
+发布前在测试企业逐项核对：发布应用版本；单聊文本；群聊仅 `@机器人`；JPG/PNG/PDF；未绑定用户；相同消息重投；Worker 重启；飞书下载、OCR、模型和回复失败；以及本人单据查询、建议确认和提交权限。自动化测试只使用伪造飞书消息和附件，不使用真实 App Secret 或真实发票。

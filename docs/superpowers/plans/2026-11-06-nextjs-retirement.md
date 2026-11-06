@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-06-nextjs-retirement-requirements.md`
 
-**当前状态（2026-11-06）：** Task 1–6 的代码与自动化验证已完成；Task 7 的本机启动、迁移、边缘路由和 Worker 验证已完成，真实管理员政策来源同步、双员工 SSO/飞书、财务复核及旧附件读取仍待现场验收。详细证据和待验收清单见 `docs/migration/nextjs-retirement-acceptance.md`。本计划尚未标记全部完成，也未自动提交。
+**当前状态（2026-11-06）：** Task 1–6 的代码与自动化验证已完成；Task 7 的本机启动、迁移、边缘路由和 Worker 验证已完成，真实管理员政策来源同步、双员工 SSO/飞书、财务复核及旧附件读取仍待现场验收。详细证据和待验收清单见 `docs/migration/nextjs-retirement-acceptance.md`。本计划尚未标记全部完成；代码已按任务分批提交，尚未推送。
 
 ## Global Constraints
 
