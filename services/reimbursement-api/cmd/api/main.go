@@ -113,12 +113,20 @@ func main() {
 		log.Print("WARNING: duplicate submitted invoice numbers are allowed for local testing")
 	}
 	submissionService := application.NewSubmissionService(store.NewPostgresSubmissionRepository(pool), nil)
+	var policySources http.Handler
+	if agentAdminURL := strings.TrimSpace(os.Getenv("AGENT_ADMIN_URL")); agentAdminURL != "" {
+		policySources, err = transport.NewPolicySourceProxy(agentAdminURL, os.Getenv("AGENT_ADMIN_SERVICE_KEY"), store.EmployeeRole(pool))
+		if err != nil {
+			log.Fatalf("configure policy source administration: %v", err)
+		}
+	}
 	router := transport.NewRouter(transport.Dependencies{
 		Claims:             application.NewClaimService(claimRepository, application.SecureIDGenerator{}, store.NewPostgresClaimNumberGenerator(pool), time.Now, ocrSuggestionRefresher),
 		Submissions:        submissionService,
 		Progress:           application.NewClaimProgressService(store.NewPostgresClaimProgressRepository(pool), submissionService),
 		Receipts:           application.NewReceiptServiceWithOptions(claimRepository, receiptRepository, objects, infrastructure.NewClamAVScanner(clamAddress), infrastructure.NewHTTPReceiptOCRClient(ocrURL), application.SecureIDGenerator{}, application.ReceiptServiceOptions{AllowDuplicateContentForTesting: allowDuplicateContentForTesting, AllowDuplicateSubmittedInvoiceForTesting: allowDuplicateSubmittedInvoiceForTesting}, ocrSuggestionRefresher),
 		Admin:              transport.AdminServices{Policies: application.NewPolicyRuleService(store.NewPostgresPolicyRuleRepository(pool)), Reviews: application.NewReviewCaseService(reviewCaseRepository), Previews: application.NewReceiptPreviewService(reviewCaseRepository, receiptRepository, objects), Role: store.EmployeeRole(pool)},
+		PolicySources:      policySources,
 		EmployeeIdentities: application.NewEmployeeIdentityService(store.NewPostgresEmployeeIdentityRepository(pool)),
 		Members:            store.NewWebAuthRepository(pool), BotAppID: os.Getenv("FEISHU_APP_ID"), TenantKey: os.Getenv("FEISHU_TENANT_KEY"),
 		ProvisioningKey: provisioningKey,

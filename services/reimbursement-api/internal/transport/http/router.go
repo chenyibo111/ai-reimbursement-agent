@@ -42,6 +42,7 @@ type Dependencies struct {
 	Auth               ActorResolver
 	AuthBFF            http.Handler
 	Admin              AdminServices
+	PolicySources      http.Handler
 	EmployeeIdentities EmployeeIdentityService
 	ProvisioningKey    string
 	Members            interface {
@@ -77,6 +78,10 @@ func NewRouter(dependencies Dependencies) http.Handler {
 		}
 		mux.HandleFunc("POST /api/v1/admin/reviews/{reviewId}/claim", admin.claimReview)
 		mux.HandleFunc("POST /api/v1/admin/reviews/{reviewId}/resolve", admin.resolveReview)
+	}
+	if dependencies.PolicySources != nil {
+		mux.Handle("/api/v1/admin/policy-sources", dependencies.PolicySources)
+		mux.Handle("/api/v1/admin/policy-sources/", dependencies.PolicySources)
 	}
 	mux.HandleFunc("GET /healthz", func(response http.ResponseWriter, _ *http.Request) { response.WriteHeader(http.StatusNoContent) })
 	if dependencies.Auth == nil {
