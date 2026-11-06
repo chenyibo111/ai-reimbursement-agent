@@ -29,12 +29,11 @@ it("starts the container Feishu worker from its injected environment instead of 
   expect(compose).toMatch(/feishu-bot-worker:[\s\S]*?command: npm run feishu:worker:container/);
 });
 
-it("keeps Node workers in ordinary Compose while retiring the legacy Next Web runtime", async () => {
-  const compose = await readFile(new URL("../../docker-compose.yml", import.meta.url), "utf8");
-  const legacyWeb = compose.slice(compose.indexOf("  web:"), compose.indexOf("  feishu-bot-worker:"));
+it("keeps core Node workers in ordinary Compose without a legacy Next Web runtime", async () => {
+  const compose = (await readFile(new URL("../../docker-compose.yml", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
   const bot = compose.slice(compose.indexOf("  feishu-bot-worker:"), compose.indexOf("  job-worker:"));
-  const jobs = compose.slice(compose.indexOf("  job-worker:"), compose.indexOf("  reimbursement-api:"));
-  expect(legacyWeb).toContain('profiles: ["legacy-web"]');
+  const jobs = compose.slice(compose.indexOf("  job-worker:"), compose.indexOf("  agent-admin:"));
+  expect(compose).not.toMatch(/^  web:/m);
   expect(bot).not.toContain("profiles:");
   expect(jobs).not.toContain("profiles:");
   expect(bot).toContain("npm run feishu:worker:container");
@@ -44,7 +43,27 @@ it("keeps Node workers in ordinary Compose while retiring the legacy Next Web ru
 it("keeps the TypeScript path configuration in the worker runtime image", async () => {
   const dockerfile = await readFile(new URL("../../Dockerfile", import.meta.url), "utf8");
 
-  expect(dockerfile).toContain("COPY --from=build /app/tsconfig.json ./tsconfig.json");
+  expect(dockerfile).toContain("COPY --from=worker-build /app/tsconfig.json ./tsconfig.json");
+});
+
+it("builds all Node workers from a dedicated image without Next assets", async () => {
+  const [rawCompose, dockerfile, workerPackage] = await Promise.all([
+    readFile(new URL("../../docker-compose.yml", import.meta.url), "utf8"),
+    readFile(new URL("../../Dockerfile", import.meta.url), "utf8"),
+    readFile(new URL("../../services/worker-runtime/package.json", import.meta.url), "utf8"),
+  ]);
+  const compose = rawCompose.replace(/\r\n/g, "\n");
+  for (const name of ["feishu-bot-worker", "job-worker", "agent-event-worker", "alert-relay", "agent-admin"]) {
+    const section = compose.split(`  ${name}:\n`)[1]?.split(/^  [a-z][\w-]*:\n/m)[0];
+    expect(section, name).toContain("target: worker-runtime");
+  }
+  expect(dockerfile).toContain("AS worker-runtime");
+  expect(dockerfile).not.toMatch(/COPY --from=worker-build \/app\/(?:\.next|public)/);
+  const dependencies = (JSON.parse(workerPackage) as { dependencies: Record<string, string> }).dependencies;
+  expect(dependencies).toHaveProperty("tsx");
+  expect(dependencies).toHaveProperty("@prisma/client");
+  expect(dependencies).not.toHaveProperty("next");
+  expect(dependencies).not.toHaveProperty("react");
 });
 
 it("rewrites host-only service addresses for the Compose network at runtime", async () => {
@@ -58,7 +77,7 @@ it("rewrites host-only service addresses for the Compose network at runtime", as
   expect(runtime).toContain('rewriteUrl("EMBEDDING_BASE_URL", "embedding-service", "8080")');
   expect(runtime).toContain('rewriteUrl("REIMBURSEMENT_API_URL", "reimbursement-api", "8080")');
   expect(runtime).toContain('process.env.CLAMAV_HOST = "clamav"');
-  expect(dockerfile).toContain("COPY --from=build /app/scripts ./scripts");
+  expect(dockerfile).toContain("COPY --from=worker-build /app/scripts ./scripts");
   expect(compose).toContain('entrypoint: ["node", "/app/scripts/docker-runtime.mjs"]');
 });
 

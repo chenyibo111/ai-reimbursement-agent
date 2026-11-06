@@ -85,34 +85,10 @@ services:
       timeout: 5s
       retries: 12
 
-  web:
-    build: .
-    profiles: ["legacy-web"]
-    command: npm run start
-    entrypoint: ["node", "/app/scripts/docker-runtime.mjs"]
-    environment:
-      REIMBURSEMENT_AGENT_STORAGE_ENDPOINT: http://minio:9000
-      HYDRA_DIAL_ADDRESS: host.docker.internal:4444
-      SSO_STATUS_URL: http://host.docker.internal:9000/session-status
-    secrets:
-      - app_env
-    ports:
-      - "127.0.0.1:${REIMBURSEMENT_NEXT_PORT:-3000}:3000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
-      ocr:
-        condition: service_healthy
-      clamav:
-        condition: service_started
-    restart: unless-stopped
-
   feishu-bot-worker:
-    build: .
+    build:
+      context: .
+      target: worker-runtime
     command: npm run feishu:worker:container
     entrypoint: ["node", "/app/scripts/docker-runtime.mjs"]
     environment:
@@ -133,7 +109,9 @@ services:
     restart: unless-stopped
 
   job-worker:
-    build: .
+    build:
+      context: .
+      target: worker-runtime
     command: npm run job:worker:container
     entrypoint: ["node", "/app/scripts/docker-runtime.mjs"]
     secrets:
@@ -152,7 +130,9 @@ services:
     restart: unless-stopped
 
   agent-admin:
-    build: .
+    build:
+      context: .
+      target: worker-runtime
     profiles: ["migration"]
     command: npm run agent:admin:container
     entrypoint: ["node", "/app/scripts/docker-runtime.mjs"]
@@ -261,7 +241,9 @@ services:
     restart: unless-stopped
 
   agent-event-worker:
-    build: .
+    build:
+      context: .
+      target: worker-runtime
     profiles: ["migration"]
     command: npm run agent:events:worker:container
     entrypoint: ["node", "/app/scripts/docker-runtime.mjs"]
@@ -296,7 +278,9 @@ services:
     restart: unless-stopped
 
   alert-relay:
-    build: .
+    build:
+      context: .
+      target: worker-runtime
     profiles: ["observability"]
     command: npm run alert:relay:container
     entrypoint: ["node", "/app/scripts/docker-runtime.mjs"]

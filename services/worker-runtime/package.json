@@ -1,0 +1,29 @@
+{
+  "name": "@ai-reimbursement/worker-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "feishu:worker:container": "tsx src/worker/feishu-bot.ts",
+    "job:worker:container": "tsx src/worker/job-worker.ts",
+    "agent:events:worker:container": "tsx src/worker/agent-event-worker.ts",
+    "alert:relay:container": "tsx src/worker/alert-relay.ts",
+    "agent:admin:container": "tsx src/worker/agent-admin.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1137.0",
+    "@larksuiteoapi/node-sdk": "^1.74.0",
+    "@nats-io/jetstream": "^3.4.0",
+    "@nats-io/transport-node": "^3.4.0",
+    "@prisma/adapter-pg": "^7.10.0",
+    "@prisma/client": "^7.10.0",
+    "dotenv": "^18.0.1",
+    "pdf-lib": "^1.17.1",
+    "pg": "^8.23.0",
+    "tsx": "^4.23.15",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "prisma": "^7.10.0"
+  }
+}
