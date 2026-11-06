@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { reimbursementApi, type PublishedPolicyRule } from "../api/client";
 
 type Draft = { key: string; code: string; name: string; type: PublishedPolicyRule["type"]; severity: PublishedPolicyRule["severity"]; amount: string; categories: string; category: string; field: "participants" | "projectCode" };
@@ -42,7 +43,7 @@ export function PolicyRulesPage() {
     finally { setSaving(false); }
   }
   return <main className="page-shell" aria-labelledby="policy-title">
-    <header className="page-header"><div><p className="eyebrow">财务管理</p><h1 id="policy-title">政策版本</h1><p className="page-summary">版本生效后，报销系统将在预校验和最终提交时执行这些规则。</p></div></header>
+    <header className="page-header"><div><p className="eyebrow">财务管理</p><h1 id="policy-title">政策版本</h1><p className="page-summary">版本生效后，报销系统将在预校验和最终提交时执行这些规则。</p></div><Link className="secondary-action" to="/admin/policy-sources">政策知识来源</Link></header>
     <section className="workbench-panel policy-publish-panel" aria-labelledby="publish-title">
       <h2 id="publish-title">发布可执行规则</h2>
       <p className="field-hint">飞书文档用于制度问答。发布前请对照制度原文核对规则；文档更新不会自动修改这些规则。城市住宿档位、单笔费用上限暂缺对应单据字段，需人工核对。</p>

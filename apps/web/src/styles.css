@@ -101,6 +101,14 @@ input::placeholder, textarea::placeholder { color: #94a3b8; }
 .policy-rule-card { border: 1px solid #dce4f0; border-radius: 14px; padding: 18px; margin: 0; background: #f7f9fc; }
 .policy-rule-card legend { padding: 0 6px; font-weight: 700; color: #13233d; }
 .policy-remove-rule { margin-top: 14px; }
+.policy-sources-panel { max-width: 960px; margin-bottom: 20px; }
+.policy-source-form { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.4fr) auto; gap: 14px; align-items: end; margin-top: 18px; }
+.policy-source-list { display: grid; gap: 12px; list-style: none; padding: 0; margin: 20px 0 0; }
+.policy-source-card { display: flex; justify-content: space-between; gap: 20px; padding: 18px; border-radius: 14px; background: #f7f9fc; }
+.policy-source-main { min-width: 0; overflow-wrap: anywhere; }
+.policy-source-main p { margin: 6px 0; }
+.policy-source-actions { display: flex; align-items: start; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 720px) { .policy-source-form { grid-template-columns: 1fr; } .policy-source-card { flex-direction: column; } }
 .review-layout { display: grid; grid-template-columns: minmax(260px, .8fr) minmax(0, 1.7fr); gap: 24px; align-items: start; }
 .review-list-panel { padding: 20px; border: 1px solid #dce4f0; border-radius: 20px; background: #fff; }
 .review-list { display: grid; gap: 8px; padding: 0; margin: 18px 0 0; list-style: none; }

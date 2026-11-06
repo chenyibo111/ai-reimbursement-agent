@@ -1,6 +1,7 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
 import { PolicyRulesPage } from "./policy-rules-page";
 import { reimbursementApi } from "../api/client";
 
@@ -9,7 +10,7 @@ afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 it("publishes a blocking whole-claim limit in cents", async () => {
   const user = userEvent.setup();
-  render(<PolicyRulesPage />);
+  render(<MemoryRouter><PolicyRulesPage /></MemoryRouter>);
   await user.type(screen.getByLabelText("版本编号"), "2026-Q4");
   await user.type(screen.getByLabelText("生效日期"), "2026-10-28");
   await user.click(screen.getByRole("button", { name: "添加规则" }));
@@ -22,7 +23,7 @@ it("publishes a blocking whole-claim limit in cents", async () => {
 
 it("refuses an amount whose cent value cannot be represented exactly", async () => {
   const user = userEvent.setup();
-  render(<PolicyRulesPage />);
+  render(<MemoryRouter><PolicyRulesPage /></MemoryRouter>);
   await user.type(screen.getByLabelText("版本编号"), "too-large");
   await user.type(screen.getByLabelText("生效日期"), "2026-10-28");
   await user.click(screen.getByRole("button", { name: "添加规则" }));
@@ -34,6 +35,6 @@ it("refuses an amount whose cent value cannot be represented exactly", async () 
 });
 
 it("explains that a published version identifier cannot be reused", () => {
-  render(<PolicyRulesPage />);
+  render(<MemoryRouter><PolicyRulesPage /></MemoryRouter>);
   expect(screen.getByText("已发布版本不能覆盖；调整规则时请填写新的版本编号。")).toBeInTheDocument();
 });

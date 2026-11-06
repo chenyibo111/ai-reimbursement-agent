@@ -12,6 +12,8 @@ export class ReimbursementApiError extends Error {
 
 export type TokenProvider = { getAccessToken(): string | null; refreshAccessToken(): Promise<string> };
 export type PublishedPolicyRule = { code: string; name: string; type: "CLAIM_TOTAL_MAX" | "CATEGORY_ALLOWED" | "CATEGORY_REQUIRED_FIELD"; severity: "BLOCKING" | "WARNING"; config: { maxAmountCents: number } | { categories: string[] } | { category: string; field: "participants" | "projectCode" } };
+export type PolicySourceJob = { jobId: string; status: string; failureCode: string | null; resultKind: "SYNCED" | "UNCHANGED" | null };
+export type PolicySource = { id: string; type: "FEISHU_DOCX" | "FEISHU_WIKI"; title: string; canonicalUrl: string; enabled: boolean; lastSuccessfulSyncAt: string | null; lastFailureCode: string | null; sectionCount: number | null; chunkCount: number | null; lastJob: PolicySourceJob | null; createdAt: string; updatedAt: string };
 type RequestOptions = Omit<RequestInit, "body"> & { body?: unknown; idempotent?: boolean };
 type ApiClientDeps = { fetcher?: typeof fetch; randomId?: () => string };
 
@@ -66,6 +68,11 @@ export function createReimbursementApi(tokenProvider: TokenProvider, deps: ApiCl
     requestSubmission: (claimId: string, version: number) => request<SubmissionRequest>(`/api/v1/claims/${encodeURIComponent(claimId)}/submission-requests`, { method: "POST", body: { version }, idempotent: true }),
     submit: (claimId: string, confirmationToken: string) => request<SubmissionSnapshot>(`/api/v1/claims/${encodeURIComponent(claimId)}/submit`, { method: "POST", body: { confirmationToken }, idempotent: true }),
     publishPolicy: (id: string, effectiveDate: string, rules: PublishedPolicyRule[]) => request<{ id: string; status: string }>("/api/v1/admin/policies/publish", { method: "POST", body: { id, effectiveDate, rules }, idempotent: true }),
+    listPolicySources: () => request<{ sources: PolicySource[] }>("/api/v1/admin/policy-sources"),
+    createPolicySource: (input: { title: string; url: string }) => request<PolicySource>("/api/v1/admin/policy-sources", { method: "POST", body: input, idempotent: true }),
+    setPolicySourceEnabled: (sourceId: string, enabled: boolean) => request<PolicySource>(`/api/v1/admin/policy-sources/${encodeURIComponent(sourceId)}`, { method: "PATCH", body: { enabled }, idempotent: true }),
+    syncPolicySource: (sourceId: string) => request<{ sourceId: string; jobId: string; jobStatus: string }>(`/api/v1/admin/policy-sources/${encodeURIComponent(sourceId)}/sync`, { method: "POST", idempotent: true }),
+    getPolicySourceJob: (sourceId: string, jobId: string) => request<PolicySourceJob>(`/api/v1/admin/policy-sources/${encodeURIComponent(sourceId)}/jobs/${encodeURIComponent(jobId)}`),
     listReviews: () => request<{ items: ReviewCase[] }>("/api/v1/admin/reviews"),
     getReview: (reviewId: string) => request<ReviewCase>(`/api/v1/admin/reviews/${encodeURIComponent(reviewId)}`),
     getReviewReceiptPreview: (reviewId: string) => request<ReceiptPreview>(`/api/v1/admin/reviews/${encodeURIComponent(reviewId)}/receipt-preview`),

@@ -5,6 +5,7 @@ import { ClaimWorkbenchPage } from "./routes/claim-workbench-page";
 import { ClaimListPage } from "./routes/claims-list-page";
 import { NewClaimPage } from "./routes/new-claim-page";
 import { PolicyRulesPage } from "./routes/policy-rules-page";
+import { PolicySourcesPage } from "./routes/policy-sources-page";
 import { ReviewCenterPage } from "./routes/review-center-page";
 import { useAuthSession } from "./auth/session";
 
@@ -38,6 +39,7 @@ export function App() {
     <Route path="/claims/new" element={<NewClaimPage />} />
     <Route path="/claims/:claimId" element={<ClaimWorkbenchPage />} />
     <Route path="/admin/policies" element={<PolicyRulesPage />} />
+    <Route path="/admin/policy-sources" element={<PolicySourcesPage />} />
     <Route path="/admin/reviews" element={<ReviewCenterPage />} />
     <Route path="*" element={<Navigate to="/claims" replace />} />
   </Routes>;
