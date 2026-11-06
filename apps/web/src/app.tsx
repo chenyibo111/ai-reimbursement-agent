@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Link, Navigate, Route, Routes, useParams } from "react-router-dom";
 
 import { ClaimWorkbenchPage } from "./routes/claim-workbench-page";
 import { ClaimListPage } from "./routes/claims-list-page";
@@ -41,6 +41,17 @@ export function App() {
     <Route path="/admin/policies" element={<PolicyRulesPage />} />
     <Route path="/admin/policy-sources" element={<PolicySourcesPage />} />
     <Route path="/admin/reviews" element={<ReviewCenterPage />} />
+    <Route path="/policies" element={<RetiredPage title="旧政策页面已停用" description="政策问答已转到飞书机器人。报销单和政策规则仍可在当前工作台查看。" />} />
+    <Route path="/claims/:claimId/detail" element={<RetiredClaimDetailPage />} />
     <Route path="*" element={<Navigate to="/claims" replace />} />
   </Routes>;
+}
+
+function RetiredPage({ title, description }: { title: string; description: string }) {
+  return <main className="page-shell"><section className="workbench-panel"><h1>{title}</h1><p className="page-summary">{description}</p><Link className="secondary-action" to="/claims">返回报销单列表</Link></section></main>;
+}
+
+function RetiredClaimDetailPage() {
+  const { claimId } = useParams();
+  return <main className="page-shell"><section className="workbench-panel"><h1>报销单详情地址已更新</h1><p className="page-summary">请使用当前工作台查看这张报销单。</p><Link className="secondary-action" to={`/claims/${encodeURIComponent(claimId ?? "")}`}>打开当前报销单</Link></section></main>;
 }

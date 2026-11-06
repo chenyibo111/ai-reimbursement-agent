@@ -7,7 +7,6 @@ describe("Embedding providers", () => {
   it("uses deterministic 1024-dimension fixture vectors for local development", async () => {
     const provider = createEmbeddingProvider({
       isProduction: false,
-      policyAdminOpenIds: new Set(),
       embedding: { provider: "fixture", dimensions: 1024 },
     });
 
@@ -24,7 +23,6 @@ describe("Embedding providers", () => {
   it("rejects empty text before sending an embedding request", async () => {
     const provider = createEmbeddingProvider({
       isProduction: false,
-      policyAdminOpenIds: new Set(),
       embedding: { provider: "fixture", dimensions: 1024 },
     });
 

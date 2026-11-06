@@ -13,11 +13,6 @@
     "jsx": "preserve",
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
     "paths": {
       "@/*": [
         "./*"
@@ -29,10 +24,11 @@
     "esModuleInterop": true
   },
   "include": [
-    "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
-    ".next/types/**/*.ts"
+    "src/**/*.ts",
+    "services/agent/src/**/*.ts",
+    "scripts/**/*.ts",
+    "tests/**/*.ts",
+    "prisma*.config.ts"
   ],
   "exclude": [
     "node_modules",

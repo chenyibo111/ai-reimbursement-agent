@@ -10,13 +10,13 @@ async function main() {
   if (!sourceId) throw new Error("policy source id is required");
   const databaseUrl = process.env.DATABASE_URL;
   const config = loadConfig(process.env);
-  if (!databaseUrl || !config.feishuOAuth || !config.embedding) throw new Error("policy sync configuration is incomplete");
+  if (!databaseUrl || !config.feishuApp || !config.embedding) throw new Error("policy sync configuration is incomplete");
   const prisma = createPrismaClient(databaseUrl);
   try {
     await prisma.$connect();
     const result = await syncPolicySource({ actorId: "policy-sync-worker", sourceId }, {
       sources: new PrismaPolicyKnowledgeRepository(prisma),
-      documents: createFeishuPolicyDocumentClient({ appId: config.feishuOAuth.appId, appSecret: config.feishuOAuth.appSecret }),
+      documents: createFeishuPolicyDocumentClient({ appId: config.feishuApp.appId, appSecret: config.feishuApp.appSecret }),
       embeddings: createEmbeddingProvider(config), now: () => new Date(),
     });
     console.log(JSON.stringify({ status: result.status, chunkCount: result.chunkCount }));

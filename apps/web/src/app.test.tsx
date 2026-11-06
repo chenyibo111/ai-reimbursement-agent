@@ -1,12 +1,13 @@
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import { expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 
 import { App } from "./app";
 
 const mocks = vi.hoisted(() => ({ useAuthSession: vi.fn() }));
 vi.mock("./auth/session", () => ({ useAuthSession: mocks.useAuthSession }));
+afterEach(() => cleanup());
 
 it("holds protected routes behind a stable login verification status", () => {
   mocks.useAuthSession.mockReturnValue({ session: { status: "loading" } });
@@ -42,4 +43,16 @@ it("starts a silent authorization when the app has no local session", () => {
 		Object.defineProperty(window, "location", { configurable: true, value: originalLocation });
 		window.history.pushState({}, "", "/");
 	}
+});
+
+it("explains that the former policy page was retired instead of silently opening claims", () => {
+  mocks.useAuthSession.mockReturnValue({ session: { status: "authenticated" } });
+  render(<QueryClientProvider client={new QueryClient()}><MemoryRouter initialEntries={["/policies"]}><App /></MemoryRouter></QueryClientProvider>);
+  expect(screen.getByRole("heading", { name: "旧政策页面已停用" })).toBeInTheDocument();
+});
+
+it("offers the canonical claim link for a retired detail URL", () => {
+  mocks.useAuthSession.mockReturnValue({ session: { status: "authenticated" } });
+  render(<QueryClientProvider client={new QueryClient()}><MemoryRouter initialEntries={["/claims/claim-123/detail"]}><App /></MemoryRouter></QueryClientProvider>);
+  expect(screen.getByRole("link", { name: "打开当前报销单" })).toHaveAttribute("href", "/claims/claim-123");
 });

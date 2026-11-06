@@ -69,3 +69,8 @@ it("rejects fixture model provider in production", () => {
     }),
   ).toThrow("fixture model provider is not allowed in production");
 });
+
+it("configures policy document access without the retired Next OAuth callback", () => {
+  const config = loadConfig({ NODE_ENV: "production", RECEIPT_EXTRACTION_PROVIDER: "paddleocr", MODEL_PROVIDER: "openai-compatible", MODEL_BASE_URL: "https://models.example.test/v1", MODEL_NAME: "model", MODEL_PROVIDER_API_KEY: "key", FEISHU_APP_ID: "cli_app", FEISHU_APP_SECRET: "secret" });
+  expect(config.feishuApp).toEqual({ appId: "cli_app", appSecret: "secret" });
+});

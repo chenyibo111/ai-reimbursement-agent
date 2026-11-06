@@ -40,10 +40,10 @@ async function main() {
           extractReceipt: (input) => extractReceipt(input, extractDeps),
           syncPolicySource: async ({ actorId, sourceId }) => {
             const config = loadConfig(process.env);
-            if (!config.feishuOAuth || !config.embedding) throw new Error("policy sync configuration is incomplete");
+            if (!config.feishuApp || !config.embedding) throw new Error("policy sync configuration is incomplete");
             return syncPolicySource({ actorId, sourceId }, {
               sources: new PrismaPolicyKnowledgeRepository(prisma),
-              documents: createFeishuPolicyDocumentClient({ appId: config.feishuOAuth.appId, appSecret: config.feishuOAuth.appSecret }),
+              documents: createFeishuPolicyDocumentClient({ appId: config.feishuApp.appId, appSecret: config.feishuApp.appSecret }),
               embeddings: createEmbeddingProvider(config),
               now: () => new Date(),
             });

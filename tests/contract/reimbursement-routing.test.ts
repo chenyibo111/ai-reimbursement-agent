@@ -19,6 +19,7 @@ describe("reimbursement migration routing", () => {
     expect(nginx).toContain("proxy_set_header X-Forwarded-Port $server_port;");
     expect(nginx).toContain("location ^~ /api/v1/");
     expect(nginx).toContain("proxy_pass http://$reimbursement_api_upstream");
+    expect(nginx).toMatch(/location \^~ \/api\/\s*\{\s*return 404;/);
     expect(nginx).toContain("location /");
     expect(nginx).toContain("proxy_pass http://$reimbursement_web_upstream");
   });
@@ -31,11 +32,9 @@ describe("reimbursement migration routing", () => {
     ]);
 
     const apiService = compose.slice(compose.indexOf("  reimbursement-api:"), compose.indexOf("  reimbursement-web:"));
-    const legacyWebService = compose.slice(compose.indexOf("  web:"), compose.indexOf("  feishu-bot-worker:"));
     expect(apiService).toMatch(/expose:\s*\n\s*- "8080"/);
     expect(apiService).not.toContain("ports:");
-    expect(legacyWebService).toContain('profiles: ["legacy-web"]');
-    expect(legacyWebService).toContain('"127.0.0.1:${REIMBURSEMENT_NEXT_PORT:-3000}:3000"');
+    expect(compose).not.toMatch(/^  web:/m);
     const edgeService = compose.slice(compose.indexOf("  reimbursement-edge:"), compose.indexOf("  nats:"));
     expect(edgeService).not.toMatch(/\n\s+web:\s*\n/);
     expect(edgeService).toContain("reimbursement-api:");

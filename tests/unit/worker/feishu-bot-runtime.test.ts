@@ -63,7 +63,7 @@ it("persists the reply before sending and marks it delivered only afterward", as
 });
 
 it("returns retryable processing failures to the pending queue", async () => {
-  const { runtime, calls } = fixture();
+  const { calls } = fixture();
   const retryable = createFeishuBotRuntime({
     repository: {
       recordInbound: async () => ({ id: "inbound-1", shouldProcess: true }),

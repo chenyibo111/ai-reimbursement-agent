@@ -11,9 +11,9 @@ function read(path: string) {
 
 describe("React and Agent reimbursement boundary", () => {
   it("keeps Agent entry points on the Go tool gateway", () => {
-    for (const path of ["app/api/conversations/private/messages/route.ts", "app/api/conversations/private/attachments/route.ts", "src/worker/feishu-bot.ts"]) {
+    for (const [path, gateway] of [["src/worker/feishu-bot.ts", "createAgentReimbursementRuntime"], ["src/worker/agent-event-worker.ts", "ReimbursementApiClient"]]) {
       const source = read(path);
-      expect(source).toContain("createAgentReimbursementRuntime");
+      expect(source).toContain(gateway);
       expect(source).not.toMatch(/Prisma(?:Claim|Receipt|AsyncJob)Repository|createClaimDraft|requestStoredSubmission|submitStoredClaim|REIMBURSEMENT_AGENT_MODE/);
     }
   });

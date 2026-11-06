@@ -1,6 +1,5 @@
 export type AppConfig = {
   isProduction: boolean;
-  policyAdminOpenIds: ReadonlySet<string>;
   embedding?: EmbeddingConfig;
   receiptExtractionProvider?: string;
   modelProvider?: "fixture" | "openai-compatible";
@@ -10,11 +9,9 @@ export type AppConfig = {
     apiKey: string;
     timeoutMs: number;
   };
-  sessionSecret?: string;
-  feishuOAuth?: {
+  feishuApp?: {
     appId: string;
     appSecret: string;
-    redirectUri: string;
   };
   feishuBot?: FeishuBotConfig;
 };
@@ -58,20 +55,12 @@ export function loadConfig(env: Record<string, string | undefined>): AppConfig {
   const modelProvider: AppConfig["modelProvider"] = configuredModelProvider as AppConfig["modelProvider"];
   const embedding = parseEmbeddingConfig(env, isProduction);
 
-  if (isProduction && !env.SESSION_SECRET) {
-    throw new Error("SESSION_SECRET is required in production");
-  }
-
   if (isProduction && !env.FEISHU_APP_ID) {
     throw new Error("FEISHU_APP_ID is required in production");
   }
 
   if (isProduction && !env.FEISHU_APP_SECRET) {
     throw new Error("FEISHU_APP_SECRET is required in production");
-  }
-
-  if (isProduction && !env.FEISHU_REDIRECT_URI) {
-    throw new Error("FEISHU_REDIRECT_URI is required in production");
   }
 
   if (isProduction && modelProvider === "fixture") {
@@ -83,23 +72,20 @@ export function loadConfig(env: Record<string, string | undefined>): AppConfig {
     : undefined;
 
   const hasCompleteFeishuConfig = Boolean(
-    env.FEISHU_APP_ID && env.FEISHU_APP_SECRET && env.FEISHU_REDIRECT_URI,
+    env.FEISHU_APP_ID && env.FEISHU_APP_SECRET,
   );
   const feishuBot = parseFeishuBotConfig(env);
 
   return {
     isProduction,
-    policyAdminOpenIds: parsePolicyAdminOpenIds(env.POLICY_ADMIN_FEISHU_OPEN_IDS),
     embedding,
     receiptExtractionProvider: env.RECEIPT_EXTRACTION_PROVIDER,
     modelProvider,
     model,
-    sessionSecret: env.SESSION_SECRET,
-    feishuOAuth: hasCompleteFeishuConfig
+    feishuApp: hasCompleteFeishuConfig
       ? {
           appId: env.FEISHU_APP_ID!,
           appSecret: env.FEISHU_APP_SECRET!,
-          redirectUri: env.FEISHU_REDIRECT_URI!,
       }
       : undefined,
     feishuBot,
@@ -138,15 +124,6 @@ function parseEmbeddingConfig(env: Record<string, string | undefined>, isProduct
     dimensions,
     timeoutMs,
   };
-}
-
-function parsePolicyAdminOpenIds(value: string | undefined): ReadonlySet<string> {
-  return new Set(
-    (value ?? "")
-      .split(",")
-      .map((openId) => openId.trim())
-      .filter((openId) => /^ou_[A-Za-z0-9_]+$/.test(openId)),
-  );
 }
 
 export function validateFeishuWorkerEnvironment(env: Record<string, string | undefined>): FeishuBotConfig {

@@ -37,4 +37,3 @@ export type ChatModel = {
   decideConversation?(input: ConversationContext): Promise<ConversationDecision>;
 };
 import type { ConversationContext } from "@/src/application/build-conversation-context";
-import type { ConversationCollectedFieldName } from "@/src/domain/agent-conversation";

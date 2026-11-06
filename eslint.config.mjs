@@ -1,15 +1,9 @@
-import { FlatCompat } from "@eslint/eslintrc";
-import { dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import js from "@eslint/js";
+import tsParser from "@typescript-eslint/parser";
+import tsPlugin from "@typescript-eslint/eslint-plugin";
 
-const baseDirectory = dirname(fileURLToPath(import.meta.url));
-const compat = new FlatCompat({ baseDirectory });
-
-const config = [
-  ...compat.extends("next/core-web-vitals"),
-  {
-    ignores: [".next/**", ".worktrees/**", "apps/web/dist/**", "node_modules/**", "generated/**", "playwright-report/**", "test-results/**"],
-  },
+export default [
+  { ignores: [".next/**", ".worktrees/**", "apps/web/**", "node_modules/**", "generated/**", "playwright-report/**", "test-results/**"] },
+  { files: ["**/*.{js,mjs}"], ...js.configs.recommended, languageOptions: { globals: { process: "readonly", console: "readonly", URL: "readonly" } } },
+  { files: ["**/*.{ts,tsx}"], languageOptions: { parser: tsParser, parserOptions: { sourceType: "module" } }, plugins: { "@typescript-eslint": tsPlugin }, rules: { ...tsPlugin.configs.recommended.rules, "@typescript-eslint/no-unused-vars": ["error", { varsIgnorePattern: "^_", argsIgnorePattern: "^_" }] } },
 ];
-
-export default config;
