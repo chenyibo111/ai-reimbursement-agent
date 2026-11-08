@@ -178,7 +178,7 @@ func (handler *AuthBFF) callback(response http.ResponseWriter, request *http.Req
 	if oidcError := request.URL.Query().Get("error"); oidcError != "" {
 		if silent && (oidcError == "login_required" || oidcError == "consent_required" || oidcError == "interaction_required" || oidcError == "account_selection_required") {
 			response.Header().Set("Cache-Control", "no-store")
-			http.Redirect(response, request, "/api/auth/sso/login?returnTo="+url.QueryEscape(safeReturnTo(pending.ReturnTo)), http.StatusFound)
+			http.Redirect(response, request, "/login?returnTo="+url.QueryEscape(safeReturnTo(pending.ReturnTo)), http.StatusFound)
 			return
 		}
 		writeAuthError(response, http.StatusBadRequest, "sso_login_failed")

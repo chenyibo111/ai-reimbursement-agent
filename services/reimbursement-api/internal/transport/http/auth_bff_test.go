@@ -31,17 +31,17 @@ func (fake *authBFFOIDC) Begin(_ context.Context, returnTo string, silent bool) 
 	}, nil
 }
 
-func TestAuthBFFSilentErrorFallsBackToInteractiveLogin(t *testing.T) {
+func TestAuthBFFSilentErrorShowsExplicitLogin(t *testing.T) {
 	for _, oidcError := range []string{"login_required", "consent_required"} {
 		t.Run(oidcError, func(t *testing.T) {
 			fixture := newAuthBFFFixture(t, "")
-			login := authBFFRequest(fixture.router, "http://localhost:8088/api/auth/sso/silent?returnTo=%2Fclaims")
+			login := authBFFRequest(fixture.router, "http://localhost:8088/api/auth/sso/silent?returnTo=%2Fadmin%2Fpolicy-sources")
 			if login.Code != http.StatusFound || !fixture.oidc.silent {
 				t.Fatalf("silent login not started: %d", login.Code)
 			}
 			callback := authBFFRequest(fixture.router, "http://localhost:8088/api/auth/sso/callback?error="+oidcError+"&state=expected-state", login.Result().Cookies()...)
-			if callback.Code != http.StatusFound || callback.Header().Get("Location") != "/api/auth/sso/login?returnTo=%2Fclaims" || len(fixture.sessionRows.rows) != 0 {
-				t.Fatalf("silent fallback failed: status=%d location=%q", callback.Code, callback.Header().Get("Location"))
+			if callback.Code != http.StatusFound || callback.Header().Get("Location") != "/login?returnTo=%2Fadmin%2Fpolicy-sources" || len(fixture.sessionRows.rows) != 0 {
+				t.Fatalf("silent login should require an explicit action: status=%d location=%q", callback.Code, callback.Header().Get("Location"))
 			}
 		})
 	}

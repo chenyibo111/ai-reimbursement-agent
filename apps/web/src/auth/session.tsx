@@ -86,8 +86,17 @@ export function AuthSessionProvider({ children }: PropsWithChildren) {
   const [session, setSession] = useState<AuthSessionSnapshot>(manager.snapshot());
 
   useEffect(() => manager.subscribe(() => setSession(manager.snapshot())), [manager]);
-  useEffect(() => { if (window.location.pathname !== "/logged-out") void manager.initialize().catch(() => undefined); }, [manager]);
+  useEffect(() => { if (!["/logged-out", "/login"].includes(window.location.pathname)) void manager.initialize().catch(() => undefined); }, [manager]);
   useEffect(() => { configureReimbursementApiTokenProvider(manager); }, [manager]);
+  useEffect(() => {
+    const revalidate = () => {
+      if (document.visibilityState === "visible" && manager.snapshot().status === "authenticated") {
+        void manager.refreshAccessToken().catch(() => undefined);
+      }
+    };
+    document.addEventListener("visibilitychange", revalidate);
+    return () => document.removeEventListener("visibilitychange", revalidate);
+  }, [manager]);
   useEffect(() => {
     if (session.status !== "authenticated") return;
     const delay = Math.max(0, Date.parse(session.expiresAt) - Date.now() - 60_000);

@@ -10,15 +10,21 @@ import { ReviewCenterPage } from "./routes/review-center-page";
 import { useAuthSession } from "./auth/session";
 
 export function App() {
-  const { session, silentLoginUrl, refreshAccessToken } = useAuthSession();
+  const { session, silentLoginUrl, refreshAccessToken, logout } = useAuthSession();
   const loggedOut = window.location.pathname === "/logged-out";
+  const loginRequired = window.location.pathname === "/login";
 
   useEffect(() => {
-    if (!loggedOut && session.status === "unauthenticated") window.location.assign(silentLoginUrl);
-  }, [loggedOut, silentLoginUrl, session.status]);
+    if (!loggedOut && !loginRequired && session.status === "unauthenticated") window.location.assign(silentLoginUrl);
+  }, [loggedOut, loginRequired, silentLoginUrl, session.status]);
 
   if (loggedOut) {
     return <main className="page-shell"><section className="workbench-panel" aria-labelledby="logged-out-title"><h1 id="logged-out-title">已退出所有项目</h1><p className="page-summary">当前登录已结束。需要继续使用报销工作台时，请重新登录。</p><a className="secondary-action" href="/api/auth/sso/login?returnTo=%2Fclaims">重新登录</a></section></main>;
+  }
+
+  if (loginRequired) {
+    const returnTo = new URLSearchParams(window.location.search).get("returnTo") || "/claims";
+    return <main className="page-shell"><section className="workbench-panel" aria-labelledby="login-title"><h1 id="login-title">登录报销工作台</h1><p className="page-summary">当前没有可复用的统一登录会话。请确认要使用的飞书账号后登录。</p><a className="primary-action new-claim-action" href={`/api/auth/sso/login?returnTo=${encodeURIComponent(returnTo)}`}>使用飞书登录</a></section></main>;
   }
 
   if (session.status === "loading") {
@@ -34,17 +40,28 @@ export function App() {
     return <main className="page-shell"><section className="workbench-panel" aria-labelledby="session-error-title"><h1 id="session-error-title">暂时无法验证登录状态</h1><p className="page-summary">{session.message}</p><button className="secondary-action" type="button" onClick={() => { void refreshAccessToken().catch(() => undefined); }}>重新验证</button></section></main>;
   }
 
-  return <Routes>
-    <Route path="/claims" element={<ClaimListPage />} />
-    <Route path="/claims/new" element={<NewClaimPage />} />
-    <Route path="/claims/:claimId" element={<ClaimWorkbenchPage />} />
-    <Route path="/admin/policies" element={<PolicyRulesPage />} />
-    <Route path="/admin/policy-sources" element={<PolicySourcesPage />} />
-    <Route path="/admin/reviews" element={<ReviewCenterPage />} />
-    <Route path="/policies" element={<RetiredPage title="旧政策页面已停用" description="政策问答已转到飞书机器人。报销单和政策规则仍可在当前工作台查看。" />} />
-    <Route path="/claims/:claimId/detail" element={<RetiredClaimDetailPage />} />
-    <Route path="*" element={<Navigate to="/claims" replace />} />
-  </Routes>;
+  return <>
+    <header className="session-bar">
+      <div className="session-bar-inner">
+        <Link to="/claims">报销工作台</Link>
+        <div className="session-actions">
+          <span>{session.employee.displayName}</span>
+          <button className="secondary-action" type="button" onClick={() => { void logout(); }}>退出登录</button>
+        </div>
+      </div>
+    </header>
+    <Routes>
+      <Route path="/claims" element={<ClaimListPage />} />
+      <Route path="/claims/new" element={<NewClaimPage />} />
+      <Route path="/claims/:claimId" element={<ClaimWorkbenchPage />} />
+      <Route path="/admin/policies" element={<PolicyRulesPage />} />
+      <Route path="/admin/policy-sources" element={<PolicySourcesPage />} />
+      <Route path="/admin/reviews" element={<ReviewCenterPage />} />
+      <Route path="/policies" element={<RetiredPage title="旧政策页面已停用" description="政策问答已转到飞书机器人。报销单和政策规则仍可在当前工作台查看。" />} />
+      <Route path="/claims/:claimId/detail" element={<RetiredClaimDetailPage />} />
+      <Route path="*" element={<Navigate to="/claims" replace />} />
+    </Routes>
+  </>;
 }
 
 function RetiredPage({ title, description }: { title: string; description: string }) {

@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
@@ -30,6 +30,18 @@ it("keeps the logged-out page available without starting another login", () => {
   }
 });
 
+it("shows an explicit login action when silent SSO cannot reuse a session", () => {
+  window.history.pushState({}, "", "/login?returnTo=%2Fadmin%2Fpolicy-sources");
+  mocks.useAuthSession.mockReturnValue({ session: { status: "loading" } });
+  try {
+    render(<QueryClientProvider client={new QueryClient()}><MemoryRouter initialEntries={["/login"]}><App /></MemoryRouter></QueryClientProvider>);
+    expect(screen.getByRole("heading", { name: "登录报销工作台" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "使用飞书登录" })).toHaveAttribute("href", "/api/auth/sso/login?returnTo=%2Fadmin%2Fpolicy-sources");
+  } finally {
+    window.history.pushState({}, "", "/");
+  }
+});
+
 it("starts a silent authorization when the app has no local session", () => {
 	window.history.pushState({}, "", "/claims");
 	mocks.useAuthSession.mockReturnValue({ session: { status: "unauthenticated" }, loginUrl: "/api/auth/sso/login?returnTo=%2Fclaims", silentLoginUrl: "/api/auth/sso/silent?returnTo=%2Fclaims" });
@@ -46,13 +58,23 @@ it("starts a silent authorization when the app has no local session", () => {
 });
 
 it("explains that the former policy page was retired instead of silently opening claims", () => {
-  mocks.useAuthSession.mockReturnValue({ session: { status: "authenticated" } });
+  mocks.useAuthSession.mockReturnValue({ session: { status: "authenticated", employee: { displayName: "测试员工" } } });
   render(<QueryClientProvider client={new QueryClient()}><MemoryRouter initialEntries={["/policies"]}><App /></MemoryRouter></QueryClientProvider>);
   expect(screen.getByRole("heading", { name: "旧政策页面已停用" })).toBeInTheDocument();
 });
 
+it("lets an authenticated employee exit SSO from the workbench", () => {
+  const logout = vi.fn();
+  mocks.useAuthSession.mockReturnValue({ session: { status: "authenticated", employee: { displayName: "陈亦博" } }, logout });
+  render(<QueryClientProvider client={new QueryClient()}><MemoryRouter initialEntries={["/policies"]}><App /></MemoryRouter></QueryClientProvider>);
+
+  expect(screen.getByText("陈亦博")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "退出登录" }));
+  expect(logout).toHaveBeenCalledOnce();
+});
+
 it("offers the canonical claim link for a retired detail URL", () => {
-  mocks.useAuthSession.mockReturnValue({ session: { status: "authenticated" } });
+  mocks.useAuthSession.mockReturnValue({ session: { status: "authenticated", employee: { displayName: "测试员工" } } });
   render(<QueryClientProvider client={new QueryClient()}><MemoryRouter initialEntries={["/claims/claim-123/detail"]}><App /></MemoryRouter></QueryClientProvider>);
   expect(screen.getByRole("link", { name: "打开当前报销单" })).toHaveAttribute("href", "/claims/claim-123");
 });

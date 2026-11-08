@@ -13,6 +13,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 button:disabled, .is-disabled { cursor: not-allowed; opacity: .55; }
 a { color: inherit; }
 
+.session-bar { border-bottom: 1px solid #dce4f0; background: #fff; }
+.session-bar-inner { width: min(100% - 32px, 1216px); min-height: 64px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.session-bar-inner > a { color: #13233d; font-weight: 700; text-decoration: none; }
+.session-actions { display: flex; align-items: center; gap: 16px; color: #64748b; }
+.session-actions .secondary-action { flex: none; }
+
 .page-shell { width: min(100% - 32px, 1216px); margin: 0 auto; padding: 56px 0 80px; }
 .page-header, .workbench-title-row, .section-heading, .claim-card-topline, .receipt-row, .receipt-actions, .submission-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .page-header { align-items: flex-end; margin-bottom: 32px; }
@@ -173,6 +179,9 @@ select { width: 100%; min-height: 46px; padding: 0 13px; border: 1px solid #cbd7
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
 
 @media (max-width: 760px) {
+  .session-bar-inner { width: min(100% - 24px, 1216px); }
+  .session-actions { gap: 8px; }
+  .session-actions span { max-width: 7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .page-shell { width: min(100% - 24px, 1216px); padding-top: 32px; }
   .page-header, .workbench-title-row, .section-heading { align-items: flex-start; flex-direction: column; }
   .workbench-layout { grid-template-columns: 1fr; }
