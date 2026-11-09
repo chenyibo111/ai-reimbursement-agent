@@ -13,6 +13,10 @@ function sourceLabel(source: string) {
 	return ({ OCR: "票据识别", MODEL: "AI 建议", MANUAL: "人工填写" } as Record<string, string>)[source] ?? "待补充";
 }
 
+function classificationLabel(status?: ExpenseItem["classificationStatus"]) {
+	return ({ CLASSIFIED: "AI 已分类，请核对", UNKNOWN: "类型无法判断，请手工填写", FAILED: "AI 分类失败，请手工填写", CATEGORY_UNMAPPED: "类别不在当前规则中，请手工选择", PENDING: "等待分类或手工填写" } as const)[status ?? "PENDING"];
+}
+
 export function ExpenseItemsPanel({ claim, receipts = [] }: { claim: Claim; receipts?: Receipt[] }) {
 	const items = claim.expenseItems ?? [];
 	const amount = claim.expenseItemTotalAmountCent ?? (items.length > 0 && items.every((item) => item.amountCent !== null) ? items.reduce((sum, item) => sum + (item.amountCent ?? 0), 0) : null);
@@ -62,6 +66,7 @@ function ExpenseItemEditor({ claim, item, index, filename }: { claim: Claim; ite
 	const label = `第 ${index + 1} 条`;
 	return <form className="expense-item-card" onSubmit={(event) => { void save(event); }} noValidate>
 		<div className="expense-item-heading"><strong>{label} · {filename}</strong><span className="status-tag">{typeLabel(item.receiptType)}</span></div>
+		<p className="field-hint">{classificationLabel(item.classificationStatus)}</p>
 		<div className="application-form-grid">
 			<div className="field-stack"><label htmlFor={`item-category-${item.id}`}>{label}费用类别</label><input id={`item-category-${item.id}`} value={category} onChange={(event) => { setIsEditing(true); setCategory(event.target.value); }} disabled={claim.status !== "DRAFT" || mutation.isPending} /><small>{sourceLabel(item.categorySource)}</small></div>
 			<div className="field-stack"><label htmlFor={`item-amount-${item.id}`}>{label}金额</label><input id={`item-amount-${item.id}`} value={amount} inputMode="decimal" onChange={(event) => { setIsEditing(true); setAmount(event.target.value); }} disabled={claim.status !== "DRAFT" || mutation.isPending} /><small>{sourceLabel(item.amountSource)}</small></div>

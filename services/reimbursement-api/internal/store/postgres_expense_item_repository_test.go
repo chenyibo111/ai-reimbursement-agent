@@ -35,7 +35,7 @@ func TestExpenseItemUpsertPreservesManualCategoryAndOneRowPerReceipt(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	applyMigrationsThrough(t, ctx, conn, filepath.Join("..", "..", "db", "migrations"), "000019")
+	applyMigrationsThrough(t, ctx, conn, filepath.Join("..", "..", "db", "migrations"), "000022")
 	_ = conn.Close(ctx)
 	pool, err := pgxpool.New(ctx, testURL)
 	if err != nil {
@@ -46,7 +46,7 @@ func TestExpenseItemUpsertPreservesManualCategoryAndOneRowPerReceipt(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = pool.Exec(ctx, `INSERT INTO reimbursement.claims(id, owner_id, purpose, itemization_mode) VALUES ('claim-1','employee-1','','ITEMIZED')`)
+	_, err = pool.Exec(ctx, `INSERT INTO reimbursement.claims(id, owner_id, purpose, itemization_mode, purpose_source) VALUES ('claim-1','employee-1','','ITEMIZED','AUTO')`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,6 +59,10 @@ func TestExpenseItemUpsertPreservesManualCategoryAndOneRowPerReceipt(t *testing.
 	first, err := repository.UpsertFromOCR(ctx, "employee-1", "receipt-1", domain.ExpenseItemSuggestion{ReceiptType: "TAXI", ExpenseCategory: "交通费", Purpose: "市内出行打车费", AmountCent: &amount})
 	if err != nil {
 		t.Fatal(err)
+	}
+	var autoPurpose string
+	if err := pool.QueryRow(ctx, `SELECT purpose FROM reimbursement.claims WHERE id='claim-1'`).Scan(&autoPurpose); err != nil || autoPurpose != "市内出行打车费" {
+		t.Fatalf("auto purpose=%q err=%v", autoPurpose, err)
 	}
 	manualCategory := "市内交通费"
 	var version int64
@@ -127,5 +131,31 @@ func TestExpenseItemUpsertPreservesManualCategoryAndOneRowPerReceipt(t *testing.
 	}
 	if len(legacyItems) != 1 || legacyItems[0].AmountCent == nil || *legacyItems[0].AmountCent != 1200 || legacyItems[0].ExpenseCategory != "" || legacyItems[0].Purpose != "" {
 		t.Fatalf("legacy conversion invented fields: %+v", legacyItems)
+	}
+	if _, err = pool.Exec(ctx, `INSERT INTO reimbursement.claims(id,owner_id,purpose,itemization_mode,purpose_source) VALUES ('mixed','employee-1','','ITEMIZED','AUTO')`); err != nil {
+		t.Fatal(err)
+	}
+	for _, receiptID := range []string{"mixed-taxi", "mixed-dining"} {
+		if _, err = pool.Exec(ctx, `INSERT INTO reimbursement.receipts(id,claim_id,owner_id,filename,content_type,expected_size,object_key,status) VALUES ($1,'mixed','employee-1',$1,'application/pdf',100,$1,'EXTRACTED')`, receiptID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = repository.UpsertFromOCR(ctx, "employee-1", "mixed-taxi", domain.ExpenseItemSuggestion{ReceiptType: "TAXI", Purpose: "市内出行打车费", AmountCent: &amount}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = repository.UpsertFromOCR(ctx, "employee-1", "mixed-dining", domain.ExpenseItemSuggestion{ReceiptType: "DINING", Purpose: "餐饮费用", AmountCent: &amount}); err != nil {
+		t.Fatal(err)
+	}
+	if err = pool.QueryRow(ctx, `SELECT purpose FROM reimbursement.claims WHERE id='mixed'`).Scan(&autoPurpose); err != nil || autoPurpose != "市内出行打车费、餐饮费用" {
+		t.Fatalf("mixed purpose=%q err=%v", autoPurpose, err)
+	}
+	if _, err = pool.Exec(ctx, `UPDATE reimbursement.claims SET purpose='客户拜访',purpose_source='MANUAL' WHERE id='mixed'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = repository.UpsertFromOCR(ctx, "employee-1", "mixed-dining", domain.ExpenseItemSuggestion{Purpose: "工作餐费", AmountCent: &amount}); err != nil {
+		t.Fatal(err)
+	}
+	if err = pool.QueryRow(ctx, `SELECT purpose FROM reimbursement.claims WHERE id='mixed'`).Scan(&autoPurpose); err != nil || autoPurpose != "客户拜访" {
+		t.Fatalf("manual purpose overwritten=%q err=%v", autoPurpose, err)
 	}
 }

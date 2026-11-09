@@ -399,7 +399,7 @@ func (handler *claimsHandler) claimDetailResponse(ctx context.Context, actorID s
 func expenseItemResponse(item domain.ExpenseItem) map[string]any {
 	return map[string]any{
 		"id": item.ID, "claimId": item.ClaimID, "receiptId": item.ReceiptID,
-		"receiptType": item.ReceiptType, "expenseCategory": item.ExpenseCategory,
+		"receiptType": item.ReceiptType, "classificationStatus": item.ClassificationStatus, "classificationVersion": item.ClassificationVersion, "expenseCategory": item.ExpenseCategory,
 		"categorySource": item.CategorySource, "purpose": item.Purpose, "purposeSource": item.PurposeSource,
 		"amountCent": item.AmountCent, "amountSource": item.AmountSource,
 		"projectCode": item.ProjectCode, "participants": item.Participants,

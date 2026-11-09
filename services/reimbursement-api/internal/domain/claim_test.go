@@ -29,6 +29,20 @@ func TestClaimPatchRejectsSubmittedClaim(t *testing.T) {
 	}
 }
 
+func TestClaimPatchMarksEditedPurposeManual(t *testing.T) {
+	claim, err := NewDraftClaim("claim-1", "BX20261109-0001", "employee-1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim.PurposeSource = "AUTO"
+	if err := claim.Patch(1, ClaimPatch{Purpose: stringPointer("客户拜访")}); err != nil {
+		t.Fatal(err)
+	}
+	if claim.Purpose != "客户拜访" || claim.PurposeSource != "MANUAL" {
+		t.Fatalf("purpose source=%s purpose=%s", claim.PurposeSource, claim.Purpose)
+	}
+}
+
 func TestClaimPatchStoresManualRequestedAmountCurrencyAndRemark(t *testing.T) {
 	claim, err := NewDraftClaim("claim-1", "BX20261008-0001", "employee-1", "差旅报销")
 	if err != nil {

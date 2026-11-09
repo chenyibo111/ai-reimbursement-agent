@@ -36,6 +36,7 @@ type Claim struct {
 	Status                    ClaimStatus
 	ItemizationMode           ClaimItemizationMode
 	Purpose                   string
+	PurposeSource             string
 	ExpenseCategory           string
 	Participants              []string
 	ProjectCode               string
@@ -77,6 +78,7 @@ func NewDraftClaim(id string, claimNumber string, ownerID string, purpose string
 		Status:                ClaimStatusDraft,
 		ItemizationMode:       ClaimItemizationModeLegacy,
 		Purpose:               strings.TrimSpace(purpose),
+		PurposeSource:         "MANUAL",
 		Currency:              ClaimCurrencyCNY,
 		RequestedAmountSource: RequestedAmountSourceSuggested,
 		Version:               1,
@@ -94,6 +96,7 @@ func (claim *Claim) Patch(expectedVersion int64, patch ClaimPatch) error {
 	}
 	if patch.Purpose != nil {
 		claim.Purpose = strings.TrimSpace(*patch.Purpose)
+		claim.PurposeSource = "MANUAL"
 	}
 	if patch.ExpenseCategory != nil {
 		claim.ExpenseCategory = *patch.ExpenseCategory

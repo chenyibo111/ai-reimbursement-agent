@@ -190,14 +190,14 @@ func (repository *PostgresExpenseItemRepository) PatchOwnedDraft(ctx context.Con
 	return item, tx.Commit(ctx)
 }
 
-const expenseItemSelect = `SELECT id, claim_id, receipt_id, receipt_type, expense_category, category_source, purpose, purpose_source, amount_cent, amount_source, project_code, participants FROM reimbursement.expense_items`
+const expenseItemSelect = `SELECT id, claim_id, receipt_id, receipt_type, classification_status, classification_version, expense_category, category_source, purpose, purpose_source, amount_cent, amount_source, project_code, participants FROM reimbursement.expense_items`
 
 type expenseItemRow interface{ Scan(...any) error }
 
 func scanExpenseItem(row expenseItemRow) (domain.ExpenseItem, error) {
 	var item domain.ExpenseItem
 	var participants []byte
-	err := row.Scan(&item.ID, &item.ClaimID, &item.ReceiptID, &item.ReceiptType, &item.ExpenseCategory, &item.CategorySource, &item.Purpose, &item.PurposeSource, &item.AmountCent, &item.AmountSource, &item.ProjectCode, &participants)
+	err := row.Scan(&item.ID, &item.ClaimID, &item.ReceiptID, &item.ReceiptType, &item.ClassificationStatus, &item.ClassificationVersion, &item.ExpenseCategory, &item.CategorySource, &item.Purpose, &item.PurposeSource, &item.AmountCent, &item.AmountSource, &item.ProjectCode, &participants)
 	if err != nil {
 		return domain.ExpenseItem{}, err
 	}
@@ -208,22 +208,30 @@ func scanExpenseItem(row expenseItemRow) (domain.ExpenseItem, error) {
 }
 
 func saveExpenseItem(ctx context.Context, tx pgx.Tx, item domain.ExpenseItem) error {
+	if item.ClassificationStatus == "" {
+		item.ClassificationStatus = "PENDING"
+	}
 	participants, err := json.Marshal(item.Participants)
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO reimbursement.expense_items(id,claim_id,receipt_id,receipt_type,expense_category,category_source,purpose,purpose_source,amount_cent,amount_source,project_code,participants)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)
-		ON CONFLICT(receipt_id) DO UPDATE SET receipt_type=EXCLUDED.receipt_type, expense_category=EXCLUDED.expense_category, category_source=EXCLUDED.category_source,
+	_, err = tx.Exec(ctx, `INSERT INTO reimbursement.expense_items(id,claim_id,receipt_id,receipt_type,classification_status,classification_version,expense_category,category_source,purpose,purpose_source,amount_cent,amount_source,project_code,participants)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb)
+		ON CONFLICT(receipt_id) DO UPDATE SET receipt_type=EXCLUDED.receipt_type, classification_status=EXCLUDED.classification_status, classification_version=EXCLUDED.classification_version, expense_category=EXCLUDED.expense_category, category_source=EXCLUDED.category_source,
 		purpose=EXCLUDED.purpose, purpose_source=EXCLUDED.purpose_source, amount_cent=EXCLUDED.amount_cent, amount_source=EXCLUDED.amount_source,
 		project_code=EXCLUDED.project_code, participants=EXCLUDED.participants, updated_at=now()`,
-		item.ID, item.ClaimID, item.ReceiptID, item.ReceiptType, item.ExpenseCategory, item.CategorySource, item.Purpose, item.PurposeSource, item.AmountCent, item.AmountSource, item.ProjectCode, participants)
+		item.ID, item.ClaimID, item.ReceiptID, item.ReceiptType, item.ClassificationStatus, item.ClassificationVersion, item.ExpenseCategory, item.CategorySource, item.Purpose, item.PurposeSource, item.AmountCent, item.AmountSource, item.ProjectCode, participants)
 	return err
 }
 
 func advanceExpenseItemClaim(ctx context.Context, tx pgx.Tx, claimID, actorID string, version int64) error {
 	_, err := tx.Exec(ctx, `UPDATE reimbursement.claims AS claim
 		SET version=claim.version+1, updated_at=now(),
+		purpose=CASE WHEN claim.purpose_source='AUTO' THEN COALESCE((
+			SELECT string_agg(DISTINCT item.purpose, '、' ORDER BY item.purpose) FROM reimbursement.expense_items AS item
+			JOIN reimbursement.receipts AS receipt ON receipt.id=item.receipt_id
+			WHERE item.claim_id=claim.id AND receipt.status='EXTRACTED' AND item.purpose <> ''
+		), '') ELSE claim.purpose END,
 		requested_amount_cent=CASE WHEN claim.requested_amount_source='OCR_SUGGESTED' THEN (
 			SELECT sum(item.amount_cent) FROM reimbursement.expense_items AS item
 			JOIN reimbursement.receipts AS receipt ON receipt.id=item.receipt_id

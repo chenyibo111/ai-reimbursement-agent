@@ -128,6 +128,7 @@ func (service *ClaimService) CreateClaim(ctx context.Context, actorID string, co
 	}
 	if _, enabled := service.itemizedEmployees[actorID]; enabled {
 		claim.ItemizationMode = domain.ClaimItemizationModeItemized
+		if claim.Purpose == "" { claim.PurposeSource = "AUTO" }
 	}
 	if err := service.repository.Create(ctx, claim, ClaimAudit{ClaimID: claim.ID, ActorID: actorID, Action: "CLAIM_DRAFT_CREATED", Version: claim.Version}, ClaimOutboxEvent{ClaimID: claim.ID, Type: "ClaimDraftCreated", Version: claim.Version}); err != nil {
 		return ClaimView{}, fmt.Errorf("persist draft claim: %w", err)

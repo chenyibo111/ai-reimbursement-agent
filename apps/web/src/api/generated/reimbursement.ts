@@ -38,6 +38,8 @@ export interface ExpenseItem {
 	claimId: string;
 	receiptId: string;
 	receiptType: string;
+	classificationStatus?: "PENDING" | "CLASSIFIED" | "UNKNOWN" | "FAILED" | "CATEGORY_UNMAPPED";
+	classificationVersion?: string;
 	expenseCategory: string;
 	categorySource: "" | "MODEL" | "MANUAL";
 	purpose: string;

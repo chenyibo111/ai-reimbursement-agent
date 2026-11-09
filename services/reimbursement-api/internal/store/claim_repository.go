@@ -35,10 +35,13 @@ func (repository *PostgresClaimRepository) Create(ctx context.Context, claim dom
 	if err != nil {
 		return fmt.Errorf("encode participants: %w", err)
 	}
+	if claim.PurposeSource == "" {
+		claim.PurposeSource = "MANUAL"
+	}
 	if _, err = tx.Exec(ctx, `
-		INSERT INTO reimbursement.claims (id, claim_number, owner_id, status, purpose, expense_category, participants, project_code, requested_amount_cent, currency, requested_amount_source, remark, version, created_at, updated_at, itemization_mode)
-		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7::jsonb, NULLIF($8, ''), $9, $10, $11, NULLIF($12, ''), $13, $14, $15, $16)
-	`, claim.ID, claim.ClaimNumber, claim.OwnerID, claim.Status, claim.Purpose, claim.ExpenseCategory, participants, claim.ProjectCode, claim.RequestedAmountCent, claim.Currency, claim.RequestedAmountSource, claim.Remark, claim.Version, claim.CreatedAt, claim.UpdatedAt, claim.ItemizationMode); err != nil {
+		INSERT INTO reimbursement.claims (id, claim_number, owner_id, status, purpose, expense_category, participants, project_code, requested_amount_cent, currency, requested_amount_source, remark, version, created_at, updated_at, itemization_mode, purpose_source)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7::jsonb, NULLIF($8, ''), $9, $10, $11, NULLIF($12, ''), $13, $14, $15, $16, $17)
+	`, claim.ID, claim.ClaimNumber, claim.OwnerID, claim.Status, claim.Purpose, claim.ExpenseCategory, participants, claim.ProjectCode, claim.RequestedAmountCent, claim.Currency, claim.RequestedAmountSource, claim.Remark, claim.Version, claim.CreatedAt, claim.UpdatedAt, claim.ItemizationMode, claim.PurposeSource); err != nil {
 		return fmt.Errorf("insert claim: %w", err)
 	}
 	if err = writeClaimAuditAndEvent(ctx, tx, audit, event); err != nil {
@@ -54,7 +57,7 @@ func (repository *PostgresClaimRepository) FindOwned(ctx context.Context, claimI
 	claim, err := scanClaim(repository.pool.QueryRow(ctx, `
 		SELECT claim.id, claim.claim_number, claim.owner_id, claim.status, claim.purpose, claim.expense_category, claim.participants, claim.project_code,
 		       claim.requested_amount_cent, claim.currency, claim.requested_amount_source, claim.remark,
-		       claim.version, claim.created_at, claim.updated_at, claim.itemization_mode,
+		       claim.version, claim.created_at, claim.updated_at, claim.itemization_mode, claim.purpose_source,
 		       summary.receipt_count, summary.recognized_receipt_count, summary.total_amount_cent, summary.missing_amount_receipt_count
 		FROM reimbursement.claims AS claim
 		LEFT JOIN LATERAL (
@@ -123,7 +126,7 @@ func scanClaim(row claimRow) (domain.Claim, error) {
 	var remark *string
 	err := row.Scan(
 		&claim.ID, &claim.ClaimNumber, &claim.OwnerID, &claim.Status, &claim.Purpose, &expenseCategory, &participants,
-		&projectCode, &claim.RequestedAmountCent, &claim.Currency, &claim.RequestedAmountSource, &remark, &claim.Version, &claim.CreatedAt, &claim.UpdatedAt, &claim.ItemizationMode,
+		&projectCode, &claim.RequestedAmountCent, &claim.Currency, &claim.RequestedAmountSource, &remark, &claim.Version, &claim.CreatedAt, &claim.UpdatedAt, &claim.ItemizationMode, &claim.PurposeSource,
 		&claim.ReceiptCount, &claim.RecognizedReceiptCount, &claim.TotalAmountCent, &claim.MissingAmountReceiptCount,
 	)
 	if err != nil {
@@ -148,7 +151,7 @@ func (repository *PostgresClaimRepository) ListOwned(ctx context.Context, actorI
 	rows, err := repository.pool.Query(ctx, `
 		SELECT claim.id, claim.claim_number, claim.owner_id, claim.status, claim.purpose, claim.expense_category, claim.participants, claim.project_code,
 		       claim.requested_amount_cent, claim.currency, claim.requested_amount_source, claim.remark,
-		       claim.version, claim.created_at, claim.updated_at, claim.itemization_mode,
+		       claim.version, claim.created_at, claim.updated_at, claim.itemization_mode, claim.purpose_source,
 		       summary.receipt_count, summary.recognized_receipt_count, summary.total_amount_cent, summary.missing_amount_receipt_count
 		FROM reimbursement.claims AS claim
 		LEFT JOIN LATERAL (
@@ -305,11 +308,11 @@ func (repository *PostgresClaimRepository) Update(ctx context.Context, claim dom
 	}
 	result, err := tx.Exec(ctx, `
 		UPDATE reimbursement.claims
-		SET purpose = $4, expense_category = NULLIF($5, ''), participants = $6::jsonb,
+		SET purpose = $4, purpose_source = $14, expense_category = NULLIF($5, ''), participants = $6::jsonb,
 		    project_code = NULLIF($7, ''), requested_amount_cent = $8, currency = $9,
 		    requested_amount_source = $10, remark = NULLIF($11, ''), version = $12, updated_at = $13
 		WHERE id = $1 AND owner_id = $2 AND status = 'DRAFT' AND version = $3
-	`, claim.ID, claim.OwnerID, expectedVersion, claim.Purpose, claim.ExpenseCategory, participants, claim.ProjectCode, claim.RequestedAmountCent, claim.Currency, claim.RequestedAmountSource, claim.Remark, claim.Version, claim.UpdatedAt)
+	`, claim.ID, claim.OwnerID, expectedVersion, claim.Purpose, claim.ExpenseCategory, participants, claim.ProjectCode, claim.RequestedAmountCent, claim.Currency, claim.RequestedAmountSource, claim.Remark, claim.Version, claim.UpdatedAt, claim.PurposeSource)
 	if err != nil {
 		return fmt.Errorf("update claim: %w", err)
 	}
@@ -346,19 +349,24 @@ func (repository *PostgresClaimRepository) RefreshOCRSuggestion(ctx context.Cont
 				) ELSE (
 					SELECT sum(receipt.total_amount_cent) FROM reimbursement.receipts AS receipt
 					WHERE receipt.claim_id = source.id AND receipt.status = 'EXTRACTED'
-				) END AS requested_amount_cent
+				) END AS requested_amount_cent,
+				(SELECT string_agg(DISTINCT item.purpose, '、' ORDER BY item.purpose)
+				 FROM reimbursement.expense_items AS item
+				 JOIN reimbursement.receipts AS receipt ON receipt.id = item.receipt_id
+				 WHERE item.claim_id = source.id AND receipt.status = 'EXTRACTED' AND item.purpose <> '') AS purpose
 			FROM reimbursement.claims AS source WHERE source.id = $1
 		)
 		UPDATE reimbursement.claims AS claim
-		SET requested_amount_cent = suggestion.requested_amount_cent,
+		SET requested_amount_cent = CASE WHEN claim.requested_amount_source = 'OCR_SUGGESTED' THEN suggestion.requested_amount_cent ELSE claim.requested_amount_cent END,
+		    purpose = CASE WHEN claim.itemization_mode = 'ITEMIZED' AND claim.purpose_source = 'AUTO' THEN COALESCE(suggestion.purpose, '') ELSE claim.purpose END,
 		    version = claim.version + 1,
 		    updated_at = now()
 		FROM suggestion
 		WHERE claim.id = suggestion.id
 		  AND claim.owner_id = $2
 		  AND claim.status = 'DRAFT'
-		  AND claim.requested_amount_source = 'OCR_SUGGESTED'
-		  AND claim.requested_amount_cent IS DISTINCT FROM suggestion.requested_amount_cent
+		  AND ((claim.requested_amount_source = 'OCR_SUGGESTED' AND claim.requested_amount_cent IS DISTINCT FROM suggestion.requested_amount_cent)
+		    OR (claim.itemization_mode = 'ITEMIZED' AND claim.purpose_source = 'AUTO' AND claim.purpose IS DISTINCT FROM COALESCE(suggestion.purpose, '')))
 		RETURNING claim.version
 	`, claimID, actorID).Scan(&version)
 	if errors.Is(err, pgx.ErrNoRows) {

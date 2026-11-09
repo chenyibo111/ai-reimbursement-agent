@@ -51,6 +51,7 @@ describe("ClaimApplicationForm", () => {
     expect(form.queryByLabelText("费用类别")).toBeNull();
     await user.click(form.getByRole("button", { name: "保存草稿" }));
     expect(reimbursementApi.updateClaim).toHaveBeenCalledWith("claim-1", expect.not.objectContaining({ expenseCategory: expect.anything() }));
+    expect(reimbursementApi.updateClaim).toHaveBeenCalledWith("claim-1", expect.not.objectContaining({ purpose: expect.anything() }));
     expect(reimbursementApi.updateClaim).toHaveBeenCalledWith("claim-1", expect.not.objectContaining({ requestedAmountCent: expect.anything() }));
   });
   it("lets an employee set the expense category needed by published category rules", async () => {

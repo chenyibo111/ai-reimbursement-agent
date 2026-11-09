@@ -620,12 +620,14 @@ components:
         updatedAt: { type: string, format: date-time }
     ExpenseItem:
       type: object
-      required: [id, claimId, receiptId, receiptType, expenseCategory, categorySource, purpose, purposeSource, amountCent, amountSource, projectCode, participants]
+      required: [id, claimId, receiptId, receiptType, classificationStatus, classificationVersion, expenseCategory, categorySource, purpose, purposeSource, amountCent, amountSource, projectCode, participants]
       properties:
         id: { type: string }
         claimId: { type: string }
         receiptId: { type: string }
         receiptType: { type: string }
+        classificationStatus: { type: string, enum: [PENDING, CLASSIFIED, UNKNOWN, FAILED, CATEGORY_UNMAPPED] }
+        classificationVersion: { type: string }
         expenseCategory: { type: string }
         categorySource: { type: string, enum: ["", MODEL, MANUAL] }
         purpose: { type: string }

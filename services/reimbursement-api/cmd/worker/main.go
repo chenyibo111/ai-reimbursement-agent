@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -68,6 +69,21 @@ func main() {
 		application.SecureIDGenerator{}, application.ReceiptServiceOptions{AllowDuplicateContentForTesting: allowDuplicateContentForTesting, AllowDuplicateSubmittedInvoiceForTesting: allowDuplicateSubmittedInvoiceForTesting}, claimRepository,
 	)
 	receiptService.SetExpenseItemSuggester(store.NewPostgresExpenseItemRepository(pool))
+	if os.Getenv("MODEL_PROVIDER") == "openai-compatible" {
+		baseURL, model := strings.TrimSpace(os.Getenv("MODEL_BASE_URL")), strings.TrimSpace(os.Getenv("MODEL_NAME"))
+		if baseURL == "" || model == "" {
+			log.Fatal("MODEL_BASE_URL and MODEL_NAME are required for receipt classification")
+		}
+		timeout := 10 * time.Second
+		if raw := strings.TrimSpace(os.Getenv("MODEL_TIMEOUT_MS")); raw != "" {
+			milliseconds, parseErr := strconv.Atoi(raw)
+			if parseErr != nil || milliseconds < 1 || milliseconds > 30000 {
+				log.Fatal("MODEL_TIMEOUT_MS must be between 1 and 30000")
+			}
+			timeout = time.Duration(milliseconds) * time.Millisecond
+		}
+		receiptService.SetReceiptClassifier(infrastructure.NewHTTPReceiptClassifier(baseURL, model, os.Getenv("MODEL_PROVIDER_API_KEY"), timeout), store.NewPostgresSubmissionRepository(pool))
+	}
 	receiptWorker := workers.NewReceiptExtractionWorker(
 		events.NewPostgresEventDeduplicator(pool, workers.ReceiptOCRConsumer),
 		workers.NewApplicationReceiptExtractor(receipts, receiptService),

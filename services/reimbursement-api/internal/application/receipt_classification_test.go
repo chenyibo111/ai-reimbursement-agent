@@ -1,6 +1,9 @@
 package application
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestResolveClassificationUsesPublishedCategoryWhitelist(t *testing.T) {
 	text := "滴滴出行 网约车运输服务"
@@ -11,5 +14,16 @@ func TestResolveClassificationUsesPublishedCategoryWhitelist(t *testing.T) {
 	defaultCategory := ResolveClassification("TAXI", "网约车运输服务", "MEDIUM", text, nil)
 	if defaultCategory.ExpenseCategory != "市内交通费" {
 		t.Fatalf("default category=%q", defaultCategory.ExpenseCategory)
+	}
+}
+
+func TestAllowedReceiptCategoriesIntersectsPublishedRules(t *testing.T) {
+	policy := &PolicyVersion{Rules: []PolicyRule{
+		{Type: "CATEGORY_ALLOWED", Config: json.RawMessage(`{"categories":["市内交通费","餐饮费"]}`)},
+		{Type: "CATEGORY_ALLOWED", Config: json.RawMessage(`{"categories":["餐饮费","住宿费"]}`)},
+	}}
+	categories, err := AllowedReceiptCategories(policy)
+	if err != nil || len(categories) != 1 || categories[0] != "餐饮费" {
+		t.Fatalf("categories=%v err=%v", categories, err)
 	}
 }

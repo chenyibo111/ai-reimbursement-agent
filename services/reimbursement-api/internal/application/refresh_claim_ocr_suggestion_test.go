@@ -2,7 +2,9 @@ package application
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/domain"
 )
@@ -41,6 +43,36 @@ func TestExtractReceiptCreatesExpenseItemForItemizedClaim(t *testing.T) {
 	}
 }
 
+func TestExtractReceiptClassifiesItemizedReceiptWithoutChangingOCRAmount(t *testing.T) {
+	amount := int64(3800)
+	items := &recordingExpenseItemSuggester{}
+	repository := &fakeReceiptRepository{receipts: map[string]domain.Receipt{"taxi": {ID: "taxi", ClaimID: "claim-1", OwnerID: "employee-1", ObjectKey: "receipts/taxi", Status: domain.ReceiptStatusReadyForOCR}}, submittedInvoiceNumbers: map[string]bool{}}
+	service := NewReceiptService(itemizedClaimReader{}, repository, &fakeObjectStore{objects: map[string]StoredObject{"receipts/taxi": {ContentType: "image/png", Content: validPNG()}}}, &fakeScanner{}, &fakeOCRClient{result: OCRResult{Text: "滴滴出行 网约车运输服务", TotalAmountCent: &amount, Confidence: 0.98}}, NewSequentialIDGenerator())
+	service.SetExpenseItemSuggester(items)
+	service.SetReceiptClassifier(fakeReceiptClassifier{suggestion: ClassificationSuggestion{ReceiptType: "TAXI", ExpenseCategory: "市内交通费", Purpose: "市内出行打车费"}}, fakeActivePolicyReader{})
+	if err := service.ExtractReceipt(context.Background(), "employee-1", "claim-1", "taxi"); err != nil {
+		t.Fatal(err)
+	}
+	if items.calls != 1 || items.suggestion.ClassificationStatus != "CLASSIFIED" || items.suggestion.ReceiptType != "TAXI" || items.suggestion.ExpenseCategory != "市内交通费" || items.suggestion.Purpose != "市内出行打车费" || items.suggestion.AmountCent == nil || *items.suggestion.AmountCent != 3800 {
+		t.Fatalf("suggestion=%+v", items.suggestion)
+	}
+}
+
+func TestExtractReceiptKeepsOCRAmountWhenModelFails(t *testing.T) {
+	amount := int64(5200)
+	items := &recordingExpenseItemSuggester{}
+	repository := &fakeReceiptRepository{receipts: map[string]domain.Receipt{"dining": {ID: "dining", ClaimID: "claim-1", OwnerID: "employee-1", ObjectKey: "receipts/dining", Status: domain.ReceiptStatusReadyForOCR}}, submittedInvoiceNumbers: map[string]bool{}}
+	service := NewReceiptService(itemizedClaimReader{}, repository, &fakeObjectStore{objects: map[string]StoredObject{"receipts/dining": {ContentType: "image/png", Content: validPNG()}}}, &fakeScanner{}, &fakeOCRClient{result: OCRResult{Text: "餐饮服务", TotalAmountCent: &amount, Confidence: 0.98}}, NewSequentialIDGenerator())
+	service.SetExpenseItemSuggester(items)
+	service.SetReceiptClassifier(fakeReceiptClassifier{err: errors.New("model unavailable")}, fakeActivePolicyReader{})
+	if err := service.ExtractReceipt(context.Background(), "employee-1", "claim-1", "dining"); err != nil {
+		t.Fatal(err)
+	}
+	if items.calls != 1 || items.suggestion.ClassificationStatus != "FAILED" || items.suggestion.ReceiptType != "" || items.suggestion.ExpenseCategory != "" || items.suggestion.AmountCent == nil || *items.suggestion.AmountCent != 5200 {
+		t.Fatalf("suggestion=%+v", items.suggestion)
+	}
+}
+
 type itemizedClaimReader struct{ fakeClaimReader }
 
 func (itemizedClaimReader) FindOwned(_ context.Context, claimID, actorID string) (domain.Claim, error) {
@@ -48,18 +80,35 @@ func (itemizedClaimReader) FindOwned(_ context.Context, claimID, actorID string)
 }
 
 type recordingExpenseItemSuggester struct {
-	calls     int
-	receiptID string
-	amount    int64
+	calls      int
+	receiptID  string
+	amount     int64
+	suggestion domain.ExpenseItemSuggestion
 }
 
 func (suggester *recordingExpenseItemSuggester) UpsertFromOCR(_ context.Context, _ string, receiptID string, suggestion domain.ExpenseItemSuggestion) (domain.ExpenseItem, error) {
 	suggester.calls++
+	suggester.suggestion = suggestion
 	suggester.receiptID = receiptID
 	if suggestion.AmountCent != nil {
 		suggester.amount = *suggestion.AmountCent
 	}
 	return domain.ExpenseItem{ReceiptID: receiptID}, nil
+}
+
+type fakeReceiptClassifier struct {
+	suggestion ClassificationSuggestion
+	err        error
+}
+
+func (classifier fakeReceiptClassifier) Classify(context.Context, OCRResult, []string) (ClassificationSuggestion, error) {
+	return classifier.suggestion, classifier.err
+}
+
+type fakeActivePolicyReader struct{}
+
+func (fakeActivePolicyReader) LoadActivePolicy(context.Context, time.Time) (*PolicyVersion, error) {
+	return nil, nil
 }
 
 type recordingOCRSuggestionRefresher struct {

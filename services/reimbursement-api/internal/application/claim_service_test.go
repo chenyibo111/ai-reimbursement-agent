@@ -81,7 +81,7 @@ func TestCreateClaimItemizesOnlyAllowedEmployees(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if allowed.ItemizationMode != domain.ClaimItemizationModeItemized || other.ItemizationMode != domain.ClaimItemizationModeLegacy {
+	if allowed.ItemizationMode != domain.ClaimItemizationModeItemized || allowed.PurposeSource != "AUTO" || other.ItemizationMode != domain.ClaimItemizationModeLegacy || other.PurposeSource != "MANUAL" {
 		t.Fatalf("unexpected modes: allowed=%s other=%s", allowed.ItemizationMode, other.ItemizationMode)
 	}
 }

@@ -104,6 +104,10 @@ type ExpenseItemSuggester interface {
 	UpsertFromOCR(context.Context, string, string, domain.ExpenseItemSuggestion) (domain.ExpenseItem, error)
 }
 
+type ActivePolicyReader interface {
+	LoadActivePolicy(context.Context, time.Time) (*PolicyVersion, error)
+}
+
 type ClaimReader interface {
 	FindOwned(context.Context, string, string) (domain.Claim, error)
 }
@@ -131,12 +135,19 @@ type ReceiptService struct {
 	ids                                      IDGenerator
 	suggestions                              ClaimOCRSuggestionRefresher
 	expenseItems                             ExpenseItemSuggester
+	classifier                               ReceiptClassifier
+	classificationPolicy                     ActivePolicyReader
 	allowDuplicateContentForTesting          bool
 	allowDuplicateSubmittedInvoiceForTesting bool
 }
 
 func (service *ReceiptService) SetExpenseItemSuggester(items ExpenseItemSuggester) {
 	service.expenseItems = items
+}
+
+func (service *ReceiptService) SetReceiptClassifier(classifier ReceiptClassifier, policy ActivePolicyReader) {
+	service.classifier = classifier
+	service.classificationPolicy = policy
 }
 
 // ReceiptServiceOptions contains explicitly opt-in runtime behavior.
@@ -380,7 +391,8 @@ func (service *ReceiptService) ExtractReceipt(ctx context.Context, actorID strin
 		if service.expenseItems == nil {
 			return errors.New("expense item repository is not configured")
 		}
-		if _, err := service.expenseItems.UpsertFromOCR(ctx, actorID, receiptID, domain.ExpenseItemSuggestion{AmountCent: result.TotalAmountCent}); err != nil {
+		suggestion := service.classifyExpenseItem(ctx, result)
+		if _, err := service.expenseItems.UpsertFromOCR(ctx, actorID, receiptID, suggestion); err != nil {
 			return fmt.Errorf("persist OCR expense item: %w", err)
 		}
 	}
@@ -390,6 +402,45 @@ func (service *ReceiptService) ExtractReceipt(ctx context.Context, actorID strin
 		}
 	}
 	return nil
+}
+
+func (service *ReceiptService) classifyExpenseItem(ctx context.Context, result OCRResult) domain.ExpenseItemSuggestion {
+	suggestion := domain.ExpenseItemSuggestion{AmountCent: result.TotalAmountCent, ClassificationStatus: "PENDING"}
+	if service.classifier == nil || service.classificationPolicy == nil {
+		return suggestion
+	}
+	suggestion.ClassificationStatus = "UNKNOWN"
+	if result.Text == "" {
+		return suggestion
+	}
+	policy, err := service.classificationPolicy.LoadActivePolicy(ctx, time.Now())
+	if err != nil {
+		suggestion.ClassificationStatus = "FAILED"
+		return suggestion
+	}
+	allowedCategories, err := AllowedReceiptCategories(policy)
+	if err != nil {
+		suggestion.ClassificationStatus = "FAILED"
+		return suggestion
+	}
+	classified, err := service.classifier.Classify(ctx, result, allowedCategories)
+	if err != nil {
+		suggestion.ClassificationStatus = "FAILED"
+		return suggestion
+	}
+	suggestion.ReceiptType = classified.ReceiptType
+	suggestion.ExpenseCategory = classified.ExpenseCategory
+	suggestion.Purpose = classified.Purpose
+	suggestion.ClassificationVersion = classified.Version
+	switch {
+	case classified.ReceiptType == ReceiptTypeUnknown:
+		suggestion.ClassificationStatus = "UNKNOWN"
+	case classified.ExpenseCategory == "":
+		suggestion.ClassificationStatus = "CATEGORY_UNMAPPED"
+	default:
+		suggestion.ClassificationStatus = "CLASSIFIED"
+	}
+	return suggestion
 }
 
 func validateUploadMetadata(command CreateUploadSessionCommand) error {

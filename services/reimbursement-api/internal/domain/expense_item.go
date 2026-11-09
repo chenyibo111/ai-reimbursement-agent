@@ -9,25 +9,29 @@ const (
 )
 
 type ExpenseItem struct {
-	ID              string
-	ClaimID         string
-	ReceiptID       string
-	ReceiptType     string
-	ExpenseCategory string
-	CategorySource  FieldSource
-	Purpose         string
-	PurposeSource   FieldSource
-	AmountCent      *int64
-	AmountSource    FieldSource
-	ProjectCode     string
-	Participants    []string
+	ID                    string
+	ClaimID               string
+	ReceiptID             string
+	ReceiptType           string
+	ClassificationStatus  string
+	ClassificationVersion string
+	ExpenseCategory       string
+	CategorySource        FieldSource
+	Purpose               string
+	PurposeSource         FieldSource
+	AmountCent            *int64
+	AmountSource          FieldSource
+	ProjectCode           string
+	Participants          []string
 }
 
 type ExpenseItemSuggestion struct {
-	ReceiptType     string
-	ExpenseCategory string
-	Purpose         string
-	AmountCent      *int64
+	ReceiptType           string
+	ClassificationStatus  string
+	ClassificationVersion string
+	ExpenseCategory       string
+	Purpose               string
+	AmountCent            *int64
 }
 
 type ExpenseItemPatch struct {
@@ -39,6 +43,10 @@ type ExpenseItemPatch struct {
 }
 
 func (item *ExpenseItem) ApplySuggestion(suggestion ExpenseItemSuggestion) {
+	if suggestion.ClassificationStatus != "" {
+		item.ClassificationStatus = suggestion.ClassificationStatus
+		item.ClassificationVersion = suggestion.ClassificationVersion
+	}
 	if suggestion.ReceiptType != "" {
 		item.ReceiptType = suggestion.ReceiptType
 	}

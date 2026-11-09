@@ -77,7 +77,7 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 		setAmountError("");
 		return {
 			version: claim.version,
-			purpose: purpose.trim(),
+			...(!isItemized || purpose.trim() !== (claim.purpose ?? "") ? { purpose: purpose.trim() } : {}),
 			...(!isItemized ? { expenseCategory: expenseCategory.trim(), projectCode: projectCode.trim(), participants: parseParticipants(participantsText) } : {}),
 			...(parsed && (!isItemized || parsed.cents !== claim.requestedAmountCent) ? { requestedAmountCent: parsed.cents } : {}),
 			currency: "CNY",
