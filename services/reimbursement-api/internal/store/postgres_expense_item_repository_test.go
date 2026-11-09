@@ -1,0 +1,104 @@
+package store
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/domain"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+func TestExpenseItemUpsertPreservesManualCategoryAndOneRowPerReceipt(t *testing.T) {
+	databaseURL := os.Getenv("TEST_REIMBURSEMENT_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_REIMBURSEMENT_DATABASE_URL is not configured")
+	}
+	ctx := context.Background()
+	testURL, adminURL, databaseName := isolatedDatabaseURLs(t, databaseURL)
+	admin, err := pgx.Connect(ctx, adminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		defer admin.Close(ctx)
+		_, _ = admin.Exec(ctx, "DROP DATABASE IF EXISTS "+pgx.Identifier{databaseName}.Sanitize()+" WITH (FORCE)")
+	})
+	if _, err = admin.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{databaseName}.Sanitize()); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := pgx.Connect(ctx, testURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applyMigrationsThrough(t, ctx, conn, filepath.Join("..", "..", "db", "migrations"), "000019")
+	_ = conn.Close(ctx)
+	pool, err := pgxpool.New(ctx, testURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	_, err = pool.Exec(ctx, `INSERT INTO reimbursement.employees(id, display_name) VALUES ('employee-1','One'),('employee-2','Two')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = pool.Exec(ctx, `INSERT INTO reimbursement.claims(id, owner_id, purpose, itemization_mode) VALUES ('claim-1','employee-1','','ITEMIZED')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = pool.Exec(ctx, `INSERT INTO reimbursement.receipts(id, claim_id, owner_id, filename, content_type, expected_size, object_key, status) VALUES ('receipt-1','claim-1','employee-1','taxi.pdf','application/pdf',100,'test/receipt-1','EXTRACTED')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := NewPostgresExpenseItemRepository(pool)
+	amount := int64(3800)
+	first, err := repository.UpsertFromOCR(ctx, "employee-1", "receipt-1", domain.ExpenseItemSuggestion{ReceiptType: "TAXI", ExpenseCategory: "交通费", Purpose: "市内出行打车费", AmountCent: &amount})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manualCategory := "市内交通费"
+	var version int64
+	if err = pool.QueryRow(ctx, `SELECT version FROM reimbursement.claims WHERE id='claim-1'`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	_, err = repository.PatchOwnedDraft(ctx, "employee-1", "claim-1", first.ID, version, domain.ExpenseItemPatch{ExpenseCategory: &manualCategory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	amount = 4000
+	_, err = repository.UpsertFromOCR(ctx, "employee-1", "receipt-1", domain.ExpenseItemSuggestion{ReceiptType: "TAXI", ExpenseCategory: "交通费", Purpose: "打车费", AmountCent: &amount})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := repository.ListOwnedByClaim(ctx, "employee-1", "claim-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ExpenseCategory != manualCategory || items[0].AmountCent == nil || *items[0].AmountCent != 4000 {
+		t.Fatalf("unexpected items: %+v", items)
+	}
+	other, err := repository.ListOwnedByClaim(ctx, "employee-2", "claim-1")
+	if err == nil || other != nil {
+		t.Fatalf("cross-owner read: items=%+v err=%v", other, err)
+	}
+	_, err = pool.Exec(ctx, `INSERT INTO reimbursement.claims(id, owner_id, purpose) VALUES ('legacy-claim','employee-1','旧草稿')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = pool.Exec(ctx, `INSERT INTO reimbursement.receipts(id, claim_id, owner_id, filename, content_type, expected_size, object_key, status, total_amount_cent) VALUES ('legacy-receipt','legacy-claim','employee-1','old.pdf','application/pdf',100,'test/legacy-receipt','EXTRACTED',1200)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = repository.ConvertOwnedDraft(ctx, "employee-1", "legacy-claim"); err != nil {
+		t.Fatal(err)
+	}
+	legacyItems, err := repository.ListOwnedByClaim(ctx, "employee-1", "legacy-claim")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(legacyItems) != 1 || legacyItems[0].AmountCent == nil || *legacyItems[0].AmountCent != 1200 || legacyItems[0].ExpenseCategory != "" || legacyItems[0].Purpose != "" {
+		t.Fatalf("legacy conversion invented fields: %+v", legacyItems)
+	}
+}
