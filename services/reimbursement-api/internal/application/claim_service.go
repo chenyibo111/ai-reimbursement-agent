@@ -91,11 +91,21 @@ type IDGenerator interface {
 }
 
 type ClaimService struct {
-	repository  ClaimRepository
-	suggestions ClaimOCRSuggestionRefresher
-	ids         IDGenerator
-	numbers     ClaimNumberGenerator
-	now         func() time.Time
+	repository        ClaimRepository
+	suggestions       ClaimOCRSuggestionRefresher
+	itemizedEmployees map[string]struct{}
+	ids               IDGenerator
+	numbers           ClaimNumberGenerator
+	now               func() time.Time
+}
+
+func (service *ClaimService) SetItemizedEmployeeIDs(ids []string) {
+	service.itemizedEmployees = make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if id = strings.TrimSpace(id); id != "" {
+			service.itemizedEmployees[id] = struct{}{}
+		}
+	}
 }
 
 func NewClaimService(repository ClaimRepository, ids IDGenerator, numbers ClaimNumberGenerator, now func() time.Time, suggestions ...ClaimOCRSuggestionRefresher) *ClaimService {
@@ -114,6 +124,9 @@ func (service *ClaimService) CreateClaim(ctx context.Context, actorID string, co
 	claim, err := domain.NewDraftClaim(service.ids.Next(), claimNumber, actorID, command.Purpose)
 	if err != nil {
 		return ClaimView{}, err
+	}
+	if _, enabled := service.itemizedEmployees[actorID]; enabled {
+		claim.ItemizationMode = domain.ClaimItemizationModeItemized
 	}
 	if err := service.repository.Create(ctx, claim, ClaimAudit{ClaimID: claim.ID, ActorID: actorID, Action: "CLAIM_DRAFT_CREATED", Version: claim.Version}, ClaimOutboxEvent{ClaimID: claim.ID, Type: "ClaimDraftCreated", Version: claim.Version}); err != nil {
 		return ClaimView{}, fmt.Errorf("persist draft claim: %w", err)

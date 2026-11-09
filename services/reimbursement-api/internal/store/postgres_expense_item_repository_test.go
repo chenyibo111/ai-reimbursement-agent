@@ -67,6 +67,13 @@ func TestExpenseItemUpsertPreservesManualCategoryAndOneRowPerReceipt(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	var requestedAfterPatch *int64
+	if err = pool.QueryRow(ctx, `SELECT requested_amount_cent FROM reimbursement.claims WHERE id='claim-1'`).Scan(&requestedAfterPatch); err != nil {
+		t.Fatal(err)
+	}
+	if requestedAfterPatch == nil || *requestedAfterPatch != 3800 {
+		t.Fatalf("amount after item patch=%v", requestedAfterPatch)
+	}
 	amount = 4000
 	_, err = repository.UpsertFromOCR(ctx, "employee-1", "receipt-1", domain.ExpenseItemSuggestion{ReceiptType: "TAXI", ExpenseCategory: "交通费", Purpose: "打车费", AmountCent: &amount})
 	if err != nil {
@@ -78,6 +85,16 @@ func TestExpenseItemUpsertPreservesManualCategoryAndOneRowPerReceipt(t *testing.
 	}
 	if len(items) != 1 || items[0].ExpenseCategory != manualCategory || items[0].AmountCent == nil || *items[0].AmountCent != 4000 {
 		t.Fatalf("unexpected items: %+v", items)
+	}
+	if err = NewPostgresClaimRepository(pool).RefreshOCRSuggestion(ctx, "claim-1", "employee-1"); err != nil {
+		t.Fatal(err)
+	}
+	var requested *int64
+	if err = pool.QueryRow(ctx, `SELECT requested_amount_cent FROM reimbursement.claims WHERE id='claim-1'`).Scan(&requested); err != nil {
+		t.Fatal(err)
+	}
+	if requested == nil || *requested != 4000 {
+		t.Fatalf("itemized requested amount=%v, want 4000", requested)
 	}
 	other, err := repository.ListOwnedByClaim(ctx, "employee-2", "claim-1")
 	if err == nil || other != nil {

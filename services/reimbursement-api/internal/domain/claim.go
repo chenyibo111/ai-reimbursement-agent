@@ -16,6 +16,7 @@ var (
 type ClaimStatus string
 
 type RequestedAmountSource string
+type ClaimItemizationMode string
 
 const (
 	ClaimStatusDraft               ClaimStatus           = "DRAFT"
@@ -23,6 +24,8 @@ const (
 	RequestedAmountSourceSuggested RequestedAmountSource = "OCR_SUGGESTED"
 	RequestedAmountSourceManual    RequestedAmountSource = "MANUAL"
 	ClaimCurrencyCNY                                     = "CNY"
+	ClaimItemizationModeLegacy     ClaimItemizationMode  = "LEGACY"
+	ClaimItemizationModeItemized   ClaimItemizationMode  = "ITEMIZED"
 	MaxClaimRemarkRunes                                  = 1000
 )
 
@@ -31,6 +34,7 @@ type Claim struct {
 	ClaimNumber               string
 	OwnerID                   string
 	Status                    ClaimStatus
+	ItemizationMode           ClaimItemizationMode
 	Purpose                   string
 	ExpenseCategory           string
 	Participants              []string
@@ -71,6 +75,7 @@ func NewDraftClaim(id string, claimNumber string, ownerID string, purpose string
 		ClaimNumber:           claimNumber,
 		OwnerID:               ownerID,
 		Status:                ClaimStatusDraft,
+		ItemizationMode:       ClaimItemizationModeLegacy,
 		Purpose:               strings.TrimSpace(purpose),
 		Currency:              ClaimCurrencyCNY,
 		RequestedAmountSource: RequestedAmountSourceSuggested,

@@ -99,6 +99,10 @@ type OCRClient interface {
 	Extract(context.Context, StoredObject) (OCRResult, error)
 }
 
+type ExpenseItemSuggester interface {
+	UpsertFromOCR(context.Context, string, string, domain.ExpenseItemSuggestion) (domain.ExpenseItem, error)
+}
+
 type ClaimReader interface {
 	FindOwned(context.Context, string, string) (domain.Claim, error)
 }
@@ -125,8 +129,13 @@ type ReceiptService struct {
 	ocr                                      OCRClient
 	ids                                      IDGenerator
 	suggestions                              ClaimOCRSuggestionRefresher
+	expenseItems                             ExpenseItemSuggester
 	allowDuplicateContentForTesting          bool
 	allowDuplicateSubmittedInvoiceForTesting bool
+}
+
+func (service *ReceiptService) SetExpenseItemSuggester(items ExpenseItemSuggester) {
+	service.expenseItems = items
 }
 
 // ReceiptServiceOptions contains explicitly opt-in runtime behavior.
@@ -361,6 +370,18 @@ func (service *ReceiptService) ExtractReceipt(ctx context.Context, actorID strin
 	}
 	if err := service.repository.MarkExtracted(ctx, receipt.ID, result); err != nil {
 		return fmt.Errorf("persist ocr result: %w", err)
+	}
+	claim, err := service.claims.FindOwned(ctx, claimID, actorID)
+	if err != nil {
+		return fmt.Errorf("find claim for OCR item: %w", err)
+	}
+	if claim.ItemizationMode == domain.ClaimItemizationModeItemized {
+		if service.expenseItems == nil {
+			return errors.New("expense item repository is not configured")
+		}
+		if _, err := service.expenseItems.UpsertFromOCR(ctx, actorID, receiptID, domain.ExpenseItemSuggestion{AmountCent: result.TotalAmountCent}); err != nil {
+			return fmt.Errorf("persist OCR expense item: %w", err)
+		}
 	}
 	if service.suggestions != nil {
 		if err := service.suggestions.RefreshOCRSuggestion(ctx, claimID, actorID); err != nil {

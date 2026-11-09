@@ -70,6 +70,22 @@ func TestCreateClaimAssignsDraftToActor(t *testing.T) {
 	}
 }
 
+func TestCreateClaimItemizesOnlyAllowedEmployees(t *testing.T) {
+	service := newClaimServiceForTest(NewMemoryClaimRepository())
+	service.SetItemizedEmployeeIDs([]string{"employee-1"})
+	allowed, err := service.CreateClaim(context.Background(), "employee-1", CreateClaimCommand{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := service.CreateClaim(context.Background(), "employee-2", CreateClaimCommand{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allowed.ItemizationMode != domain.ClaimItemizationModeItemized || other.ItemizationMode != domain.ClaimItemizationModeLegacy {
+		t.Fatalf("unexpected modes: allowed=%s other=%s", allowed.ItemizationMode, other.ItemizationMode)
+	}
+}
+
 func TestCreateClaimAllowsAnIncompleteDraft(t *testing.T) {
 	service := newClaimServiceForTest(NewMemoryClaimRepository())
 

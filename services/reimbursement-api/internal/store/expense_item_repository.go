@@ -222,7 +222,14 @@ func saveExpenseItem(ctx context.Context, tx pgx.Tx, item domain.ExpenseItem) er
 }
 
 func advanceExpenseItemClaim(ctx context.Context, tx pgx.Tx, claimID, actorID string, version int64) error {
-	_, err := tx.Exec(ctx, `UPDATE reimbursement.claims SET version=version+1, updated_at=now() WHERE id=$1`, claimID)
+	_, err := tx.Exec(ctx, `UPDATE reimbursement.claims AS claim
+		SET version=claim.version+1, updated_at=now(),
+		requested_amount_cent=CASE WHEN claim.requested_amount_source='OCR_SUGGESTED' THEN (
+			SELECT sum(item.amount_cent) FROM reimbursement.expense_items AS item
+			JOIN reimbursement.receipts AS receipt ON receipt.id=item.receipt_id
+			WHERE item.claim_id=claim.id AND receipt.status='EXTRACTED'
+		) ELSE claim.requested_amount_cent END
+		WHERE claim.id=$1`, claimID)
 	if err != nil {
 		return err
 	}

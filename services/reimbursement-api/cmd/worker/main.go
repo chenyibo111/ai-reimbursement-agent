@@ -67,6 +67,7 @@ func main() {
 		infrastructure.NewClamAVScanner(clamAddress), infrastructure.NewHTTPReceiptOCRClient(ocrURL),
 		application.SecureIDGenerator{}, application.ReceiptServiceOptions{AllowDuplicateContentForTesting: allowDuplicateContentForTesting, AllowDuplicateSubmittedInvoiceForTesting: allowDuplicateSubmittedInvoiceForTesting}, claimRepository,
 	)
+	receiptService.SetExpenseItemSuggester(store.NewPostgresExpenseItemRepository(pool))
 	receiptWorker := workers.NewReceiptExtractionWorker(
 		events.NewPostgresEventDeduplicator(pool, workers.ReceiptOCRConsumer),
 		workers.NewApplicationReceiptExtractor(receipts, receiptService),

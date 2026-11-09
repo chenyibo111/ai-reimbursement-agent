@@ -120,8 +120,10 @@ func main() {
 			log.Fatalf("configure policy source administration: %v", err)
 		}
 	}
+	claimService := application.NewClaimService(claimRepository, application.SecureIDGenerator{}, store.NewPostgresClaimNumberGenerator(pool), time.Now, ocrSuggestionRefresher)
+	claimService.SetItemizedEmployeeIDs(strings.Split(os.Getenv("REIMBURSEMENT_ITEMIZED_EMPLOYEE_IDS"), ","))
 	router := transport.NewRouter(transport.Dependencies{
-		Claims:             application.NewClaimService(claimRepository, application.SecureIDGenerator{}, store.NewPostgresClaimNumberGenerator(pool), time.Now, ocrSuggestionRefresher),
+		Claims:             claimService,
 		Submissions:        submissionService,
 		Progress:           application.NewClaimProgressService(store.NewPostgresClaimProgressRepository(pool), submissionService),
 		Receipts:           application.NewReceiptServiceWithOptions(claimRepository, receiptRepository, objects, infrastructure.NewClamAVScanner(clamAddress), infrastructure.NewHTTPReceiptOCRClient(ocrURL), application.SecureIDGenerator{}, application.ReceiptServiceOptions{AllowDuplicateContentForTesting: allowDuplicateContentForTesting, AllowDuplicateSubmittedInvoiceForTesting: allowDuplicateSubmittedInvoiceForTesting}, ocrSuggestionRefresher),
