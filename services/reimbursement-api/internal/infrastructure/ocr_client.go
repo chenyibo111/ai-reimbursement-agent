@@ -71,5 +71,17 @@ func (client *HTTPReceiptOCRClient) Extract(ctx context.Context, object applicat
 	if len(payload.Pages) > 0 {
 		confidence /= float64(len(payload.Pages))
 	}
-	return parseOCRReceipt(text.String(), confidence), nil
+	fullText := text.String()
+	result := parseOCRReceipt(fullText, confidence)
+	result.Text = boundedOCRText(fullText)
+	return result, nil
+}
+
+func boundedOCRText(value string) string {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\x00", ""))
+	runes := []rune(value)
+	if len(runes) > 8_000 {
+		runes = runes[:8_000]
+	}
+	return string(runes)
 }

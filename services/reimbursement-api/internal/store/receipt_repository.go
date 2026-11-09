@@ -233,9 +233,9 @@ func (repository *PostgresReceiptRepository) TransitionToReview(ctx context.Cont
 	} else if _, err := tx.Exec(ctx, `
 		UPDATE reimbursement.receipts
 		SET invoice_number = NULLIF($2, ''), invoice_date = $3, total_amount_cent = $4,
-		    seller_name = NULLIF($5::text, ''), ocr_confidence = $6, status = 'REVIEW_REQUIRED', updated_at = now()
+		    seller_name = NULLIF($5::text, ''), ocr_confidence = $6, ocr_text = $7, status = 'REVIEW_REQUIRED', updated_at = now()
 		WHERE id = $1
-	`, receiptID, ocrResult.InvoiceNumber, ocrResult.InvoiceDate, ocrResult.TotalAmountCent, ocrResult.SellerName, ocrResult.Confidence); err != nil {
+	`, receiptID, ocrResult.InvoiceNumber, ocrResult.InvoiceDate, ocrResult.TotalAmountCent, ocrResult.SellerName, ocrResult.Confidence, ocrResult.Text); err != nil {
 		return fmt.Errorf("persist reviewable OCR candidate: %w", err)
 	}
 
@@ -292,9 +292,9 @@ func (repository *PostgresReceiptRepository) MarkExtracted(ctx context.Context, 
 		update, err := tx.Exec(ctx, `
 			UPDATE reimbursement.receipts
 			SET invoice_number = NULLIF($2, ''), invoice_date = $3, total_amount_cent = $4,
-			    seller_name = NULLIF($5::text, ''), ocr_confidence = $6, status = 'EXTRACTED', updated_at = now()
+			    seller_name = NULLIF($5::text, ''), ocr_confidence = $6, ocr_text = $7, status = 'EXTRACTED', updated_at = now()
 			WHERE id = $1
-		`, receiptID, result.InvoiceNumber, result.InvoiceDate, result.TotalAmountCent, result.SellerName, result.Confidence)
+		`, receiptID, result.InvoiceNumber, result.InvoiceDate, result.TotalAmountCent, result.SellerName, result.Confidence, result.Text)
 		if err != nil {
 			return "", "", err
 		}

@@ -88,6 +88,7 @@ type FileScanner interface {
 }
 
 type OCRResult struct {
+	Text            string
 	InvoiceNumber   string
 	InvoiceDate     *time.Time
 	TotalAmountCent *int64

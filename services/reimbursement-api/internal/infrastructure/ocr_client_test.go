@@ -31,7 +31,7 @@ func TestHTTPReceiptOCRClientPreservesMimeAndExtractsInvoiceNumber(t *testing.T)
 	if err != nil {
 		t.Fatalf("extract receipt: %v", err)
 	}
-	if result.InvoiceNumber != "INV-123456" || result.Confidence != 0.92 {
+	if result.InvoiceNumber != "INV-123456" || result.Confidence != 0.92 || result.Text != "发票号码：INV-123456" {
 		t.Fatalf("unexpected ocr result: %#v", result)
 	}
 }
