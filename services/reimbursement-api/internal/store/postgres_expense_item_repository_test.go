@@ -2,10 +2,12 @@ package store
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/application"
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/domain"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -66,6 +68,10 @@ func TestExpenseItemUpsertPreservesManualCategoryAndOneRowPerReceipt(t *testing.
 	_, err = repository.PatchOwnedDraft(ctx, "employee-1", "claim-1", first.ID, version, domain.ExpenseItemPatch{ExpenseCategory: &manualCategory})
 	if err != nil {
 		t.Fatal(err)
+	}
+	_, err = repository.PatchOwnedDraft(ctx, "employee-1", "claim-1", first.ID, version, domain.ExpenseItemPatch{ExpenseCategory: &manualCategory})
+	if !errors.Is(err, application.ErrClaimVersionConflict) {
+		t.Fatalf("stale item update: %v", err)
 	}
 	var requestedAfterPatch *int64
 	if err = pool.QueryRow(ctx, `SELECT requested_amount_cent FROM reimbursement.claims WHERE id='claim-1'`).Scan(&requestedAfterPatch); err != nil {

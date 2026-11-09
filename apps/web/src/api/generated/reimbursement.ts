@@ -7,6 +7,10 @@ export type ReceiptStatus = "UPLOAD_PENDING" | "READY_FOR_OCR" | "EXTRACTED" | "
 
 export interface Claim {
   id: string;
+	itemizationMode?: "LEGACY" | "ITEMIZED";
+	expenseItems?: ExpenseItem[];
+	expenseCategories?: string[];
+	expenseItemTotalAmountCent?: number | null;
 	claimNumber: string;
   ownerId?: string;
   status: ClaimStatus;
@@ -27,6 +31,30 @@ export interface Claim {
 	remark: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ExpenseItem {
+	id: string;
+	claimId: string;
+	receiptId: string;
+	receiptType: string;
+	expenseCategory: string;
+	categorySource: "" | "MODEL" | "MANUAL";
+	purpose: string;
+	purposeSource: "" | "MODEL" | "MANUAL";
+	amountCent: number | null;
+	amountSource: "" | "OCR" | "MANUAL";
+	projectCode: string;
+	participants: string[];
+}
+
+export interface ExpenseItemPatch {
+	version: number;
+	expenseCategory?: string;
+	purpose?: string;
+	amountCent?: number;
+	projectCode?: string;
+	participants?: string[];
 }
 
 export type ClaimSearchQuery = {
@@ -74,6 +102,8 @@ export interface ValidationIssue {
   code: string;
   severity: "BLOCKING" | "WARNING";
   message: string;
+  itemId?: string;
+  receiptId?: string;
   policyVersionId?: string;
   ruleCode?: string;
 }

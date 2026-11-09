@@ -200,7 +200,8 @@ func (repository *PostgresClaimRepository) SearchOwned(ctx context.Context, acto
 		conditions = append(conditions, fmt.Sprintf("purpose ILIKE $%d ESCAPE '\\'", len(args)))
 	}
 	if query.ExpenseCategory != "" {
-		add("expense_category", query.ExpenseCategory, "=")
+		args = append(args, query.ExpenseCategory)
+		conditions = append(conditions, fmt.Sprintf(`(itemization_mode = 'LEGACY' AND expense_category = $%d OR itemization_mode = 'ITEMIZED' AND EXISTS (SELECT 1 FROM reimbursement.expense_items item WHERE item.claim_id = reimbursement.claims.id AND item.expense_category = $%d))`, len(args), len(args)))
 	}
 	if query.MinRequestedAmountCent != nil {
 		add("requested_amount_cent", *query.MinRequestedAmountCent, ">=")

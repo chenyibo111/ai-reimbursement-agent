@@ -1,4 +1,4 @@
-import type { Claim, ClaimPatch, ClaimSearchPage, ClaimSearchQuery, Receipt, ReceiptPreview, ResolveReviewCaseInput, ReviewCase, SubmissionRequest, SubmissionSnapshot, ValidationResult } from "./generated/reimbursement";
+import type { Claim, ClaimPatch, ClaimSearchPage, ClaimSearchQuery, ExpenseItemPatch, Receipt, ReceiptPreview, ResolveReviewCaseInput, ReviewCase, SubmissionRequest, SubmissionSnapshot, ValidationResult } from "./generated/reimbursement";
 
 export class ReimbursementApiError extends Error {
   constructor(
@@ -58,6 +58,7 @@ export function createReimbursementApi(tokenProvider: TokenProvider, deps: ApiCl
       return request<ClaimSearchPage>(`/api/v1/claims?${params}`);
     },
     getClaim: (claimId: string) => request<Claim>(`/api/v1/claims/${encodeURIComponent(claimId)}`),
+		updateExpenseItem: (claimId: string, itemId: string, patch: ExpenseItemPatch) => request<Claim>(`/api/v1/claims/${encodeURIComponent(claimId)}/items/${encodeURIComponent(itemId)}`, { method: "PATCH", body: patch, idempotent: true }),
 		updateClaim: (claimId: string, patch: ClaimPatch) => request<Claim>(`/api/v1/claims/${encodeURIComponent(claimId)}`, { method: "PATCH", body: patch, idempotent: true }),
     listReceipts: (claimId: string) => request<{ items: Receipt[] }>(`/api/v1/claims/${encodeURIComponent(claimId)}/receipts`),
     deleteReceipt: (claimId: string, receiptId: string) => request<void>(`/api/v1/claims/${encodeURIComponent(claimId)}/receipts/${encodeURIComponent(receiptId)}`, { method: "DELETE", idempotent: true }),

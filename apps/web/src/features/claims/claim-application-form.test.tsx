@@ -10,6 +10,8 @@ import { ClaimApplicationForm, parseCNYAmountToCent } from "./claim-application-
 vi.mock("../../api/client", () => ({
   reimbursementApi: {
     updateClaim: vi.fn(),
+    requestSubmission: vi.fn(),
+    submit: vi.fn(),
   },
 }));
 
@@ -28,6 +30,29 @@ function renderForm(claim: Claim = manualClaim) {
 }
 
 describe("ClaimApplicationForm", () => {
+  it("requires an itemized amount summary confirmation before submitting", async () => {
+    const user = userEvent.setup();
+    const claim: Claim = { ...manualClaim, itemizationMode: "ITEMIZED", expenseItems: [{ id: "item-1", receiptId: "receipt-1", claimId: "claim-1", receiptType: "TAXI", expenseCategory: "交通费", categorySource: "MANUAL", purpose: "市内出行打车费", purposeSource: "MODEL", amountCent: 10155, amountSource: "OCR", projectCode: "", participants: [] }] };
+    const { container } = renderForm(claim);
+    const form = within(container);
+    vi.mocked(reimbursementApi.requestSubmission).mockResolvedValue({ claimId: claim.id, claimVersion: claim.version, policyVersion: "1", expiresAt: "2026-11-09T12:00:00Z", confirmationToken: "token-1", warnings: [] });
+    await user.click(form.getByRole("button", { name: "提交报销单" }));
+    expect(await form.findByText(/申请金额.*￥99.99/)).toBeVisible();
+    expect(form.getByText(/明细合计.*￥101.55/)).toBeVisible();
+    expect(form.getByText(/差额.*￥1.56/)).toBeVisible();
+    expect(reimbursementApi.submit).not.toHaveBeenCalled();
+    await user.click(form.getByRole("button", { name: "确认提交" }));
+    expect(reimbursementApi.submit).toHaveBeenCalledWith("claim-1", "token-1");
+  });
+  it("saves an itemized draft without writing whole-claim category fields", async () => {
+    const user = userEvent.setup();
+    const { container } = renderForm({ ...manualClaim, itemizationMode: "ITEMIZED", expenseItems: [] });
+    const form = within(container);
+    expect(form.queryByLabelText("费用类别")).toBeNull();
+    await user.click(form.getByRole("button", { name: "保存草稿" }));
+    expect(reimbursementApi.updateClaim).toHaveBeenCalledWith("claim-1", expect.not.objectContaining({ expenseCategory: expect.anything() }));
+    expect(reimbursementApi.updateClaim).toHaveBeenCalledWith("claim-1", expect.not.objectContaining({ requestedAmountCent: expect.anything() }));
+  });
   it("lets an employee set the expense category needed by published category rules", async () => {
     const user = userEvent.setup();
     const { container } = renderForm();

@@ -295,6 +295,42 @@ paths:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/claims/{claimId}/items/{itemId}:
+    patch:
+      operationId: patchExpenseItem
+      summary: Update one expense item on an actor-owned itemized draft
+      parameters:
+        - $ref: "#/components/parameters/ClaimId"
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: "#/components/parameters/Idempotency-Key"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              additionalProperties: false
+              properties:
+                version: { type: integer, minimum: 1 }
+                expenseCategory: { type: string }
+                purpose: { type: string }
+                amountCent: { type: integer, format: int64, minimum: 0 }
+                projectCode: { type: string }
+                participants:
+                  type: array
+                  items: { type: string }
+      responses:
+        "200":
+          description: Updated actor-owned claim with expense items
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Claim" }
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/claims/{claimId}/uploads:
     post:
       operationId: createUploadSession
@@ -533,6 +569,16 @@ components:
           type: [string, "null"]
         ownerId: { type: string }
         expenseCategory: { type: [string, "null"] }
+        itemizationMode: { type: string, enum: [LEGACY, ITEMIZED] }
+        expenseCategories:
+          type: array
+          items: { type: string }
+        expenseItems:
+          type: array
+          items: { $ref: "#/components/schemas/ExpenseItem" }
+        expenseItemTotalAmountCent:
+          type: [integer, "null"]
+          description: Sum of item amounts when every expense item has an amount.
         participants:
           type: array
           items: { type: string }
@@ -572,6 +618,24 @@ components:
           maxLength: 1000
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    ExpenseItem:
+      type: object
+      required: [id, claimId, receiptId, receiptType, expenseCategory, categorySource, purpose, purposeSource, amountCent, amountSource, projectCode, participants]
+      properties:
+        id: { type: string }
+        claimId: { type: string }
+        receiptId: { type: string }
+        receiptType: { type: string }
+        expenseCategory: { type: string }
+        categorySource: { type: string, enum: ["", MODEL, MANUAL] }
+        purpose: { type: string }
+        purposeSource: { type: string, enum: ["", MODEL, MANUAL] }
+        amountCent: { type: [integer, "null"], format: int64 }
+        amountSource: { type: string, enum: ["", OCR, MANUAL] }
+        projectCode: { type: string }
+        participants:
+          type: array
+          items: { type: string }
     Receipt:
       type: object
       required: [id, claimId, filename, status, closedByReview, ocrConfidence, updatedAt]
@@ -652,6 +716,8 @@ components:
         ruleCode:
           type: string
           description: Set for a published Go policy rule issue.
+        itemId: { type: string }
+        receiptId: { type: string }
     SubmissionRequest:
       type: object
       required: [confirmationToken, claimId, claimVersion, policyVersion, expiresAt, warnings]

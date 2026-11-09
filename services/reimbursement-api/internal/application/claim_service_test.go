@@ -86,6 +86,19 @@ func TestCreateClaimItemizesOnlyAllowedEmployees(t *testing.T) {
 	}
 }
 
+func TestItemizedClaimRejectsWholeClaimCategoryWrite(t *testing.T) {
+	service := newClaimServiceForTest(NewMemoryClaimRepository())
+	service.SetItemizedEmployeeIDs([]string{"employee-1"})
+	claim, err := service.CreateClaim(context.Background(), "employee-1", CreateClaimCommand{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	category := "交通费"
+	if _, err := service.UpdateClaim(context.Background(), "employee-1", claim.ID, claim.Version, PatchClaimCommand{ExpenseCategory: &category}); !errors.Is(err, ErrItemizedFieldsRequireItem) {
+		t.Fatalf("whole-claim category write=%v", err)
+	}
+}
+
 func TestCreateClaimAllowsAnIncompleteDraft(t *testing.T) {
 	service := newClaimServiceForTest(NewMemoryClaimRepository())
 

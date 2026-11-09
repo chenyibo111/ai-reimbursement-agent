@@ -34,18 +34,16 @@ describe("NewClaimPage", () => {
 
     expect(screen.getByLabelText(/报销事由/)).toBeVisible();
     expect(screen.getByLabelText("申请报销总额")).toBeVisible();
-    expect(screen.getByLabelText("费用类别")).toBeVisible();
+    expect(screen.queryByLabelText("费用类别")).toBeNull();
     expect(reimbursementApi.createClaim).not.toHaveBeenCalled();
 
     await user.type(screen.getByLabelText(/报销事由/), "客户午餐招待");
     await user.type(screen.getByLabelText("申请报销总额"), "128.50");
-    await user.type(screen.getByLabelText("费用类别"), "住宿费");
-    await user.type(screen.getByLabelText("项目编码"), "PROJ-42");
-    await user.type(screen.getByLabelText("同行人"), "张三，李四");
     await user.click(screen.getByRole("button", { name: "保存草稿" }));
 
     await waitFor(() => expect(reimbursementApi.createClaim).toHaveBeenCalledWith("客户午餐招待"));
-    await waitFor(() => expect(reimbursementApi.updateClaim).toHaveBeenCalledWith("claim-new", expect.objectContaining({ version: 1, requestedAmountCent: 12850, expenseCategory: "住宿费", projectCode: "PROJ-42", participants: ["张三", "李四"] })));
+    await waitFor(() => expect(reimbursementApi.updateClaim).toHaveBeenCalledWith("claim-new", expect.objectContaining({ version: 1, requestedAmountCent: 12850 })));
+    expect(reimbursementApi.updateClaim).toHaveBeenCalledWith("claim-new", expect.not.objectContaining({ expenseCategory: expect.anything() }));
   });
 
   it("opens the created draft if saving the remaining fields fails", async () => {

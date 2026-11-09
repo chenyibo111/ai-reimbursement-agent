@@ -42,9 +42,14 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 	const [submissionIssues, setSubmissionIssues] = useState<ValidationIssue[]>([]);
 	const [submissionError, setSubmissionError] = useState("");
 	const [isSubmitting, setSubmitting] = useState(false);
+	const [pendingConfirmation, setPendingConfirmation] = useState<{ token: string; version: number; amountCent: number | null; itemTotalCent: number; warnings: ValidationIssue[] } | null>(null);
 	const [isEditing, setIsEditing] = useState(false);
 	const isDraft = claim.status === "DRAFT";
+	const isItemized = claim.itemizationMode === "ITEMIZED";
 	const difference = useMemo(() => claim.requestedAmountCent === null || recognizedAmountCent === null ? null : claim.requestedAmountCent - recognizedAmountCent, [claim.requestedAmountCent, recognizedAmountCent]);
+	useEffect(() => {
+		if (pendingConfirmation && claim.version > pendingConfirmation.version) setPendingConfirmation(null);
+	}, [claim.version, pendingConfirmation]);
 
 	useEffect(() => {
 		if (isEditing) return;
@@ -58,6 +63,7 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 	}, [claim.id, claim.version, claim.purpose, claim.expenseCategory, claim.projectCode, claim.participants, claim.requestedAmountCent, claim.remark, isEditing]);
 
 	function markEdited() {
+		setPendingConfirmation(null);
 		setIsEditing(true);
 	}
 
@@ -72,10 +78,8 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 		return {
 			version: claim.version,
 			purpose: purpose.trim(),
-			expenseCategory: expenseCategory.trim(),
-			projectCode: projectCode.trim(),
-			participants: parseParticipants(participantsText),
-			...(parsed ? { requestedAmountCent: parsed.cents } : {}),
+			...(!isItemized ? { expenseCategory: expenseCategory.trim(), projectCode: projectCode.trim(), participants: parseParticipants(participantsText) } : {}),
+			...(parsed && (!isItemized || parsed.cents !== claim.requestedAmountCent) ? { requestedAmountCent: parsed.cents } : {}),
 			currency: "CNY",
 			remark: remark.trim() || null,
 		};
@@ -97,6 +101,7 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 	}
 
 	async function handleSave() {
+		setPendingConfirmation(null);
 		setSubmissionIssues([]);
 		setSubmissionError("");
 		try {
@@ -108,6 +113,7 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 
 	async function handleSubmit(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault();
+		if (pendingConfirmation) return;
 		setSubmissionIssues([]);
 		setSubmissionError("");
 		setSubmitting(true);
@@ -117,6 +123,10 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 			const confirmation = await reimbursementApi.requestSubmission(claim.id, updated.version);
 			const warnings = confirmation.warnings ?? [];
 			setSubmissionIssues(warnings);
+			if (isItemized) {
+				setPendingConfirmation({ token: confirmation.confirmationToken, version: updated.version, amountCent: updated.requestedAmountCent, itemTotalCent: (updated.expenseItems ?? claim.expenseItems ?? []).reduce((sum, item) => sum + (item.amountCent ?? 0), 0), warnings });
+				return;
+			}
 			await reimbursementApi.submit(claim.id, confirmation.confirmationToken);
 			setSubmissionIssues([]);
 			onSubmitted?.(warnings);
@@ -135,7 +145,24 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 		}
 	}
 
+	async function confirmSubmit() {
+		if (!pendingConfirmation) return;
+		setSubmitting(true);
+		try {
+			await reimbursementApi.submit(claim.id, pendingConfirmation.token);
+			setSubmissionIssues([]);
+			onSubmitted?.(pendingConfirmation.warnings);
+			setPendingConfirmation(null);
+		} catch (error) {
+			setPendingConfirmation(null);
+			setSubmissionError(errorMessage(error));
+		} finally {
+			setSubmitting(false);
+		}
+	}
+
 	function handleRestoreSuggestion() {
+		setPendingConfirmation(null);
 		setAmountError("");
 		mutation.mutate({ version: claim.version, useOcrSuggestedAmount: true }, {
 			onSuccess: (updated) => {
@@ -160,7 +187,7 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 					<input id="claim-purpose" name="purpose" value={purpose} onChange={(event) => { markEdited(); setPurpose(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} placeholder="例如：杭州客户拜访" />
 					<p className="field-hint">简要说明这笔报销对应的业务事项。</p>
 				</div>
-				<div className="field-stack">
+				{!isItemized && <><div className="field-stack">
 					<label htmlFor="claim-expense-category">费用类别</label>
 					<input id="claim-expense-category" name="expenseCategory" value={expenseCategory} onChange={(event) => { markEdited(); setExpenseCategory(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} placeholder="例如：住宿费" />
 					<p className="field-hint">若公司政策设置了类别范围，提交前需填写允许的类别。</p>
@@ -168,7 +195,7 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 				<div className="application-form-grid">
 					<div className="field-stack"><label htmlFor="claim-project-code">项目编码</label><input id="claim-project-code" name="projectCode" value={projectCode} onChange={(event) => { markEdited(); setProjectCode(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} placeholder="有对应项目时填写" /><p className="field-hint">适用的费用类别可能要求填写项目编码。</p></div>
 					<div className="field-stack"><label htmlFor="claim-participants">同行人</label><input id="claim-participants" name="participants" value={participantsText} onChange={(event) => { markEdited(); setParticipantsText(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} placeholder="例如：张三，李四" /><p className="field-hint">多人之间用逗号分隔；适用类别可能要求填写。</p></div>
-				</div>
+				</div></>}
 				<div className="application-form-grid">
 					<div className="field-stack">
 						<label htmlFor="requested-amount">申请报销总额</label>
@@ -196,8 +223,15 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 				<div className="application-form-actions">
 					{claim.requestedAmountSource === "MANUAL" && <button className="secondary-action" type="button" disabled={!isDraft || mutation.isPending || isSubmitting} onClick={handleRestoreSuggestion}>恢复 OCR 建议金额</button>}
 					<button className="secondary-action" type="button" disabled={!isDraft || mutation.isPending || isSubmitting} onClick={() => { void handleSave(); }}>{mutation.isPending ? "正在保存…" : "保存草稿"}</button>
-					<button className="primary-action" type="submit" disabled={!isDraft || mutation.isPending || isSubmitting}>{isSubmitting ? "正在提交…" : "提交报销单"}</button>
+					<button className="primary-action" type="submit" disabled={!isDraft || mutation.isPending || isSubmitting || Boolean(pendingConfirmation)}>{isSubmitting ? "正在提交…" : "提交报销单"}</button>
 				</div>
+				{pendingConfirmation && claim.version <= pendingConfirmation.version && <div className="submission-confirmation" role="alertdialog" aria-label="提交金额确认">
+					<p>申请金额 {pendingConfirmation.amountCent === null ? "待填写" : formatCNYFromCent(pendingConfirmation.amountCent)}</p>
+					<p>明细合计 {formatCNYFromCent(pendingConfirmation.itemTotalCent)}</p>
+					<p>差额 {pendingConfirmation.amountCent === null ? "待确认" : formatCNYFromCent(Math.abs(pendingConfirmation.amountCent - pendingConfirmation.itemTotalCent))}</p>
+					<button className="primary-action" type="button" disabled={isSubmitting} onClick={() => { void confirmSubmit(); }}>确认提交</button>
+					<button className="secondary-action" type="button" disabled={isSubmitting} onClick={() => setPendingConfirmation(null)}>返回修改</button>
+				</div>}
 				{mutation.isError && <p className="field-error" role="alert">{errorMessage(mutation.error)}</p>}
 				{submissionIssues.length > 0 && <ul className="validation-list" role="alert">{submissionIssues.map((issue) => <li key={issue.code} className={issue.severity === "BLOCKING" ? "validation-blocking" : "validation-warning"}>{issue.message}</li>)}</ul>}
 				{submissionError && <p className="field-error" role="alert">{submissionError}</p>}

@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 
 import { reimbursementApi } from "../api/client";
-import { parseCNYAmountToCent, parseParticipants } from "../features/claims/claim-application-form";
+import { parseCNYAmountToCent } from "../features/claims/claim-application-form";
 import { claimKeys } from "../features/claims/use-claim";
 
 function errorMessage(error: unknown) {
@@ -14,9 +14,6 @@ export function NewClaimPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [purpose, setPurpose] = useState("");
-  const [expenseCategory, setExpenseCategory] = useState("");
-  const [projectCode, setProjectCode] = useState("");
-  const [participantsText, setParticipantsText] = useState("");
   const [amountText, setAmountText] = useState("");
   const [remark, setRemark] = useState("");
   const [amountError, setAmountError] = useState("");
@@ -40,9 +37,6 @@ export function NewClaimPage() {
       createdClaimId = created.id;
       const updated = await reimbursementApi.updateClaim(created.id, {
         version: created.version,
-        expenseCategory: expenseCategory.trim(),
-        projectCode: projectCode.trim(),
-        participants: parseParticipants(participantsText),
         ...(parsed ? { requestedAmountCent: parsed.cents } : {}),
         currency: "CNY",
         remark: remark.trim() || null,
@@ -70,7 +64,7 @@ export function NewClaimPage() {
         <Link className="back-link" to="/claims">← 返回我的报销单</Link>
         <p className="eyebrow">新建报销单</p>
         <h1 id="new-claim-title">填写报销申请</h1>
-        <p className="page-summary">填写后选择“保存草稿”才会创建报销单；保存完成即可上传票据，并在同一页面提交。</p>
+        <p className="page-summary">先保存草稿，再到工作台上传票据并补充费用类别、项目编码和同行人。</p>
       </header>
       <section className="workbench-panel claim-application-panel" aria-labelledby="new-claim-form-title">
         <div className="section-heading"><div><p className="eyebrow">申请信息</p><h2 id="new-claim-form-title">报销申请信息</h2></div><span className="status-tag">尚未保存</span></div>
@@ -79,11 +73,6 @@ export function NewClaimPage() {
             <label htmlFor="new-claim-purpose">报销事由 <span className="required-label">（提交必填）</span></label>
             <input id="new-claim-purpose" name="purpose" value={purpose} onChange={(event) => setPurpose(event.target.value)} disabled={isSaving} placeholder="例如：杭州客户拜访" autoFocus />
             <p className="field-hint">简要说明这笔报销对应的业务事项。</p>
-          </div>
-          <div className="field-stack"><label htmlFor="new-claim-expense-category">费用类别</label><input id="new-claim-expense-category" name="expenseCategory" value={expenseCategory} onChange={(event) => setExpenseCategory(event.target.value)} disabled={isSaving} placeholder="例如：住宿费" /><p className="field-hint">若公司政策设置了类别范围，提交前需填写允许的类别。</p></div>
-          <div className="application-form-grid">
-            <div className="field-stack"><label htmlFor="new-claim-project-code">项目编码</label><input id="new-claim-project-code" name="projectCode" value={projectCode} onChange={(event) => setProjectCode(event.target.value)} disabled={isSaving} placeholder="有对应项目时填写" /><p className="field-hint">适用的费用类别可能要求填写项目编码。</p></div>
-            <div className="field-stack"><label htmlFor="new-claim-participants">同行人</label><input id="new-claim-participants" name="participants" value={participantsText} onChange={(event) => setParticipantsText(event.target.value)} disabled={isSaving} placeholder="例如：张三，李四" /><p className="field-hint">多人之间用逗号分隔；适用类别可能要求填写。</p></div>
           </div>
           <div className="application-form-grid">
             <div className="field-stack">

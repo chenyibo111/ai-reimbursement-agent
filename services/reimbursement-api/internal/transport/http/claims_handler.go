@@ -18,10 +18,11 @@ import (
 var claimNumberPattern = regexp.MustCompile(`^BX[0-9]{8}-[0-9]{4,}$`)
 
 type claimsHandler struct {
-	claims      ClaimService
-	submissions SubmissionService
-	progress    ClaimProgressService
-	receipts    ReceiptService
+	claims       ClaimService
+	submissions  SubmissionService
+	progress     ClaimProgressService
+	receipts     ReceiptService
+	expenseItems ExpenseItemService
 }
 
 func (handler *claimsHandler) getClaimProgress(response http.ResponseWriter, request *http.Request) {
@@ -342,7 +343,113 @@ func (handler *claimsHandler) getClaim(response http.ResponseWriter, request *ht
 		writeMappedError(response, err)
 		return
 	}
-	writeJSON(response, http.StatusOK, claimResponse(claim))
+	result, err := handler.claimDetailResponse(request.Context(), actor.ID, claim)
+	if err != nil {
+		writeMappedError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, result)
+}
+
+func (handler *claimsHandler) claimDetailResponse(ctx context.Context, actorID string, claim application.ClaimView) (map[string]any, error) {
+	result := claimResponse(claim)
+	result["expenseItems"] = []any{}
+	result["expenseCategories"] = []string{}
+	result["expenseItemTotalAmountCent"] = nil
+	if claim.ItemizationMode != domain.ClaimItemizationModeItemized {
+		return result, nil
+	}
+	if handler.expenseItems == nil {
+		return nil, errors.New("expense items are not configured")
+	}
+	items, err := handler.expenseItems.ListOwnedByClaim(ctx, actorID, claim.ID)
+	if err != nil {
+		return nil, err
+	}
+	values := make([]map[string]any, 0, len(items))
+	categories := []string{}
+	seen := map[string]bool{}
+	var itemTotal int64
+	completeAmount := len(items) > 0
+	for _, item := range items {
+		values = append(values, expenseItemResponse(item))
+		if item.AmountCent == nil {
+			completeAmount = false
+		} else {
+			itemTotal += *item.AmountCent
+		}
+		if item.ExpenseCategory != "" && !seen[item.ExpenseCategory] {
+			categories = append(categories, item.ExpenseCategory)
+			seen[item.ExpenseCategory] = true
+		}
+	}
+	result["expenseItems"] = values
+	result["expenseCategories"] = categories
+	if completeAmount {
+		result["expenseItemTotalAmountCent"] = itemTotal
+	}
+	if len(categories) == 1 {
+		result["expenseCategory"] = categories[0]
+	} else {
+		result["expenseCategory"] = nil
+	}
+	return result, nil
+}
+
+func expenseItemResponse(item domain.ExpenseItem) map[string]any {
+	return map[string]any{
+		"id": item.ID, "claimId": item.ClaimID, "receiptId": item.ReceiptID,
+		"receiptType": item.ReceiptType, "expenseCategory": item.ExpenseCategory,
+		"categorySource": item.CategorySource, "purpose": item.Purpose, "purposeSource": item.PurposeSource,
+		"amountCent": item.AmountCent, "amountSource": item.AmountSource,
+		"projectCode": item.ProjectCode, "participants": item.Participants,
+	}
+}
+
+func (handler *claimsHandler) patchExpenseItem(response http.ResponseWriter, request *http.Request) {
+	actor, _ := ActorFromContext(request.Context())
+	if handler.expenseItems == nil {
+		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "费用明细暂不可用")
+		return
+	}
+	if strings.TrimSpace(request.Header.Get("Idempotency-Key")) == "" {
+		writeError(response, http.StatusBadRequest, "IDEMPOTENCY_KEY_REQUIRED", "请提供 Idempotency-Key")
+		return
+	}
+	var body struct {
+		Version         int64     `json:"version"`
+		ExpenseCategory *string   `json:"expenseCategory"`
+		Purpose         *string   `json:"purpose"`
+		AmountCent      *int64    `json:"amountCent"`
+		ProjectCode     *string   `json:"projectCode"`
+		Participants    *[]string `json:"participants"`
+	}
+	decoder := json.NewDecoder(request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil || body.Version < 1 {
+		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "费用明细字段或报销单版本无效")
+		return
+	}
+	if body.ExpenseCategory == nil && body.Purpose == nil && body.AmountCent == nil && body.ProjectCode == nil && body.Participants == nil {
+		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "请提供需要修改的明细字段")
+		return
+	}
+	patch := domain.ExpenseItemPatch{ExpenseCategory: body.ExpenseCategory, Purpose: body.Purpose, AmountCent: body.AmountCent, ProjectCode: body.ProjectCode, Participants: body.Participants}
+	if _, err := handler.expenseItems.PatchOwnedDraft(request.Context(), actor.ID, pathClaimID(request), request.PathValue("itemId"), body.Version, patch); err != nil {
+		writeMappedError(response, err)
+		return
+	}
+	claim, err := handler.claims.GetClaim(request.Context(), actor.ID, pathClaimID(request))
+	if err != nil {
+		writeMappedError(response, err)
+		return
+	}
+	result, err := handler.claimDetailResponse(request.Context(), actor.ID, claim)
+	if err != nil {
+		writeMappedError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, result)
 }
 
 func (handler *claimsHandler) deleteClaim(response http.ResponseWriter, request *http.Request) {
@@ -473,6 +580,7 @@ func claimResponse(claim application.ClaimView) map[string]any {
 		"claimNumber":               claim.ClaimNumber,
 		"ownerId":                   claim.OwnerID,
 		"status":                    claim.Status,
+		"itemizationMode":           claim.ItemizationMode,
 		"version":                   claim.Version,
 		"purpose":                   claim.Purpose,
 		"expenseCategory":           claim.ExpenseCategory,
@@ -550,6 +658,12 @@ func validationIssueResponse(issue domain.ValidationIssue, policyVersion string)
 		severity = "BLOCKING"
 	}
 	entry := map[string]any{"code": issue.Code, "severity": severity, "message": issue.Message}
+	if issue.ItemID != "" {
+		entry["itemId"] = issue.ItemID
+	}
+	if issue.ReceiptID != "" {
+		entry["receiptId"] = issue.ReceiptID
+	}
 	if strings.HasPrefix(issue.Code, "POLICY_") {
 		entry["policyVersionId"] = policyVersion
 		entry["ruleCode"] = strings.TrimPrefix(issue.Code, "POLICY_")

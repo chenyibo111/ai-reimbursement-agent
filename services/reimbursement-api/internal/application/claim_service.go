@@ -15,9 +15,10 @@ import (
 )
 
 var (
-	ErrClaimNotFound        = errors.New("claim not found")
-	ErrClaimVersionConflict = errors.New("claim version conflict")
-	ErrValidationBlocked    = errors.New("validation blocked")
+	ErrClaimNotFound             = errors.New("claim not found")
+	ErrClaimVersionConflict      = errors.New("claim version conflict")
+	ErrValidationBlocked         = errors.New("validation blocked")
+	ErrItemizedFieldsRequireItem = errors.New("itemized fields must be edited on an expense item")
 )
 
 type CreateClaimCommand struct {
@@ -155,6 +156,9 @@ func (service *ClaimService) UpdateClaim(ctx context.Context, actorID string, cl
 	}
 	if err != nil {
 		return ClaimView{}, fmt.Errorf("find claim: %w", err)
+	}
+	if claim.ItemizationMode == domain.ClaimItemizationModeItemized && (command.ExpenseCategory != nil || command.ProjectCode != nil || command.Participants != nil) {
+		return ClaimView{}, ErrItemizedFieldsRequireItem
 	}
 	patch := domain.ClaimPatch{
 		Purpose:               command.Purpose,
