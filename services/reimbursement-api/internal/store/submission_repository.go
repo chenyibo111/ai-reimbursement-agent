@@ -30,7 +30,11 @@ func (repository *PostgresSubmissionRepository) LoadSubmissionInput(ctx context.
 	if err != nil {
 		return application.SubmissionInput{}, err
 	}
-	return application.SubmissionInput{Claim: claim, Receipts: receipts}, nil
+	items, err := loadClaimExpenseItems(ctx, repository.pool, claimID)
+	if err != nil {
+		return application.SubmissionInput{}, err
+	}
+	return application.SubmissionInput{Claim: claim, Receipts: receipts, Items: items}, nil
 }
 
 func (repository *PostgresSubmissionRepository) LoadActivePolicy(ctx context.Context, at time.Time) (*application.PolicyVersion, error) {
@@ -127,9 +131,13 @@ func (repository *PostgresSubmissionRepository) Submit(ctx context.Context, inpu
 	}
 	currentVersion := "baseline-v1"
 	var policyIssues []domain.ValidationIssue
+	items, err := loadClaimExpenseItems(ctx, tx, claim.ID)
+	if err != nil {
+		return application.SubmissionSnapshot{}, err
+	}
 	if activePolicy != nil {
 		currentVersion = activePolicy.ID
-		policyIssues, err = application.EvaluatePolicyRules(*activePolicy, claim)
+		policyIssues, err = application.EvaluatePolicyRules(*activePolicy, claim, items)
 		if err != nil {
 			return application.SubmissionSnapshot{}, fmt.Errorf("evaluate policy at submission: %w", err)
 		}
@@ -146,7 +154,7 @@ func (repository *PostgresSubmissionRepository) Submit(ctx context.Context, inpu
 	if err != nil {
 		return application.SubmissionSnapshot{}, err
 	}
-	if blockingSubmissionInput(claim, receipts) {
+	if blockingSubmissionInput(claim, receipts, items) {
 		return application.SubmissionSnapshot{}, application.ErrValidationBlocked
 	}
 
@@ -154,9 +162,10 @@ func (repository *PostgresSubmissionRepository) Submit(ctx context.Context, inpu
 	payload, err := json.Marshal(struct {
 		Claim         domain.Claim             `json:"claim"`
 		Receipts      []domain.Receipt         `json:"receipts"`
+		ExpenseItems  []domain.ExpenseItem     `json:"expenseItems"`
 		PolicyVersion string                   `json:"policyVersion"`
 		PolicyIssues  []domain.ValidationIssue `json:"policyIssues"`
-	}{claim, receipts, policyVersion, policyIssues})
+	}{claim, receipts, items, policyVersion, policyIssues})
 	if err != nil {
 		return application.SubmissionSnapshot{}, fmt.Errorf("marshal submission snapshot: %w", err)
 	}
@@ -214,7 +223,7 @@ func loadOwnedClaim(ctx context.Context, query queryRower, actorID string, claim
 	var projectCode *string
 	var requestedAmountCent *int64
 	var remark *string
-	err := query.QueryRow(ctx, `SELECT id, claim_number, owner_id, status, purpose, expense_category, participants, project_code, requested_amount_cent, currency, requested_amount_source, remark, version, created_at, updated_at FROM reimbursement.claims WHERE id = $1 AND owner_id = $2`+lock, claimID, actorID).Scan(&claim.ID, &claim.ClaimNumber, &claim.OwnerID, &claim.Status, &claim.Purpose, &expenseCategory, &participants, &projectCode, &requestedAmountCent, &claim.Currency, &claim.RequestedAmountSource, &remark, &claim.Version, &claim.CreatedAt, &claim.UpdatedAt)
+	err := query.QueryRow(ctx, `SELECT id, claim_number, owner_id, status, purpose, expense_category, participants, project_code, requested_amount_cent, currency, requested_amount_source, remark, version, created_at, updated_at, itemization_mode FROM reimbursement.claims WHERE id = $1 AND owner_id = $2`+lock, claimID, actorID).Scan(&claim.ID, &claim.ClaimNumber, &claim.OwnerID, &claim.Status, &claim.Purpose, &expenseCategory, &participants, &projectCode, &requestedAmountCent, &claim.Currency, &claim.RequestedAmountSource, &remark, &claim.Version, &claim.CreatedAt, &claim.UpdatedAt, &claim.ItemizationMode)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Claim{}, application.ErrClaimNotFound
 	}
@@ -259,6 +268,25 @@ func loadClaimReceipts(ctx context.Context, query interface {
 	return receipts, nil
 }
 
+func loadClaimExpenseItems(ctx context.Context, query interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}, claimID string) ([]domain.ExpenseItem, error) {
+	rows, err := query.Query(ctx, expenseItemSelect+` WHERE claim_id=$1 ORDER BY receipt_id`, claimID)
+	if err != nil {
+		return nil, fmt.Errorf("load expense items: %w", err)
+	}
+	defer rows.Close()
+	items := []domain.ExpenseItem{}
+	for rows.Next() {
+		item, err := scanExpenseItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func scanSubmissionSnapshot(row receiptRow) (application.SubmissionSnapshot, error) {
 	var snapshot application.SubmissionSnapshot
 	err := row.Scan(&snapshot.ClaimID, &snapshot.SubmissionNumber, &snapshot.ClaimVersion, &snapshot.PolicyVersion, &snapshot.SubmittedAt)
@@ -271,8 +299,11 @@ func scanSubmissionSnapshot(row receiptRow) (application.SubmissionSnapshot, err
 	return snapshot, nil
 }
 
-func blockingSubmissionInput(claim domain.Claim, receipts []domain.Receipt) bool {
+func blockingSubmissionInput(claim domain.Claim, receipts []domain.Receipt, items []domain.ExpenseItem) bool {
 	if claim.Status != domain.ClaimStatusDraft || strings.TrimSpace(claim.Purpose) == "" || claim.RequestedAmountCent == nil || len(receipts) == 0 {
+		return true
+	}
+	if claim.ItemizationMode == domain.ClaimItemizationModeItemized && len(items) != len(receipts) {
 		return true
 	}
 	for _, receipt := range receipts {

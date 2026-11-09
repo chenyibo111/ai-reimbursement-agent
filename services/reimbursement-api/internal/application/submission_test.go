@@ -33,6 +33,19 @@ func TestPublishedPolicyBlocksAndInvalidatesOldConfirmation(t *testing.T) {
 	}
 }
 
+func TestValidateItemizedClaimChecksEachReceiptCategory(t *testing.T) {
+	repository := newFakeSubmissionRepository()
+	amount := int64(9000)
+	repository.claim = domain.Claim{ID: "mixed", OwnerID: "employee-1", Status: domain.ClaimStatusDraft, ItemizationMode: domain.ClaimItemizationModeItemized, Purpose: "市内出行及餐饮费用", RequestedAmountCent: &amount, Version: 3}
+	repository.receipts = []domain.Receipt{{ID: "taxi", Status: domain.ReceiptStatusExtracted}, {ID: "dining", Status: domain.ReceiptStatusExtracted}}
+	repository.items = []domain.ExpenseItem{{ID: "taxi", ReceiptID: "taxi", ExpenseCategory: "交通费", AmountCent: &amount}, {ID: "dining", ReceiptID: "dining", ExpenseCategory: "餐饮费", AmountCent: &amount}}
+	repository.activePolicy = &PolicyVersion{ID: "mixed-policy", EffectiveDate: "2026-10-01", Rules: []PolicyRule{{Code: "PROJECT", Name: "餐饮项目", Type: "CATEGORY_REQUIRED_FIELD", Severity: "BLOCKING", Config: json.RawMessage(`{"category":"餐饮费","field":"projectCode"}`)}}}
+	result, err := NewSubmissionService(repository, fixedClock{now: time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC)}).ValidateClaim(context.Background(), "employee-1", "mixed")
+	if err != nil || len(result.Issues) != 1 || result.Issues[0].ReceiptID != "dining" {
+		t.Fatalf("issues=%+v err=%v", result.Issues, err)
+	}
+}
+
 func TestRequestSubmissionReturnsNonBlockingPolicyWarnings(t *testing.T) {
 	repository := newFakeSubmissionRepository()
 	amount := int64(12000)

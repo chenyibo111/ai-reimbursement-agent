@@ -96,6 +96,10 @@ func TestExpenseItemUpsertPreservesManualCategoryAndOneRowPerReceipt(t *testing.
 	if requested == nil || *requested != 4000 {
 		t.Fatalf("itemized requested amount=%v, want 4000", requested)
 	}
+	submissionInput, err := NewPostgresSubmissionRepository(pool).LoadSubmissionInput(ctx, "employee-1", "claim-1")
+	if err != nil || submissionInput.Claim.ItemizationMode != domain.ClaimItemizationModeItemized || len(submissionInput.Items) != 1 || submissionInput.Items[0].ReceiptID != "receipt-1" {
+		t.Fatalf("submission input=%+v err=%v", submissionInput, err)
+	}
 	other, err := repository.ListOwnedByClaim(ctx, "employee-2", "claim-1")
 	if err == nil || other != nil {
 		t.Fatalf("cross-owner read: items=%+v err=%v", other, err)
