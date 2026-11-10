@@ -4,13 +4,15 @@ import { intentActions } from "@/src/application/evaluate-intent";
 import type { ConversationDecision } from "@/src/infrastructure/model/chat-model";
 import type { ReimbursementToolName } from "@/services/agent/src/tool-gateway/reimbursement-tools";
 
-const toolNames = ["create_claim_draft", "create_upload_session", "finalize_receipt_upload", "delete_owned_receipt", "delete_owned_draft", "get_claim_workbench", "list_owned_claims", "search_owned_claims", "find_owned_claim_by_number", "update_claim_fields", "get_claim_validation", "get_owned_claim_progress", "request_submission_confirmation", "submit_claim"] as const satisfies readonly ReimbursementToolName[];
+const toolNames = ["create_claim_draft", "create_upload_session", "finalize_receipt_upload", "delete_owned_receipt", "delete_owned_draft", "get_claim_workbench", "list_owned_claims", "search_owned_claims", "find_owned_claim_by_number", "update_claim_fields", "update_expense_item", "get_claim_validation", "get_owned_claim_progress", "request_submission_confirmation", "submit_claim"] as const satisfies readonly ReimbursementToolName[];
 const claimSchema = z.object({
   id: z.string().min(1), ownerId: z.string().min(1), claimNumber: z.string().min(1),
   status: z.enum(["DRAFT", "SUBMITTED"]), version: z.number().int().positive(),
   purpose: z.string().nullable(), requestedAmountCent: z.number().int().nonnegative().nullable().optional(),
   totalAmountCent: z.number().int().nonnegative().nullable(),
-  expenseCategory: z.string().optional(), participants: z.array(z.string()).optional(), projectCode: z.string().optional(),
+  expenseCategory: z.string().nullable().optional(), participants: z.array(z.string()).optional(), projectCode: z.string().nullable().optional(),
+  itemizationMode: z.enum(["LEGACY", "ITEMIZED"]).optional(), expenseCategories: z.array(z.string()).optional(), expenseItemTotalAmountCent: z.number().int().nonnegative().nullable().optional(),
+  expenseItems: z.array(z.object({ id: z.string(), receiptId: z.string(), receiptType: z.string(), expenseCategory: z.string(), categorySource: z.string(), purpose: z.string(), purposeSource: z.string(), amountCent: z.number().int().nonnegative().nullable(), amountSource: z.string(), projectCode: z.string(), participants: z.array(z.string()) }).strict()).optional(),
   receipts: z.array(z.object({ id: z.string(), filename: z.string(), status: z.string(), invoiceNumber: z.string().default(""), ocrConfidence: z.number().default(0), totalAmountCent: z.number().int().nonnegative().nullable() }).strict()),
   issues: z.array(z.object({ code: z.string(), severity: z.enum(["BLOCKING", "WARNING"]), message: z.string() }).strict()).optional(),
 }).strict();

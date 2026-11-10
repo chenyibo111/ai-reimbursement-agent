@@ -2,6 +2,18 @@ import { expect, it, vi } from "vitest";
 
 import { ReimbursementApiClient, ReimbursementApiHttpError } from "./reimbursement-api-client";
 
+it("accepts a mixed-category claim and sends an actor-scoped item patch", async () => {
+  const claim = { id: "claim-1", claimNumber: "BX20261110-0001", version: 3, status: "DRAFT", purpose: "打车和餐饮", expenseCategory: null, expenseCategories: ["市内交通费", "餐饮费"], projectCode: null, participants: [], totalAmountCent: 9000, currency: "CNY" };
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({ items: [claim] })).mockResolvedValueOnce(Response.json(claim));
+  const client = new ReimbursementApiClient({ baseUrl: "http://go.test", serviceKey: "key", signingSecret: "secret", fetcher });
+  const context = { actorEmployeeId: "employee-1", actorRole: "EMPLOYEE" as const, channel: "FEISHU" as const, conversationId: "conversation-1", toolCallId: "item-1", idempotencyKey: "item-1" };
+  await expect(client.listOwnedClaims({ ...context, limit: 5 })).resolves.toMatchObject([{ expenseCategory: "", expenseCategories: ["市内交通费", "餐饮费"] }]);
+  await client.updateExpenseItem({ ...context, claimId: "claim-1", itemId: "taxi", version: 3, fields: { expenseCategory: "市内交通费" } });
+  expect(fetcher.mock.calls[1][0]).toBe("http://go.test/api/v1/claims/claim-1/items/taxi");
+  expect(fetcher.mock.calls[1][1]?.method).toBe("PATCH");
+  expect(JSON.parse(String(fetcher.mock.calls[1][1]?.body))).toEqual({ version: 3, expenseCategory: "市内交通费" });
+});
+
 it("reads employee-safe progress through the actor-scoped Go endpoint", async () => {
   const progress = { claimId: "claim-1", claimNumber: "BX20261027-0001", status: "DRAFT", version: 2, submissionNumber: null, submittedAt: null, receipts: [], issues: [], approval: "NOT_CONNECTED", payment: "NOT_CONNECTED" };
   const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json(progress));

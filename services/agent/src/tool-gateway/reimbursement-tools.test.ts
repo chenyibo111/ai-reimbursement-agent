@@ -3,6 +3,16 @@ import { describe, expect, it, vi } from "vitest";
 import { ReimbursementToolGateway, type ToolCallResultStore } from "./reimbursement-tools";
 
 describe("ReimbursementToolGateway", () => {
+  it("updates one expense item with actor identity and rejects an owner override", async () => {
+    const port = { updateExpenseItem: vi.fn().mockResolvedValue({ id: "claim-1", expenseItems: [] }) };
+    const store: ToolCallResultStore = { findCompleted: vi.fn().mockResolvedValue(null), saveCompleted: vi.fn() };
+    const gateway = new ReimbursementToolGateway(port as never, store);
+    const call = { actorEmployeeId: "employee-1", actorRole: "EMPLOYEE" as const, channel: "FEISHU" as const, conversationId: "conversation-1", toolCallId: "item-1", idempotencyKey: "item-1", name: "update_expense_item" as const, arguments: { claimId: "claim-1", itemId: "taxi", version: 3, expenseCategory: "市内交通费" } };
+    await gateway.execute(call);
+    expect(port.updateExpenseItem).toHaveBeenCalledWith(expect.objectContaining({ actorEmployeeId: "employee-1", claimId: "claim-1", itemId: "taxi", version: 3, fields: { expenseCategory: "市内交通费" } }));
+    await expect(gateway.execute({ ...call, arguments: { ...call.arguments, ownerId: "employee-2" } })).rejects.toThrow();
+    await expect(gateway.execute({ ...call, arguments: { ...call.arguments, version: 0 } })).rejects.toThrow();
+  });
   it("rejects owner overrides on progress reads", async () => {
     const port = { getOwnedClaimProgress: vi.fn().mockResolvedValue({ claimId: "claim-1" }) };
     const store: ToolCallResultStore = { findCompleted: vi.fn().mockResolvedValue(null), saveCompleted: vi.fn() };

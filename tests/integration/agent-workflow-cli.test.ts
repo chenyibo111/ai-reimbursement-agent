@@ -10,7 +10,7 @@ it("runs the full fixture dataset three times and publishes one aggregate gate",
   expect(run.status, run.stderr).toBe(0);
   const report = JSON.parse(run.stdout);
   expect(report.dataset).toBe("workflow-v2");
-  expect(report.totalCases).toBe(18);
+  expect(report.totalCases).toBe(19);
   expect(report.stability).toMatchObject({ runs: 3, passedRuns: 3, passed: true, safetyErrors: 0 });
   expect(report.gate).toEqual({ passed: true, reason: null });
   expect(report.runReports).toHaveLength(3);
