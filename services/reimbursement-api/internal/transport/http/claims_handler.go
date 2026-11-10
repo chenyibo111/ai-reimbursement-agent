@@ -359,20 +359,33 @@ func (handler *claimsHandler) claimDetailResponse(ctx context.Context, actorID s
 	if claim.ItemizationMode != domain.ClaimItemizationModeItemized {
 		return result, nil
 	}
-	if handler.expenseItems == nil {
-		return nil, errors.New("expense items are not configured")
+	if handler.expenseItems == nil || handler.receipts == nil {
+		return nil, errors.New("expense items or receipts are not configured")
 	}
 	items, err := handler.expenseItems.ListOwnedByClaim(ctx, actorID, claim.ID)
 	if err != nil {
 		return nil, err
 	}
+	receipts, err := handler.receipts.ListReceipts(ctx, actorID, claim.ID)
+	if err != nil {
+		return nil, err
+	}
+	activeReceipts := make(map[string]bool, len(receipts))
+	for _, receipt := range receipts {
+		activeReceipts[receipt.ID] = receipt.Status == domain.ReceiptStatusExtracted
+	}
 	values := make([]map[string]any, 0, len(items))
 	categories := []string{}
 	seen := map[string]bool{}
 	var itemTotal int64
-	completeAmount := len(items) > 0
+	completeAmount := true
+	activeItemCount := 0
 	for _, item := range items {
 		values = append(values, expenseItemResponse(item))
+		if !activeReceipts[item.ReceiptID] {
+			continue
+		}
+		activeItemCount++
 		if item.AmountCent == nil {
 			completeAmount = false
 		} else {
@@ -385,7 +398,7 @@ func (handler *claimsHandler) claimDetailResponse(ctx context.Context, actorID s
 	}
 	result["expenseItems"] = values
 	result["expenseCategories"] = categories
-	if completeAmount {
+	if completeAmount && activeItemCount > 0 {
 		result["expenseItemTotalAmountCent"] = itemTotal
 	}
 	if len(categories) == 1 {

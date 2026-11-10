@@ -72,12 +72,23 @@ func TestClaimResponseIncludesSavedSubmissionWarnings(t *testing.T) {
 }
 
 func TestItemizedClaimResponseIncludesTwoExpenseCategories(t *testing.T) {
-	router := NewRouter(Dependencies{Claims: itemizedFakeClaims{}, ExpenseItems: fakeExpenseItems{}, Auth: StaticActorResolver{}})
+	router := NewRouter(Dependencies{Claims: itemizedFakeClaims{}, ExpenseItems: fakeExpenseItems{}, Receipts: itemizedFakeReceipts{}, Auth: StaticActorResolver{}})
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/claims/claim-1", nil)
 	request.Header.Set("Authorization", "Bearer employee-1")
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"expenseCategories":["交通费","餐饮费"]`) || !strings.Contains(response.Body.String(), `"expenseItemTotalAmountCent":9000`) || !strings.Contains(response.Body.String(), `"receiptId":"taxi"`) {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestItemizedClaimSummaryExcludesReceiptPendingReview(t *testing.T) {
+	router := NewRouter(Dependencies{Claims: itemizedFakeClaims{}, ExpenseItems: fakeExpenseItems{}, Receipts: itemizedFakeReceipts{reviewDining: true}, Auth: StaticActorResolver{}})
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/claims/claim-1", nil)
+	request.Header.Set("Authorization", "Bearer employee-1")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"expenseItemTotalAmountCent":3800`) || !strings.Contains(response.Body.String(), `"expenseCategories":["交通费"]`) || !strings.Contains(response.Body.String(), `"receiptId":"dining"`) {
 		t.Fatalf("response=%d %s", response.Code, response.Body.String())
 	}
 }
@@ -103,6 +114,22 @@ func (itemizedFakeClaims) GetClaim(ctx context.Context, actorID, claimID string)
 }
 
 type fakeExpenseItems struct{}
+
+type itemizedFakeReceipts struct {
+	fakeReceipts
+	reviewDining bool
+}
+
+func (service itemizedFakeReceipts) ListReceipts(_ context.Context, actorID, claimID string) ([]application.ReceiptView, error) {
+	if actorID != "employee-1" || claimID != "claim-1" {
+		return nil, application.ErrClaimNotFound
+	}
+	diningStatus := domain.ReceiptStatusExtracted
+	if service.reviewDining {
+		diningStatus = domain.ReceiptStatusReview
+	}
+	return []application.ReceiptView{{ID: "taxi", Status: domain.ReceiptStatusExtracted}, {ID: "dining", Status: diningStatus}}, nil
+}
 
 func (fakeExpenseItems) ListOwnedByClaim(_ context.Context, actorID, claimID string) ([]domain.ExpenseItem, error) {
 	if actorID != "employee-1" || claimID != "claim-1" {

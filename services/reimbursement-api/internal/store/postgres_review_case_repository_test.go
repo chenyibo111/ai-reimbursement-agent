@@ -48,13 +48,13 @@ func TestPostgresReviewCaseRepositoryClaimAndResolveAreVersioned(t *testing.T) {
 	`, ownerID, reviewerOneID, reviewerTwoID); err != nil {
 		t.Fatalf("seed employees: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO reimbursement.claims (id, owner_id, purpose) VALUES ($1, $2, 'Review repository test')`, claimID, ownerID); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO reimbursement.claims (id, owner_id, purpose, itemization_mode, requested_amount_source) VALUES ($1, $2, 'Review repository test', 'ITEMIZED', 'OCR_SUGGESTED')`, claimID, ownerID); err != nil {
 		t.Fatalf("seed claim: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO reimbursement.receipts
-			(id, claim_id, owner_id, filename, content_type, expected_size, object_key, status)
-		VALUES ($1, $2, $3, 'review.png', 'image/png', 1, $4, 'REVIEW_REQUIRED')
+			(id, claim_id, owner_id, filename, content_type, expected_size, object_key, status, total_amount_cent)
+		VALUES ($1, $2, $3, 'review.png', 'image/png', 1, $4, 'REVIEW_REQUIRED', 1500)
 	`, receiptID, claimID, ownerID, "review-test/"+receiptID); err != nil {
 		t.Fatalf("seed receipt: %v", err)
 	}
@@ -94,6 +94,10 @@ func TestPostgresReviewCaseRepositoryClaimAndResolveAreVersioned(t *testing.T) {
 	var claimVersion int64
 	if err := pool.QueryRow(ctx, `SELECT version FROM reimbursement.claims WHERE id = $1`, claimID).Scan(&claimVersion); err != nil || claimVersion != 2 {
 		t.Fatalf("claim version after review resolution = %d, %v", claimVersion, err)
+	}
+	var itemAmount, requestedAmount int64
+	if err := pool.QueryRow(ctx, `SELECT item.amount_cent, claim.requested_amount_cent FROM reimbursement.expense_items AS item JOIN reimbursement.claims AS claim ON claim.id=item.claim_id WHERE item.receipt_id=$1`, receiptID).Scan(&itemAmount, &requestedAmount); err != nil || itemAmount != 1500 || requestedAmount != 1500 {
+		t.Fatalf("reviewed item amount=%d claim amount=%d err=%v", itemAmount, requestedAmount, err)
 	}
 
 	var audits int

@@ -25,6 +25,19 @@ func TestExtractReceiptRefreshesOCRSuggestedAmount(t *testing.T) {
 	}
 }
 
+func TestExtractReceiptRefreshesSummaryWhenRetryMovesReceiptToReview(t *testing.T) {
+	refresher := &recordingOCRSuggestionRefresher{}
+	amount := int64(3800)
+	repository := &fakeReceiptRepository{receipts: map[string]domain.Receipt{"receipt-1": {ID: "receipt-1", ClaimID: "claim-1", OwnerID: "employee-1", ObjectKey: "receipts/receipt-1", Status: domain.ReceiptStatusExtracted, TotalAmountCent: &amount}}, submittedInvoiceNumbers: make(map[string]bool), reviewReasons: make(map[string][]string)}
+	service := NewReceiptService(itemizedClaimReader{}, repository, &fakeObjectStore{objects: map[string]StoredObject{"receipts/receipt-1": {ContentType: "image/png", Content: validPNG()}}}, &fakeScanner{}, &fakeOCRClient{result: OCRResult{TotalAmountCent: &amount, Confidence: 0.69}}, NewSequentialIDGenerator(), refresher)
+	if err := service.ExtractReceipt(context.Background(), "employee-1", "claim-1", "receipt-1"); !errors.Is(err, ErrLowOCRConfidence) {
+		t.Fatalf("expected review, got %v", err)
+	}
+	if refresher.calls != 1 {
+		t.Fatalf("review transition did not refresh claim summary: %+v", refresher)
+	}
+}
+
 func TestExtractReceiptCreatesExpenseItemForItemizedClaim(t *testing.T) {
 	amount := int64(3800)
 	items := &recordingExpenseItemSuggester{}

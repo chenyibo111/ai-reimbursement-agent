@@ -371,12 +371,22 @@ func (service *ReceiptService) ExtractReceipt(ctx context.Context, actorID strin
 			if err := service.repository.TransitionToReview(ctx, receipt.ID, "DUPLICATE_SUBMITTED_INVOICE", &result); err != nil {
 				return fmt.Errorf("flag duplicate invoice: %w", err)
 			}
+			if service.suggestions != nil {
+				if err := service.suggestions.RefreshOCRSuggestion(ctx, claimID, actorID); err != nil {
+					return fmt.Errorf("refresh ocr suggested amount: %w", err)
+				}
+			}
 			return ErrDuplicateSubmittedInvoice
 		}
 	}
 	if result.Confidence > 0 && result.Confidence < 0.7 {
 		if err := service.repository.TransitionToReview(ctx, receipt.ID, "OCR_LOW_CONFIDENCE", &result); err != nil {
 			return fmt.Errorf("flag low-confidence receipt: %w", err)
+		}
+		if service.suggestions != nil {
+			if err := service.suggestions.RefreshOCRSuggestion(ctx, claimID, actorID); err != nil {
+				return fmt.Errorf("refresh ocr suggested amount: %w", err)
+			}
 		}
 		return ErrLowOCRConfidence
 	}

@@ -43,24 +43,35 @@ type ExpenseItemPatch struct {
 }
 
 func (item *ExpenseItem) ApplySuggestion(suggestion ExpenseItemSuggestion) {
-	if suggestion.ClassificationStatus != "" {
+	fullRefresh := suggestion.ClassificationStatus != ""
+	if fullRefresh {
 		item.ClassificationStatus = suggestion.ClassificationStatus
 		item.ClassificationVersion = suggestion.ClassificationVersion
 	}
-	if suggestion.ReceiptType != "" {
+	if fullRefresh || suggestion.ReceiptType != "" {
 		item.ReceiptType = suggestion.ReceiptType
 	}
-	if suggestion.ExpenseCategory != "" && item.CategorySource != FieldSourceManual {
+	if item.CategorySource != FieldSourceManual && (fullRefresh || suggestion.ExpenseCategory != "") {
 		item.ExpenseCategory = suggestion.ExpenseCategory
-		item.CategorySource = FieldSourceModel
+		item.CategorySource = ""
+		if suggestion.ExpenseCategory != "" {
+			item.CategorySource = FieldSourceModel
+		}
 	}
-	if suggestion.Purpose != "" && item.PurposeSource != FieldSourceManual {
+	if item.PurposeSource != FieldSourceManual && (fullRefresh || suggestion.Purpose != "") {
 		item.Purpose = suggestion.Purpose
-		item.PurposeSource = FieldSourceModel
+		item.PurposeSource = ""
+		if suggestion.Purpose != "" {
+			item.PurposeSource = FieldSourceModel
+		}
 	}
-	if suggestion.AmountCent != nil && item.AmountSource != FieldSourceManual {
-		amount := *suggestion.AmountCent
-		item.AmountCent = &amount
-		item.AmountSource = FieldSourceOCR
+	if item.AmountSource != FieldSourceManual && (fullRefresh || suggestion.AmountCent != nil) {
+		item.AmountCent = nil
+		item.AmountSource = ""
+		if suggestion.AmountCent != nil {
+			amount := *suggestion.AmountCent
+			item.AmountCent = &amount
+			item.AmountSource = FieldSourceOCR
+		}
 	}
 }

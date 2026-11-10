@@ -28,3 +28,21 @@ func TestExpenseItemSuggestionFillsOnlyKnownFields(t *testing.T) {
 		t.Fatalf("unexpected inferred fields: %+v", item)
 	}
 }
+
+func TestExpenseItemSuggestionClearsStaleAutomaticFields(t *testing.T) {
+	amount := int64(3800)
+	item := ExpenseItem{ReceiptType: "TAXI", ClassificationStatus: "CLASSIFIED", ExpenseCategory: "交通费", CategorySource: FieldSourceModel, Purpose: "市内出行打车费", PurposeSource: FieldSourceModel, AmountCent: &amount, AmountSource: FieldSourceOCR}
+	item.ApplySuggestion(ExpenseItemSuggestion{ClassificationStatus: "FAILED"})
+	if item.ReceiptType != "" || item.ExpenseCategory != "" || item.CategorySource != "" || item.Purpose != "" || item.PurposeSource != "" || item.AmountCent != nil || item.AmountSource != "" {
+		t.Fatalf("stale automatic fields retained: %+v", item)
+	}
+}
+
+func TestExpenseItemSuggestionKeepsManualFieldsWhenAutomaticFieldsDisappear(t *testing.T) {
+	amount := int64(3800)
+	item := ExpenseItem{ExpenseCategory: "市内交通费", CategorySource: FieldSourceManual, Purpose: "客户拜访", PurposeSource: FieldSourceManual, AmountCent: &amount, AmountSource: FieldSourceManual}
+	item.ApplySuggestion(ExpenseItemSuggestion{ClassificationStatus: "UNKNOWN"})
+	if item.ExpenseCategory != "市内交通费" || item.Purpose != "客户拜访" || item.AmountCent == nil || *item.AmountCent != amount {
+		t.Fatalf("manual fields removed: %+v", item)
+	}
+}
