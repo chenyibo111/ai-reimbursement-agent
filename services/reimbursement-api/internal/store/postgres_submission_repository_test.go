@@ -133,6 +133,16 @@ func TestPostgresSubmissionRepositoryCreatesImmutableSnapshotAndReplays(t *testi
 	}
 }
 
+func TestBlockingSubmissionInputRequiresItemAmount(t *testing.T) {
+	amount := int64(9000)
+	claim := domain.Claim{Status: domain.ClaimStatusDraft, ItemizationMode: domain.ClaimItemizationModeItemized, Purpose: "市内出行", RequestedAmountCent: &amount}
+	receipts := []domain.Receipt{{ID: "taxi", Status: domain.ReceiptStatusExtracted}}
+	items := []domain.ExpenseItem{{ID: "taxi", ReceiptID: "taxi"}}
+	if !blockingSubmissionInput(claim, receipts, items) {
+		t.Fatal("missing item amount must block the transaction")
+	}
+}
+
 type fixedSubmissionClock struct{ now time.Time }
 
 func (clock fixedSubmissionClock) Now() time.Time { return clock.now }

@@ -184,6 +184,13 @@ func validateSubmissionInput(input SubmissionInput) []domain.ValidationIssue {
 	if input.Claim.ItemizationMode == domain.ClaimItemizationModeItemized && len(input.Items) != len(input.Receipts) {
 		issues = append(issues, domain.ValidationIssue{Code: "EXPENSE_ITEM_REQUIRED", Message: "请完成每张票据的费用明细", Blocking: true})
 	}
+	if input.Claim.ItemizationMode == domain.ClaimItemizationModeItemized {
+		for _, item := range input.Items {
+			if item.AmountCent == nil {
+				issues = append(issues, domain.ValidationIssue{Code: "EXPENSE_ITEM_AMOUNT_REQUIRED", Message: "请补充票据的费用明细金额", ReceiptID: item.ReceiptID, Blocking: true})
+			}
+		}
+	}
 	for _, receipt := range input.Receipts {
 		if receipt.Status == domain.ReceiptStatusReview || receipt.Status == domain.ReceiptStatusQuarantined {
 			issues = append(issues, domain.ValidationIssue{Code: "RECEIPT_REVIEW_REQUIRED", Message: "存在需要人工复核的票据", Blocking: true})

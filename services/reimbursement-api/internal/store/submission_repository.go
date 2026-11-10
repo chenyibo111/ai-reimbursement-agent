@@ -306,6 +306,13 @@ func blockingSubmissionInput(claim domain.Claim, receipts []domain.Receipt, item
 	if claim.ItemizationMode == domain.ClaimItemizationModeItemized && len(items) != len(receipts) {
 		return true
 	}
+	if claim.ItemizationMode == domain.ClaimItemizationModeItemized {
+		for _, item := range items {
+			if item.AmountCent == nil {
+				return true
+			}
+		}
+	}
 	for _, receipt := range receipts {
 		if receipt.Status != domain.ReceiptStatusExtracted || (receipt.OCRConfidence > 0 && receipt.OCRConfidence < 0.7) {
 			return true

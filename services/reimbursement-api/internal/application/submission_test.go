@@ -46,6 +46,22 @@ func TestValidateItemizedClaimChecksEachReceiptCategory(t *testing.T) {
 	}
 }
 
+func TestItemizedClaimRequiresEachReceiptAmountEvenWithManualClaimAmount(t *testing.T) {
+	repository := newFakeSubmissionRepository()
+	amount := int64(9000)
+	repository.claim = domain.Claim{ID: "mixed", OwnerID: "employee-1", Status: domain.ClaimStatusDraft, ItemizationMode: domain.ClaimItemizationModeItemized, Purpose: "市内出行", RequestedAmountCent: &amount, Version: 3}
+	repository.receipts = []domain.Receipt{{ID: "taxi", Status: domain.ReceiptStatusExtracted}}
+	repository.items = []domain.ExpenseItem{{ID: "taxi", ReceiptID: "taxi"}}
+	service := NewSubmissionService(repository, fixedClock{now: time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC)})
+	validation, err := service.ValidateClaim(context.Background(), "employee-1", "mixed")
+	if err != nil || len(validation.Issues) != 1 || validation.Issues[0].Code != "EXPENSE_ITEM_AMOUNT_REQUIRED" || validation.Issues[0].ReceiptID != "taxi" {
+		t.Fatalf("issues=%+v err=%v", validation.Issues, err)
+	}
+	if _, err := service.RequestSubmission(context.Background(), "employee-1", "mixed", 3); !errors.Is(err, ErrValidationBlocked) {
+		t.Fatalf("missing item amount should block confirmation: %v", err)
+	}
+}
+
 func TestRequestSubmissionReturnsNonBlockingPolicyWarnings(t *testing.T) {
 	repository := newFakeSubmissionRepository()
 	amount := int64(12000)
