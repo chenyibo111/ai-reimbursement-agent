@@ -122,7 +122,14 @@ func TestExpenseItemUpsertPreservesManualCategoryAndOneRowPerReceipt(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = repository.ConvertOwnedDraft(ctx, "employee-1", "legacy-claim"); err != nil {
+	var legacyVersion int64
+	if err = pool.QueryRow(ctx, `SELECT version FROM reimbursement.claims WHERE id='legacy-claim'`).Scan(&legacyVersion); err != nil {
+		t.Fatal(err)
+	}
+	if err = repository.ConvertOwnedDraft(ctx, "employee-1", "legacy-claim", legacyVersion+1); !errors.Is(err, application.ErrClaimVersionConflict) {
+		t.Fatalf("stale legacy conversion: %v", err)
+	}
+	if err = repository.ConvertOwnedDraft(ctx, "employee-1", "legacy-claim", legacyVersion); err != nil {
 		t.Fatal(err)
 	}
 	legacyItems, err := repository.ListOwnedByClaim(ctx, "employee-1", "legacy-claim")

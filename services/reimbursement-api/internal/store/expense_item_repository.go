@@ -19,7 +19,7 @@ func NewPostgresExpenseItemRepository(pool *pgxpool.Pool) *PostgresExpenseItemRe
 	return &PostgresExpenseItemRepository{pool: pool}
 }
 
-func (repository *PostgresExpenseItemRepository) ConvertOwnedDraft(ctx context.Context, actorID, claimID string) error {
+func (repository *PostgresExpenseItemRepository) ConvertOwnedDraft(ctx context.Context, actorID, claimID string, expectedVersion int64) error {
 	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
@@ -36,6 +36,9 @@ func (repository *PostgresExpenseItemRepository) ConvertOwnedDraft(ctx context.C
 	}
 	if status != "DRAFT" {
 		return domain.ErrClaimNotDraft
+	}
+	if version != expectedVersion {
+		return application.ErrClaimVersionConflict
 	}
 	if mode == "ITEMIZED" {
 		return tx.Commit(ctx)
