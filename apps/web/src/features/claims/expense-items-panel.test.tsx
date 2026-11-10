@@ -48,3 +48,18 @@ it("explains a failed classification while keeping OCR amount editable", () => {
 	expect(within(container).getByText("AI 分类失败，请手工填写")).toBeVisible();
 	expect(within(container).getByLabelText("第 1 条金额")).toHaveValue("52.00");
 });
+
+it("opens an existing item whose participants were returned as null", async () => {
+	const claim = {
+		id: "claim-null", status: "DRAFT", version: 2,
+		expenseItems: [{ id: "item-null", receiptId: "receipt-null", receiptType: "TAXI", expenseCategory: "交通费", categorySource: "MODEL", purpose: "市内出行打车费", purposeSource: "MODEL", amountCent: 3800, amountSource: "OCR", projectCode: "", participants: null }],
+	} as unknown as Claim;
+	vi.mocked(reimbursementApi.updateExpenseItem).mockResolvedValue(claim);
+	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+	const { container } = render(<QueryClientProvider client={client}><ExpenseItemsPanel claim={claim} /></QueryClientProvider>);
+	const user = userEvent.setup();
+	expect(within(container).getByLabelText("第 1 条同行人")).toHaveValue("");
+	await user.type(within(container).getByLabelText("第 1 条同行人"), "张三");
+	await user.click(within(container).getByRole("button", { name: "保存第 1 条明细" }));
+	expect(reimbursementApi.updateExpenseItem).toHaveBeenCalledWith("claim-null", "item-null", { version: 2, participants: ["张三"] });
+});

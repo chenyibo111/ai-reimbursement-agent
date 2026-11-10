@@ -207,6 +207,9 @@ func scanExpenseItem(row expenseItemRow) (domain.ExpenseItem, error) {
 	if err := json.Unmarshal(participants, &item.Participants); err != nil {
 		return domain.ExpenseItem{}, err
 	}
+	if item.Participants == nil {
+		item.Participants = []string{}
+	}
 	return item, nil
 }
 
@@ -214,7 +217,11 @@ func saveExpenseItem(ctx context.Context, tx pgx.Tx, item domain.ExpenseItem) er
 	if item.ClassificationStatus == "" {
 		item.ClassificationStatus = "PENDING"
 	}
-	participants, err := json.Marshal(item.Participants)
+	people := item.Participants
+	if people == nil {
+		people = []string{}
+	}
+	participants, err := json.Marshal(people)
 	if err != nil {
 		return err
 	}

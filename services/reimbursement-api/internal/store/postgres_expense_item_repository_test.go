@@ -60,6 +60,17 @@ func TestExpenseItemUpsertPreservesManualCategoryAndOneRowPerReceipt(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	var participantsKind string
+	if err := pool.QueryRow(ctx, `SELECT jsonb_typeof(participants) FROM reimbursement.expense_items WHERE receipt_id='receipt-1'`).Scan(&participantsKind); err != nil || participantsKind != "array" {
+		t.Fatalf("new item participants type=%q err=%v, want array", participantsKind, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE reimbursement.expense_items SET participants='null'::jsonb WHERE receipt_id='receipt-1'`); err != nil {
+		t.Fatal(err)
+	}
+	existing, err := repository.ListOwnedByClaim(ctx, "employee-1", "claim-1")
+	if err != nil || len(existing) != 1 || existing[0].Participants == nil {
+		t.Fatalf("legacy null participants were not normalized: items=%+v err=%v", existing, err)
+	}
 	var autoPurpose string
 	if err := pool.QueryRow(ctx, `SELECT purpose FROM reimbursement.claims WHERE id='claim-1'`).Scan(&autoPurpose); err != nil || autoPurpose != "市内出行打车费" {
 		t.Fatalf("auto purpose=%q err=%v", autoPurpose, err)

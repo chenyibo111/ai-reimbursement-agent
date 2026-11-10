@@ -36,7 +36,7 @@ function ExpenseItemEditor({ claim, item, index, filename }: { claim: Claim; ite
 	const [purpose, setPurpose] = useState(item.purpose);
 	const [amount, setAmount] = useState(item.amountCent === null ? "" : (item.amountCent / 100).toFixed(2));
 	const [projectCode, setProjectCode] = useState(item.projectCode);
-	const [participants, setParticipants] = useState(item.participants.join("，"));
+	const [participants, setParticipants] = useState((item.participants ?? []).join("，"));
 	const [error, setError] = useState("");
 	const [notice, setNotice] = useState("");
 	const [isEditing, setIsEditing] = useState(false);
@@ -44,7 +44,7 @@ function ExpenseItemEditor({ claim, item, index, filename }: { claim: Claim; ite
 		if (isEditing) return;
 		setCategory(item.expenseCategory); setPurpose(item.purpose);
 		setAmount(item.amountCent === null ? "" : (item.amountCent / 100).toFixed(2));
-		setProjectCode(item.projectCode); setParticipants(item.participants.join("，"));
+		setProjectCode(item.projectCode); setParticipants((item.participants ?? []).join("，"));
 	}, [item.expenseCategory, item.purpose, item.amountCent, item.projectCode, item.participants, isEditing]);
 	async function save(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault(); setError(""); setNotice("");
@@ -53,7 +53,7 @@ function ExpenseItemEditor({ claim, item, index, filename }: { claim: Claim; ite
 		if (purpose.trim() !== item.purpose) patch.purpose = purpose.trim();
 		if (projectCode.trim() !== item.projectCode) patch.projectCode = projectCode.trim();
 		const people = parseParticipants(participants);
-		if (people.join("\u0000") !== item.participants.join("\u0000")) patch.participants = people;
+		if (people.join("\u0000") !== (item.participants ?? []).join("\u0000")) patch.participants = people;
 		if (amount.trim()) {
 			const parsed = parseCNYAmountToCent(amount);
 			if (parsed.error) { setError(parsed.error); return; }
