@@ -208,3 +208,6 @@ select { width: 100%; min-height: 46px; padding: 0 13px; border: 1px solid #cbd7
 .expense-item-card { display: grid; gap: 1rem; padding: 1rem; border: 1px solid var(--line, #DCE4F0); border-radius: 0.875rem; background: #fff; }
 .expense-item-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 .expense-item-card .secondary-action { justify-self: start; }
+.claim-category-summary { display: block; padding: 11px 13px; border: 1px solid var(--line, #DCE4F0); border-radius: 0.875rem; background: #f7f9fc; color: #13233d; line-height: 1.5; }
+.expense-corrections { display: grid; justify-items: start; gap: 12px; margin-top: 20px; }
+.expense-corrections .expense-item-list { width: 100%; margin-top: 0; }

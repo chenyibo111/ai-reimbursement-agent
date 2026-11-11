@@ -10,6 +10,7 @@ import { ClaimApplicationForm, parseCNYAmountToCent } from "./claim-application-
 vi.mock("../../api/client", () => ({
   reimbursementApi: {
     updateClaim: vi.fn(),
+		updateExpenseItem: vi.fn(),
     requestSubmission: vi.fn(),
     submit: vi.fn(),
   },
@@ -48,12 +49,32 @@ describe("ClaimApplicationForm", () => {
     const user = userEvent.setup();
     const { container } = renderForm({ ...manualClaim, itemizationMode: "ITEMIZED", expenseItems: [] });
     const form = within(container);
-    expect(form.queryByLabelText("费用类别")).toBeNull();
+    expect(form.getByText("费用类别")).toBeVisible();
+		expect(form.getByText("待分类")).toBeVisible();
     await user.click(form.getByRole("button", { name: "保存草稿" }));
     expect(reimbursementApi.updateClaim).toHaveBeenCalledWith("claim-1", expect.not.objectContaining({ expenseCategory: expect.anything() }));
     expect(reimbursementApi.updateClaim).toHaveBeenCalledWith("claim-1", expect.not.objectContaining({ purpose: expect.anything() }));
     expect(reimbursementApi.updateClaim).toHaveBeenCalledWith("claim-1", expect.not.objectContaining({ requestedAmountCent: expect.anything() }));
   });
+	it("shows aggregate categories and reveals per-receipt corrections only on request", async () => {
+		const claim: Claim = { ...manualClaim, itemizationMode: "ITEMIZED", purpose: "市内出行及餐饮费用", expenseCategories: ["交通费", "餐饮费"], expenseItems: [
+			{ id: "taxi", claimId: "claim-1", receiptId: "taxi", receiptType: "TAXI", expenseCategory: "交通费", categorySource: "MODEL", purpose: "市内出行打车费", purposeSource: "MODEL", amountCent: 3800, amountSource: "OCR", projectCode: "", participants: [] },
+			{ id: "dining", claimId: "claim-1", receiptId: "dining", receiptType: "DINING", expenseCategory: "餐饮费", categorySource: "MODEL", purpose: "餐饮费用", purposeSource: "MODEL", amountCent: 5200, amountSource: "OCR", projectCode: "", participants: [] },
+		] };
+		const { container } = renderForm(claim);
+		const form = within(container);
+		expect(form.getByText("交通费、餐饮费")).toBeVisible();
+		expect(form.getByLabelText(/报销事由/)).toHaveValue("市内出行及餐饮费用");
+		expect(form.queryByLabelText("第 1 条费用类别")).toBeNull();
+		await userEvent.setup().click(form.getByText("更正分类或补充信息"));
+		const category = form.getByLabelText("第 1 条费用类别");
+		await userEvent.setup().clear(category);
+		await userEvent.setup().type(category, "市内交通费");
+		vi.mocked(reimbursementApi.updateExpenseItem).mockResolvedValue(claim);
+		await userEvent.setup().click(form.getByRole("button", { name: "保存第 1 条明细" }));
+		expect(reimbursementApi.updateExpenseItem).toHaveBeenCalledWith("claim-1", "taxi", expect.objectContaining({ version: 3, expenseCategory: "市内交通费" }));
+		expect(form.queryByLabelText("第 1 条金额")).toBeNull();
+	});
   it("lets an employee set the expense category needed by published category rules", async () => {
     const user = userEvent.setup();
     const { container } = renderForm();

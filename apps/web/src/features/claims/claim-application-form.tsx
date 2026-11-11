@@ -1,9 +1,9 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { reimbursementApi, ReimbursementApiError } from "../../api/client";
-import type { Claim, ClaimPatch, ValidationIssue } from "../../api/generated/reimbursement";
+import type { Claim, ClaimPatch, ExpenseItem, ExpenseItemPatch, ValidationIssue } from "../../api/generated/reimbursement";
 import { formatCNYFromCent } from "./claim-display";
-import { useUpdateClaim } from "./use-claim";
+import { useUpdateClaim, useUpdateExpenseItem } from "./use-claim";
 
 type AmountParseResult = { cents: number; error?: never } | { cents?: never; error: string };
 
@@ -44,8 +44,10 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 	const [isSubmitting, setSubmitting] = useState(false);
 	const [pendingConfirmation, setPendingConfirmation] = useState<{ token: string; version: number; amountCent: number | null; itemTotalCent: number; warnings: ValidationIssue[] } | null>(null);
 	const [isEditing, setIsEditing] = useState(false);
+	const [showCorrections, setShowCorrections] = useState(false);
 	const isDraft = claim.status === "DRAFT";
 	const isItemized = claim.itemizationMode === "ITEMIZED";
+	const categories = claim.expenseCategories ?? [];
 	const difference = useMemo(() => claim.requestedAmountCent === null || recognizedAmountCent === null ? null : claim.requestedAmountCent - recognizedAmountCent, [claim.requestedAmountCent, recognizedAmountCent]);
 	useEffect(() => {
 		if (pendingConfirmation && claim.version > pendingConfirmation.version) setPendingConfirmation(null);
@@ -187,6 +189,11 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 					<input id="claim-purpose" name="purpose" value={purpose} onChange={(event) => { markEdited(); setPurpose(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} placeholder="例如：杭州客户拜访" />
 					<p className="field-hint">简要说明这笔报销对应的业务事项。</p>
 				</div>
+				{isItemized && <div className="field-stack">
+					<span>费用类别</span>
+					<output className="claim-category-summary" aria-label="费用类别汇总">{categories.join("、") || "待分类"}</output>
+					<p className="field-hint">按票据识别结果汇总；更正分类后会自动更新。</p>
+				</div>}
 				{!isItemized && <><div className="field-stack">
 					<label htmlFor="claim-expense-category">费用类别</label>
 					<input id="claim-expense-category" name="expenseCategory" value={expenseCategory} onChange={(event) => { markEdited(); setExpenseCategory(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} placeholder="例如：住宿费" />
@@ -236,6 +243,55 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 				{submissionIssues.length > 0 && <ul className="validation-list" role="alert">{submissionIssues.map((issue) => <li key={issue.code} className={issue.severity === "BLOCKING" ? "validation-blocking" : "validation-warning"}>{issue.message}</li>)}</ul>}
 				{submissionError && <p className="field-error" role="alert">{submissionError}</p>}
 			</form>
+			{isItemized && isDraft && (claim.expenseItems?.length ?? 0) > 0 && <div className="expense-corrections">
+				<button className="secondary-action" type="button" aria-expanded={showCorrections} aria-controls="expense-correction-list" onClick={() => setShowCorrections((open) => !open)}>更正分类或补充信息</button>
+				{showCorrections && <div id="expense-correction-list" className="expense-item-list">{claim.expenseItems?.map((item, index) => <ExpenseItemCorrectionForm key={item.id} claim={claim} item={item} index={index} />)}</div>}
+			</div>}
 		</section>
 	);
+}
+
+function ExpenseItemCorrectionForm({ claim, item, index }: { claim: Claim; item: ExpenseItem; index: number }) {
+	const mutation = useUpdateExpenseItem(claim.id);
+	const [category, setCategory] = useState(item.expenseCategory);
+	const [purpose, setPurpose] = useState(item.purpose);
+	const [projectCode, setProjectCode] = useState(item.projectCode);
+	const [participants, setParticipants] = useState((item.participants ?? []).join("，"));
+	const [isEditing, setIsEditing] = useState(false);
+	const [notice, setNotice] = useState("");
+	const [error, setError] = useState("");
+	useEffect(() => {
+		if (isEditing) return;
+		setCategory(item.expenseCategory);
+		setPurpose(item.purpose);
+		setProjectCode(item.projectCode);
+		setParticipants((item.participants ?? []).join("，"));
+	}, [item.expenseCategory, item.purpose, item.projectCode, item.participants, isEditing]);
+	async function save(event: FormEvent<HTMLFormElement>) {
+		event.preventDefault(); setNotice(""); setError("");
+		const patch: ExpenseItemPatch = { version: claim.version };
+		if (category.trim() !== item.expenseCategory) patch.expenseCategory = category.trim();
+		if (purpose.trim() !== item.purpose) patch.purpose = purpose.trim();
+		if (projectCode.trim() !== item.projectCode) patch.projectCode = projectCode.trim();
+		const people = parseParticipants(participants);
+		if (people.join("\u0000") !== (item.participants ?? []).join("\u0000")) patch.participants = people;
+		if (Object.keys(patch).length === 1) { setNotice("没有需要保存的修改。"); return; }
+		try { await mutation.mutateAsync({ itemId: item.id, patch }); setIsEditing(false); setNotice("明细已保存。"); }
+		catch (cause) { setError(errorMessage(cause)); }
+	}
+	const label = `第 ${index + 1} 条`;
+	return <form className="expense-item-card" onSubmit={(event) => { void save(event); }} noValidate>
+		<strong>{label} · 票据分类与补充信息</strong>
+		<div className="application-form-grid">
+			<div className="field-stack"><label htmlFor={`item-category-${item.id}`}>{label}费用类别</label><input id={`item-category-${item.id}`} value={category} onChange={(event) => { setIsEditing(true); setCategory(event.target.value); }} disabled={mutation.isPending} /></div>
+			<div className="field-stack"><label htmlFor={`item-purpose-${item.id}`}>{label}通用事由</label><input id={`item-purpose-${item.id}`} value={purpose} onChange={(event) => { setIsEditing(true); setPurpose(event.target.value); }} disabled={mutation.isPending} /></div>
+		</div>
+		<div className="application-form-grid">
+			<div className="field-stack"><label htmlFor={`item-project-${item.id}`}>{label}项目编码</label><input id={`item-project-${item.id}`} value={projectCode} onChange={(event) => { setIsEditing(true); setProjectCode(event.target.value); }} disabled={mutation.isPending} /></div>
+			<div className="field-stack"><label htmlFor={`item-participants-${item.id}`}>{label}同行人</label><input id={`item-participants-${item.id}`} value={participants} onChange={(event) => { setIsEditing(true); setParticipants(event.target.value); }} disabled={mutation.isPending} /></div>
+		</div>
+		{error && <p className="field-error" role="alert">{error}</p>}
+		{notice && <p role="status">{notice}</p>}
+		<button className="secondary-action" type="submit" disabled={mutation.isPending}>{mutation.isPending ? "正在保存…" : `保存${label}明细`}</button>
+	</form>;
 }

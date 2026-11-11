@@ -32,6 +32,7 @@
 | Date | 原生 `input[type=date]` | 浏览器平台控件 | 费用明细日期编辑 | 真实浏览器；接受平台自有日历层 |
 | Toast | 页面内 `role=status` | 本文件 | success / error | 浏览器 E2E |
 | CRUD | Go `/api/v1/claims` | Go 服务端 API | 创建草稿 / 上传 / 删除草稿附件 / 校验 / 提交 | 完整流程 E2E |
+| 票据驱动报销 | `apps/web/src/features/claims` | Go 明细和整单汇总 | 识别明细只读；申请信息显示类别汇总和事由；草稿按需展开逐票更正 | Web 测试、浏览器复核 |
 | 政策管理 | `/api/admin/policies` 路由与 `src/ui/policy-version-editor.tsx` | 服务端政策版本与白名单授权 | 创建草稿 / 保存规则 / 发布版本 | 政策管理 E2E |
 | 政策知识来源 | `/api/admin/policy-sources` 路由与 `src/ui/policy-source-manager.tsx` | 服务端来源、快照与白名单授权 | 添加 / 停用 / 重新启用 / 手动同步 | 来源管理 E2E |
 | 私有 Agent 会话 | `src/ui/agent-conversation-widget.tsx` | `/api/conversations/private/*` 与服务端会话归属 | 折叠 / 展开 / 附件 / 确认提交 | 单元测试、浏览器键盘与窄屏复核 |
