@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
@@ -28,7 +27,6 @@ var (
 	ErrDuplicateSubmittedInvoice = errors.New("invoice number already exists on a submitted claim")
 	ErrLowOCRConfidence          = errors.New("receipt OCR confidence requires review")
 	ErrReceiptNotFound           = errors.New("receipt not found")
-	pdfPageTypePattern           = regexp.MustCompile(`/Type\s*/Page\b`)
 )
 
 type CreateUploadSessionCommand struct {
@@ -98,6 +96,7 @@ type OCRResult struct {
 
 type OCRClient interface {
 	Extract(context.Context, StoredObject) (OCRResult, error)
+	ValidatePDF(context.Context, StoredObject) (int, error)
 }
 
 type ExpenseItemSuggester interface {
@@ -234,6 +233,15 @@ func (service *ReceiptService) FinalizeReceiptUpload(ctx context.Context, actorI
 			return fmt.Errorf("quarantine unsafe receipt: %w", err)
 		}
 		return ErrUnsafeReceiptFile
+	}
+	if receipt.ContentType == "application/pdf" {
+		pages, err := service.ocr.ValidatePDF(ctx, object)
+		if err != nil {
+			return fmt.Errorf("validate pdf: %w", err)
+		}
+		if pages < 1 || pages > MaxPDFPages {
+			return ErrInvalidFileSignature
+		}
 	}
 	hash := contentHash(object.Content)
 	if service.allowDuplicateContentForTesting {
@@ -472,8 +480,7 @@ func hasValidSignature(contentType string, content []byte) bool {
 	case "image/png":
 		return len(content) >= 8 && bytes.Equal(content[:8], []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a})
 	case "application/pdf":
-		pageCount := len(pdfPageTypePattern.FindAllIndex(content, -1))
-		return len(content) >= 5 && bytes.Equal(content[:5], []byte("%PDF-")) && pageCount > 0 && pageCount <= MaxPDFPages
+		return len(content) >= 5 && bytes.Equal(content[:5], []byte("%PDF-"))
 	default:
 		return false
 	}
