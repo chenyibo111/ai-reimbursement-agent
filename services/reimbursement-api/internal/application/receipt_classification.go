@@ -76,6 +76,7 @@ func ResolveClassification(receiptType, evidence, confidence, ocrText string, al
 		"DINING":    {"餐饮费用", []string{"餐饮费", "餐费"}},
 		"LODGING":   {"住宿费用", []string{"住宿费", "酒店住宿费"}},
 		"TRANSPORT": {"交通出行费用", []string{"交通费", "差旅交通费", "火车票"}},
+		"OTHER":     {"其他费用", []string{"其他"}},
 	}
 	option, ok := options[receiptType]
 	if !ok {

@@ -20,6 +20,7 @@ func TestReceiptClassifierMapsOnlyEvidenceBackedAllowedCategories(t *testing.T) 
 		{"dining", "餐饮服务 发票", "DINING", "餐饮费", "餐饮费用"},
 		{"lodging", "酒店住宿服务 发票", "LODGING", "住宿费", "住宿费用"},
 		{"transport", "铁路旅客运输服务", "TRANSPORT", "交通费", "交通出行费用"},
+		{"other", "电子发票 *水果*水果", "OTHER", "其他", "其他费用"},
 	}
 	for _, fixture := range cases {
 		t.Run(fixture.name, func(t *testing.T) {
@@ -27,7 +28,7 @@ func TestReceiptClassifierMapsOnlyEvidenceBackedAllowedCategories(t *testing.T) 
 			defer server.Close()
 			classifier := NewHTTPReceiptClassifier(server.URL, "test-model", "test-key", time.Second)
 			amount := int64(3800)
-			result, err := classifier.Classify(context.Background(), application.OCRResult{Text: fixture.text, TotalAmountCent: &amount}, []string{"市内交通费", "餐饮费", "住宿费", "交通费"})
+			result, err := classifier.Classify(context.Background(), application.OCRResult{Text: fixture.text, TotalAmountCent: &amount}, []string{"市内交通费", "餐饮费", "住宿费", "交通费", "其他"})
 			if err != nil || result.ReceiptType != fixture.receiptType || result.ExpenseCategory != fixture.category || result.Purpose != fixture.purpose || amount != 3800 {
 				t.Fatalf("classification=%+v amount=%d err=%v", result, amount, err)
 			}
@@ -87,6 +88,9 @@ func modelFixture(t *testing.T, output map[string]any) *httptest.Server {
 		}
 		if len(payload.Messages) != 2 || !strings.Contains(payload.Messages[1].Content, "票据文字") {
 			t.Errorf("messages=%+v", payload.Messages)
+		}
+		if len(payload.Messages) > 0 && !strings.Contains(payload.Messages[0].Content, "OTHER") {
+			t.Error("classifier prompt does not allow OTHER receipts")
 		}
 		content, _ := json.Marshal(output)
 		_ = json.NewEncoder(response).Encode(map[string]any{"choices": []map[string]any{{"message": map[string]any{"content": string(content)}}}})

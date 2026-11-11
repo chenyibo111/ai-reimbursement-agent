@@ -17,6 +17,22 @@ func TestResolveClassificationUsesPublishedCategoryWhitelist(t *testing.T) {
 	}
 }
 
+func TestResolveClassificationMapsEvidenceBackedOtherReceipts(t *testing.T) {
+	text := "电子发票 项目名称 *水果*水果 *蔬菜*蔬菜"
+	result := ResolveClassification("OTHER", "*水果*水果", "HIGH", text, nil)
+	if result.ReceiptType != "OTHER" || result.ExpenseCategory != "其他" || result.Purpose != "其他费用" {
+		t.Fatalf("other receipt classification=%+v", result)
+	}
+	unmapped := ResolveClassification("OTHER", "*水果*水果", "HIGH", text, []string{"餐饮费"})
+	if unmapped.ReceiptType != "OTHER" || unmapped.ExpenseCategory != "" || unmapped.Purpose != "其他费用" {
+		t.Fatalf("disallowed other category=%+v", unmapped)
+	}
+	uncertain := ResolveClassification("OTHER", "*水果*水果", "LOW", text, nil)
+	if uncertain.ReceiptType != ReceiptTypeUnknown || uncertain.ExpenseCategory != "" || uncertain.Purpose != "" {
+		t.Fatalf("low-confidence receipt should remain unknown: %+v", uncertain)
+	}
+}
+
 func TestAllowedReceiptCategoriesIntersectsPublishedRules(t *testing.T) {
 	policy := &PolicyVersion{Rules: []PolicyRule{
 		{Type: "CATEGORY_ALLOWED", Config: json.RawMessage(`{"categories":["市内交通费","餐饮费"]}`)},
