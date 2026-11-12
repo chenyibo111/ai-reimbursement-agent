@@ -22,6 +22,10 @@ export function parseParticipants(value: string): string[] {
 	return value.split(/[,，、\n]/).map((item) => item.trim()).filter(Boolean);
 }
 
+export function parseCategories(value: string): string[] {
+	return [...new Set(parseParticipants(value))];
+}
+
 function formatAmountInput(value: number | null) {
 	return value === null ? "" : (value / 100).toFixed(2);
 }
@@ -34,6 +38,7 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 	const mutation = useUpdateClaim(claim.id);
 	const [purpose, setPurpose] = useState(claim.purpose ?? "");
 	const [expenseCategory, setExpenseCategory] = useState(claim.expenseCategory ?? "");
+	const [selectedCategoriesText, setSelectedCategoriesText] = useState(() => (claim.selectedExpenseCategories ?? claim.expenseCategories ?? []).join("、"));
 	const [projectCode, setProjectCode] = useState(claim.projectCode ?? "");
 	const [participantsText, setParticipantsText] = useState((claim.participants ?? []).join("，"));
 	const [amountText, setAmountText] = useState(() => formatAmountInput(claim.requestedAmountCent));
@@ -44,18 +49,19 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 	const [isSubmitting, setSubmitting] = useState(false);
 	const [isEditing, setIsEditing] = useState(false);
 	const isDraft = claim.status === "DRAFT";
+	const isItemized = claim.itemizationMode === "ITEMIZED";
 	const difference = useMemo(() => claim.requestedAmountCent === null || recognizedAmountCent === null ? null : claim.requestedAmountCent - recognizedAmountCent, [claim.requestedAmountCent, recognizedAmountCent]);
-
 	useEffect(() => {
 		if (isEditing) return;
 		setPurpose(claim.purpose ?? "");
 		setExpenseCategory(claim.expenseCategory ?? "");
+		setSelectedCategoriesText((claim.selectedExpenseCategories ?? claim.expenseCategories ?? []).join("、"));
 		setProjectCode(claim.projectCode ?? "");
 		setParticipantsText((claim.participants ?? []).join("，"));
 		setAmountText(formatAmountInput(claim.requestedAmountCent));
 		setRemark(claim.remark ?? "");
 		setAmountError("");
-	}, [claim.id, claim.version, claim.purpose, claim.expenseCategory, claim.projectCode, claim.participants, claim.requestedAmountCent, claim.remark, isEditing]);
+	}, [claim.id, claim.version, claim.purpose, claim.expenseCategory, claim.selectedExpenseCategories, claim.expenseCategories, claim.projectCode, claim.participants, claim.requestedAmountCent, claim.remark, isEditing]);
 
 	function markEdited() {
 		setIsEditing(true);
@@ -69,13 +75,16 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 			return null;
 		}
 		setAmountError("");
+		const selectedCategories = parseCategories(selectedCategoriesText);
+		const savedCategories = claim.selectedExpenseCategories ?? claim.expenseCategories ?? [];
 		return {
 			version: claim.version,
-			purpose: purpose.trim(),
-			expenseCategory: expenseCategory.trim(),
-			projectCode: projectCode.trim(),
-			participants: parseParticipants(participantsText),
-			...(parsed ? { requestedAmountCent: parsed.cents } : {}),
+			...(!isItemized || purpose.trim() !== (claim.purpose ?? "") ? { purpose: purpose.trim() } : {}),
+			...(!isItemized ? { expenseCategory: expenseCategory.trim() } : {}),
+			...(isItemized && selectedCategories.join("\u0000") !== savedCategories.join("\u0000") ? { selectedExpenseCategories: selectedCategories } : {}),
+			...(!isItemized || projectCode.trim() !== (claim.projectCode ?? "") ? { projectCode: projectCode.trim() } : {}),
+			...(!isItemized || parseParticipants(participantsText).join("\u0000") !== (claim.participants ?? []).join("\u0000") ? { participants: parseParticipants(participantsText) } : {}),
+			...(parsed && (!isItemized || parsed.cents !== claim.requestedAmountCent) ? { requestedAmountCent: parsed.cents } : {}),
 			currency: "CNY",
 			remark: remark.trim() || null,
 		};
@@ -87,6 +96,7 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 		const updated = await mutation.mutateAsync(patch);
 		setPurpose(updated.purpose ?? "");
 		setExpenseCategory(updated.expenseCategory ?? "");
+		setSelectedCategoriesText((updated.selectedExpenseCategories ?? updated.expenseCategories ?? []).join("、"));
 		setProjectCode(updated.projectCode ?? "");
 		setParticipantsText((updated.participants ?? []).join("，"));
 		setAmountText(formatAmountInput(updated.requestedAmountCent));
@@ -160,11 +170,16 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 					<input id="claim-purpose" name="purpose" value={purpose} onChange={(event) => { markEdited(); setPurpose(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} placeholder="例如：杭州客户拜访" />
 					<p className="field-hint">简要说明这笔报销对应的业务事项。</p>
 				</div>
-				<div className="field-stack">
+				{isItemized && <div className="field-stack">
+					<label htmlFor="claim-selected-categories">费用类别</label>
+					<input id="claim-selected-categories" name="selectedExpenseCategories" value={selectedCategoriesText} onChange={(event) => { markEdited(); setSelectedCategoriesText(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} aria-describedby="claim-selected-categories-help" placeholder="例如：交通费、餐饮费" />
+					<p id="claim-selected-categories-help" className="field-hint">这是最终提交的类别，可填写多个并用顿号分隔；票据识别类别只提供初始建议。</p>
+				</div>}
+				{!isItemized && <div className="field-stack">
 					<label htmlFor="claim-expense-category">费用类别</label>
 					<input id="claim-expense-category" name="expenseCategory" value={expenseCategory} onChange={(event) => { markEdited(); setExpenseCategory(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} placeholder="例如：住宿费" />
 					<p className="field-hint">若公司政策设置了类别范围，提交前需填写允许的类别。</p>
-				</div>
+				</div>}
 				<div className="application-form-grid">
 					<div className="field-stack"><label htmlFor="claim-project-code">项目编码</label><input id="claim-project-code" name="projectCode" value={projectCode} onChange={(event) => { markEdited(); setProjectCode(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} placeholder="有对应项目时填写" /><p className="field-hint">适用的费用类别可能要求填写项目编码。</p></div>
 					<div className="field-stack"><label htmlFor="claim-participants">同行人</label><input id="claim-participants" name="participants" value={participantsText} onChange={(event) => { markEdited(); setParticipantsText(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} placeholder="例如：张三，李四" /><p className="field-hint">多人之间用逗号分隔；适用类别可能要求填写。</p></div>
@@ -194,9 +209,9 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 					{difference === 0 && <p>与识别票据合计一致</p>}
 				</div>
 				<div className="application-form-actions">
-					{claim.requestedAmountSource === "MANUAL" && <button className="secondary-action" type="button" disabled={!isDraft || mutation.isPending || isSubmitting} onClick={handleRestoreSuggestion}>恢复 OCR 建议金额</button>}
-					<button className="secondary-action" type="button" disabled={!isDraft || mutation.isPending || isSubmitting} onClick={() => { void handleSave(); }}>{mutation.isPending ? "正在保存…" : "保存草稿"}</button>
-					<button className="primary-action" type="submit" disabled={!isDraft || mutation.isPending || isSubmitting}>{isSubmitting ? "正在提交…" : "提交报销单"}</button>
+						{claim.requestedAmountSource === "MANUAL" && <button className="secondary-action" type="button" disabled={!isDraft || mutation.isPending || isSubmitting} onClick={handleRestoreSuggestion}>恢复 OCR 建议金额</button>}
+						<button className="secondary-action" type="button" disabled={!isDraft || mutation.isPending || isSubmitting} onClick={() => { void handleSave(); }}>{mutation.isPending ? "正在保存…" : "保存草稿"}</button>
+						<button className="primary-action" type="submit" disabled={!isDraft || mutation.isPending || isSubmitting}>{isSubmitting ? "正在提交…" : "提交报销单"}</button>
 				</div>
 				{mutation.isError && <p className="field-error" role="alert">{errorMessage(mutation.error)}</p>}
 				{submissionIssues.length > 0 && <ul className="validation-list" role="alert">{submissionIssues.map((issue) => <li key={issue.code} className={issue.severity === "BLOCKING" ? "validation-blocking" : "validation-warning"}>{issue.message}</li>)}</ul>}

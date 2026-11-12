@@ -93,6 +93,7 @@ go build ./cmd/...
 
 - [统一登录与本地验收](docs/operations/local-sso-react.md)
 - [Agent 本人单据办理验收](docs/operations/agent-owned-claim-acceptance.md)
+- [票据驱动明细灰度验收](docs/operations/receipt-driven-itemized-rollout.md)
 - [飞书集成](docs/feishu-integration.md)
 - [架构与信任边界](docs/architecture.md)
 - [运维与日志](docs/operations.md)

@@ -3,6 +3,7 @@ import { Link, useLocation, useParams } from "react-router-dom";
 
 import { shouldRefreshClaimAfterReceiptTransition, useClaim, useDeleteReceipt, useReceipts } from "../features/claims/use-claim";
 import { ClaimApplicationForm } from "../features/claims/claim-application-form";
+import { ExpenseItemsPanel } from "../features/claims/expense-items-panel";
 import type { Receipt, ValidationIssue } from "../api/generated/reimbursement";
 import { useReceiptUpload } from "../features/receipts/use-receipt-upload";
 import { claimAmountSummary, formatCNYFromCent } from "../features/claims/claim-display";
@@ -150,7 +151,8 @@ export function ClaimWorkbenchPage() {
             </ul>
           </section>
 
-				<ClaimApplicationForm claim={claim} recognizedAmountCent={claim.totalAmountCent} onSaved={() => setNotice("草稿已保存。")} onSubmitted={(warnings) => { setNotice("报销单已提交，系统已保存当前提交快照。"); setLatestSubmission({ claimId: claim.id, warnings }); void claimQuery.refetch(); }} />
+				{claim.itemizationMode === "ITEMIZED" && <ExpenseItemsPanel claim={claim} receipts={receiptsQuery.data?.items} />}
+				<ClaimApplicationForm claim={claim} recognizedAmountCent={claim.itemizationMode === "ITEMIZED" ? (claim.expenseItemTotalAmountCent ?? null) : claim.totalAmountCent} onSaved={() => setNotice("草稿已保存。")} onSubmitted={(warnings) => { setNotice("报销单已提交，系统已保存当前提交快照。"); setLatestSubmission({ claimId: claim.id, warnings }); void claimQuery.refetch(); }} />
         </div>
       </div>
     </main>

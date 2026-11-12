@@ -7,8 +7,9 @@ export function formatClaimFacts(kind: ClaimFactKind, workbench: Workbench, vali
   const { claim, receipts } = workbench;
   const claimLabel = claim.claimNumber || claim.id;
   const receiptTotal = receiptTotalDescription(workbench);
+  const itemSummary = itemizedSummary(workbench);
   if (kind === "READ_CLAIM") {
-    return `报销单 ${claimLabel}，状态：${claim.status === "DRAFT" ? "草稿" : claim.status === "SUBMITTED" ? "已提交" : "待确认"}，报销事由：${claim.purpose || "未填写"}。申请报销总额：${money(claim.requestedAmountCent)}。${receiptTotal}。两者不是同一个字段，请以工作台当前单据为准。`;
+    return `报销单 ${claimLabel}，状态：${claim.status === "DRAFT" ? "草稿" : claim.status === "SUBMITTED" ? "已提交" : "待确认"}，报销事由：${claim.purpose || "未填写"}。申请报销总额：${money(claim.requestedAmountCent)}。${receiptTotal}。${itemSummary}两者不是同一个字段，请以工作台当前单据为准。`;
   }
   if (kind === "READ_RECEIPT_AMOUNT") {
     if (!receipts.length) return `报销单 ${claimLabel} 尚无票据，无法确认发票金额。`;
@@ -18,7 +19,23 @@ export function formatClaimFacts(kind: ClaimFactKind, workbench: Workbench, vali
   const issues = validation?.issues ?? [];
   const issueText = issues.length ? issues.map((issue) => `${issue.severity === "BLOCKING" ? "阻断" : "提醒"}：${issue.message}`).join("；") : "当前未返回校验问题";
   const receiptText = receipts.length ? receipts.map(receiptLine).join("；") : "尚无票据";
-  return `报销单 ${claimLabel} 的只读摘要：报销事由：${claim.purpose || "未填写"}；申请报销总额：${money(claim.requestedAmountCent)}；${receiptTotal}；票据 ${receipts.length} 张（${receiptText}）；系统规则版本：${validation?.policyVersion || "未取得"}；提交条件：${issueText}。校验仅涵盖系统可自动判断的字段，未编码制度条款需人工核对。此摘要未申请提交确认，也未提交报销单。`;
+  return `报销单 ${claimLabel} 的只读摘要：报销事由：${claim.purpose || "未填写"}；申请报销总额：${money(claim.requestedAmountCent)}；${receiptTotal}；${itemSummary}票据 ${receipts.length} 张（${receiptText}）；系统规则版本：${validation?.policyVersion || "未取得"}；提交条件：${issueText}。校验仅涵盖系统可自动判断的字段，未编码制度条款需人工核对。此摘要未申请提交确认，也未提交报销单。`;
+}
+
+function itemizedSummary({ claim, receipts }: Workbench): string {
+  if (claim.itemizationMode !== "ITEMIZED") return "";
+  const items = claim.expenseItems ?? [];
+  const finalCategories = claim.selectedExpenseCategories ?? claim.expenseCategories ?? [];
+  const finalSummary = `最终费用类别：${finalCategories.join("、") || "待填写"}；`;
+  if (!items.length) return `${finalSummary}费用明细待生成；`;
+  const typeNames: Record<string, string> = { TAXI: "打车", DINING: "餐饮", LODGING: "住宿", TRANSPORT: "交通" };
+  const lines = items.map((item) => {
+    const receipt = receipts.find((candidate) => candidate.id === item.receiptId);
+    const type = typeNames[item.receiptType] ?? "待分类";
+    const category = item.expenseCategory ? `${item.categorySource === "MANUAL" ? "人工填写" : "AI 建议"}类别 ${item.expenseCategory}` : "类别待补充";
+    return `${receipt?.filename ?? item.receiptId}：${type}，${category}，明细金额 ${money(item.amountCent, "待补充")}`;
+  });
+  return `${finalSummary}费用明细：${lines.join("；")}；明细合计：${money(claim.expenseItemTotalAmountCent, "待补充")}；`;
 }
 
 function receiptTotalDescription({ claim, receipts }: Workbench): string {

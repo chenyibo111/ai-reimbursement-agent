@@ -2,6 +2,20 @@ import { expect, it } from "vitest";
 
 import { formatClaimFacts } from "@/src/application/format-claim-facts";
 
+it("includes both taxi and dining item suggestions in one claim summary", () => {
+  const claim = { id: "claim-1", claimNumber: "BX20261110-0001", version: 3, status: "DRAFT", purpose: "市内出行打车费、餐饮费用", itemizationMode: "ITEMIZED" as const, expenseCategories: ["市内交通费", "餐饮费"], selectedExpenseCategories: ["餐饮费", "其他"], expenseItemTotalAmountCent: 9000, totalAmountCent: 9000, requestedAmountCent: 9000, currency: "CNY" as const, expenseItems: [
+    { id: "taxi", receiptId: "taxi", receiptType: "TAXI", expenseCategory: "市内交通费", categorySource: "MODEL", purpose: "市内出行打车费", purposeSource: "MODEL", amountCent: 3800, amountSource: "OCR", projectCode: "", participants: [] },
+    { id: "dining", receiptId: "dining", receiptType: "DINING", expenseCategory: "餐饮费", categorySource: "MODEL", purpose: "餐饮费用", purposeSource: "MODEL", amountCent: 5200, amountSource: "OCR", projectCode: "", participants: [] },
+  ] };
+  const receipts = [{ id: "taxi", claimId: claim.id, filename: "taxi.pdf", status: "EXTRACTED", invoiceNumber: "T-1", ocrConfidence: 0.98, totalAmountCent: 3800 }, { id: "dining", claimId: claim.id, filename: "dining.pdf", status: "EXTRACTED", invoiceNumber: "D-1", ocrConfidence: 0.98, totalAmountCent: 5200 }];
+  const answer = formatClaimFacts("READ_CLAIM", { claim, receipts });
+  expect(answer).toContain("打车");
+  expect(answer).toContain("餐饮");
+  expect(answer).toContain("AI 建议类别");
+  expect(answer).toContain("最终费用类别：餐饮费、其他");
+  expect(answer).toContain("明细合计：¥90.00");
+});
+
 const claim = { id: "claim-1", claimNumber: "BX-001", version: 2, status: "DRAFT", purpose: "客户拜访", requestedAmountCent: 12345, totalAmountCent: 10155, currency: "CNY" as const, receiptCount: 1 };
 const receipt = { id: "receipt-1", claimId: "claim-1", filename: "invoice.pdf", status: "EXTRACTED", invoiceNumber: "123", ocrConfidence: 0.97, totalAmountCent: 10155 };
 

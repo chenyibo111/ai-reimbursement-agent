@@ -258,6 +258,11 @@ paths:
                   type: string
                   description: 报销事由。草稿可留空，提交时必填。
                 expenseCategory: { type: string }
+                  selectedExpenseCategories:
+                    type: array
+                    maxItems: 20
+                    uniqueItems: true
+                    items: { type: string, minLength: 1, maxLength: 100 }
                 participants:
                   type: array
                   items: { type: string }
@@ -290,6 +295,43 @@ paths:
           description: Draft removed; attachment object cleanup durably queued
         "409":
           description: Claim changed or is no longer a draft
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/claims/{claimId}/items/{itemId}:
+    patch:
+      operationId: patchExpenseItem
+      summary: Deprecated read-only receipt recognition endpoint
+      deprecated: true
+      parameters:
+        - $ref: "#/components/parameters/ClaimId"
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: "#/components/parameters/Idempotency-Key"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              additionalProperties: false
+              properties:
+                version: { type: integer, minimum: 1 }
+                expenseCategory: { type: string }
+                purpose: { type: string }
+                amountCent: { type: integer, format: int64, minimum: 0 }
+                projectCode: { type: string }
+                participants:
+                  type: array
+                  items: { type: string }
+      responses:
+        "409":
+          description: Receipt recognition is read-only; edit the final claim fields instead.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
@@ -533,6 +575,21 @@ components:
           type: [string, "null"]
         ownerId: { type: string }
         expenseCategory: { type: [string, "null"] }
+        itemizationMode: { type: string, enum: [LEGACY, ITEMIZED] }
+        expenseCategories:
+          type: array
+          items: { type: string }
+          selectedExpenseCategories:
+            type: array
+            description: Final claim categories submitted by the employee; OCR categories only initialize the draft.
+            items: { type: string }
+          expenseCategoriesSource: { type: string, enum: [AUTO, MANUAL] }
+        expenseItems:
+          type: array
+          items: { $ref: "#/components/schemas/ExpenseItem" }
+        expenseItemTotalAmountCent:
+          type: [integer, "null"]
+          description: Sum of item amounts when every expense item has an amount.
         participants:
           type: array
           items: { type: string }
@@ -572,6 +629,26 @@ components:
           maxLength: 1000
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    ExpenseItem:
+      type: object
+      required: [id, claimId, receiptId, receiptType, classificationStatus, classificationVersion, expenseCategory, categorySource, purpose, purposeSource, amountCent, amountSource, projectCode, participants]
+      properties:
+        id: { type: string }
+        claimId: { type: string }
+        receiptId: { type: string }
+        receiptType: { type: string }
+        classificationStatus: { type: string, enum: [PENDING, CLASSIFIED, UNKNOWN, FAILED, CATEGORY_UNMAPPED] }
+        classificationVersion: { type: string }
+        expenseCategory: { type: string }
+        categorySource: { type: string, enum: ["", MODEL, MANUAL] }
+        purpose: { type: string }
+        purposeSource: { type: string, enum: ["", MODEL, MANUAL] }
+        amountCent: { type: [integer, "null"], format: int64 }
+        amountSource: { type: string, enum: ["", OCR, MANUAL] }
+        projectCode: { type: string }
+        participants:
+          type: array
+          items: { type: string }
     Receipt:
       type: object
       required: [id, claimId, filename, status, closedByReview, ocrConfidence, updatedAt]
@@ -652,6 +729,8 @@ components:
         ruleCode:
           type: string
           description: Set for a published Go policy rule issue.
+        itemId: { type: string }
+        receiptId: { type: string }
     SubmissionRequest:
       type: object
       required: [confirmationToken, claimId, claimVersion, policyVersion, expiresAt, warnings]

@@ -104,11 +104,18 @@ func decodePolicyConfig(raw json.RawMessage, target any) error {
 	return nil
 }
 
-func EvaluatePolicyRules(version PolicyVersion, claim domain.Claim) ([]domain.ValidationIssue, error) {
+func EvaluatePolicyRules(version PolicyVersion, claim domain.Claim, itemGroups ...[]domain.ExpenseItem) ([]domain.ValidationIssue, error) {
 	if err := ValidatePolicyVersion(version); err != nil {
 		return nil, err
 	}
 	issues := make([]domain.ValidationIssue, 0)
+	items := []domain.ExpenseItem{{ExpenseCategory: claim.ExpenseCategory, ProjectCode: claim.ProjectCode, Participants: claim.Participants}}
+	if claim.ItemizationMode == domain.ClaimItemizationModeItemized {
+		items = make([]domain.ExpenseItem, 0, len(claim.SelectedExpenseCategories))
+		for _, category := range claim.SelectedExpenseCategories {
+			items = append(items, domain.ExpenseItem{ExpenseCategory: category, ProjectCode: claim.ProjectCode, Participants: claim.Participants})
+		}
+	}
 	for _, rule := range version.Rules {
 		violated := false
 		message := ""
@@ -125,32 +132,46 @@ func EvaluatePolicyRules(version PolicyVersion, claim domain.Claim) ([]domain.Va
 				Categories []string `json:"categories"`
 			}
 			_ = json.Unmarshal(rule.Config, &config)
-			violated = true
-			for _, category := range config.Categories {
-				if strings.TrimSpace(category) == strings.TrimSpace(claim.ExpenseCategory) && strings.TrimSpace(claim.ExpenseCategory) != "" {
-					violated = false
-					break
+			if len(items) == 0 {
+				issues = append(issues, domain.ValidationIssue{Code: "POLICY_" + rule.Code, Message: rule.Name + "：请填写允许的费用类别。", Blocking: rule.Severity == "BLOCKING"})
+			}
+			for _, item := range items {
+				allowed := false
+				for _, category := range config.Categories {
+					if strings.TrimSpace(category) == strings.TrimSpace(item.ExpenseCategory) && strings.TrimSpace(item.ExpenseCategory) != "" {
+						allowed = true
+						break
+					}
+				}
+				if !allowed {
+					issues = append(issues, domain.ValidationIssue{Code: "POLICY_" + rule.Code, Message: rule.Name + "：请填写允许的费用类别。", Blocking: rule.Severity == "BLOCKING", ItemID: item.ID, ReceiptID: item.ReceiptID})
 				}
 			}
-			message = rule.Name + "：请填写允许的费用类别。"
 		case "CATEGORY_REQUIRED_FIELD":
 			var config struct {
 				Category string `json:"category"`
 				Field    string `json:"field"`
 			}
 			_ = json.Unmarshal(rule.Config, &config)
-			if strings.TrimSpace(claim.ExpenseCategory) == strings.TrimSpace(config.Category) {
-				if config.Field == "projectCode" {
-					violated = strings.TrimSpace(claim.ProjectCode) == ""
-					message = rule.Name + "：请补充项目编码。"
-				} else {
-					violated = len(claim.Participants) == 0
-					for _, participant := range claim.Participants {
-						if strings.TrimSpace(participant) == "" {
-							violated = true
+			for _, item := range items {
+				if strings.TrimSpace(item.ExpenseCategory) == strings.TrimSpace(config.Category) {
+					itemViolation := false
+					itemMessage := ""
+					if config.Field == "projectCode" {
+						itemViolation = strings.TrimSpace(item.ProjectCode) == ""
+						itemMessage = rule.Name + "：请补充项目编码。"
+					} else {
+						itemViolation = len(item.Participants) == 0
+						for _, participant := range item.Participants {
+							if strings.TrimSpace(participant) == "" {
+								itemViolation = true
+							}
 						}
+						itemMessage = rule.Name + "：请补充同行人。"
 					}
-					message = rule.Name + "：请补充同行人。"
+					if itemViolation {
+						issues = append(issues, domain.ValidationIssue{Code: "POLICY_" + rule.Code, Message: itemMessage, Blocking: rule.Severity == "BLOCKING", ItemID: item.ID, ReceiptID: item.ReceiptID})
+					}
 				}
 			}
 		}

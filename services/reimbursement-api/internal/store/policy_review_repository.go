@@ -171,6 +171,22 @@ func (repository *PostgresReviewCaseRepository) ResolveReceiptCase(ctx context.C
 	} else if _, err := tx.Exec(ctx, `UPDATE reimbursement.receipts SET status = 'QUARANTINED', updated_at = now() WHERE id = $1`, receiptID); err != nil {
 		return application.ReviewCase{}, fmt.Errorf("quarantine reviewed receipt: %w", err)
 	}
+	if command.Action == application.ReviewCaseActionConfirm || command.Action == application.ReviewCaseActionCorrectFields {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO reimbursement.expense_items(id, claim_id, receipt_id, amount_cent, amount_source)
+			SELECT receipt.id, receipt.claim_id, receipt.id, receipt.total_amount_cent,
+			       CASE WHEN receipt.total_amount_cent IS NULL THEN '' ELSE 'OCR' END
+			FROM reimbursement.receipts AS receipt
+			JOIN reimbursement.claims AS claim ON claim.id=receipt.claim_id
+			WHERE receipt.id=$1 AND claim.itemization_mode='ITEMIZED'
+			ON CONFLICT(receipt_id) DO UPDATE SET
+			  amount_cent=CASE WHEN reimbursement.expense_items.amount_source='MANUAL' THEN reimbursement.expense_items.amount_cent ELSE EXCLUDED.amount_cent END,
+			  amount_source=CASE WHEN reimbursement.expense_items.amount_source='MANUAL' THEN reimbursement.expense_items.amount_source ELSE EXCLUDED.amount_source END,
+			  updated_at=now()
+		`, receiptID); err != nil {
+			return application.ReviewCase{}, fmt.Errorf("sync reviewed expense item: %w", err)
+		}
+	}
 
 	status := "RESOLVED"
 	if command.Action == application.ReviewCaseActionRequestReupload || command.Action == application.ReviewCaseActionCloseInvalid {
@@ -200,8 +216,26 @@ func (repository *PostgresReviewCaseRepository) ResolveReceiptCase(ctx context.C
 	`, randomUUID(), receiptID, claimID); err != nil {
 		return application.ReviewCase{}, fmt.Errorf("insert receipt review resolution event: %w", err)
 	}
-	if err := advanceClaimVersionForReceipt(ctx, tx, claimID); err != nil {
-		return application.ReviewCase{}, err
+	if _, err := tx.Exec(ctx, `
+		UPDATE reimbursement.claims AS claim SET
+		  version=claim.version+1, updated_at=now(),
+		  requested_amount_cent=CASE WHEN claim.requested_amount_source='OCR_SUGGESTED' THEN
+		    CASE WHEN claim.itemization_mode='ITEMIZED' THEN (
+		      SELECT sum(item.amount_cent) FROM reimbursement.expense_items AS item
+		      JOIN reimbursement.receipts AS receipt ON receipt.id=item.receipt_id
+		      WHERE item.claim_id=claim.id AND receipt.status='EXTRACTED'
+		    ) ELSE (
+		      SELECT sum(receipt.total_amount_cent) FROM reimbursement.receipts AS receipt
+		      WHERE receipt.claim_id=claim.id AND receipt.status='EXTRACTED'
+		    ) END ELSE claim.requested_amount_cent END,
+		  purpose=CASE WHEN claim.itemization_mode='ITEMIZED' AND claim.purpose_source='AUTO' THEN COALESCE((
+		    SELECT string_agg(DISTINCT item.purpose, '、' ORDER BY item.purpose)
+		    FROM reimbursement.expense_items AS item JOIN reimbursement.receipts AS receipt ON receipt.id=item.receipt_id
+		    WHERE item.claim_id=claim.id AND receipt.status='EXTRACTED' AND item.purpose<>''
+		  ), '') ELSE claim.purpose END
+		WHERE claim.id=$1
+	`, claimID); err != nil {
+		return application.ReviewCase{}, fmt.Errorf("refresh claim after review: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return application.ReviewCase{}, fmt.Errorf("commit review case resolution: %w", err)

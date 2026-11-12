@@ -51,6 +51,7 @@ type ValidationResult struct {
 type SubmissionInput struct {
 	Claim    domain.Claim
 	Receipts []domain.Receipt
+	Items    []domain.ExpenseItem
 }
 
 type SubmissionRepository interface {
@@ -89,7 +90,7 @@ func (service *SubmissionService) ValidateClaim(ctx context.Context, actorID str
 		return ValidationResult{}, fmt.Errorf("load active policy: %w", err)
 	}
 	if policy != nil {
-		policyIssues, err := EvaluatePolicyRules(*policy, input.Claim)
+		policyIssues, err := EvaluatePolicyRules(*policy, input.Claim, input.Items)
 		if err != nil {
 			return ValidationResult{}, fmt.Errorf("evaluate active policy: %w", err)
 		}
@@ -179,6 +180,14 @@ func validateSubmissionInput(input SubmissionInput) []domain.ValidationIssue {
 	}
 	if len(input.Receipts) == 0 {
 		issues = append(issues, domain.ValidationIssue{Code: "RECEIPT_REQUIRED", Message: "至少需要一张票据", Blocking: true})
+	}
+	if input.Claim.ItemizationMode == domain.ClaimItemizationModeItemized && len(input.Items) != len(input.Receipts) {
+		issues = append(issues, domain.ValidationIssue{Code: "EXPENSE_ITEM_REQUIRED", Message: "请完成每张票据的费用明细", Blocking: true})
+	}
+	if input.Claim.ItemizationMode == domain.ClaimItemizationModeItemized {
+		if len(input.Claim.SelectedExpenseCategories) == 0 {
+			issues = append(issues, domain.ValidationIssue{Code: "EXPENSE_CATEGORY_REQUIRED", Message: "请选择最终费用类别", Blocking: true})
+		}
 	}
 	for _, receipt := range input.Receipts {
 		if receipt.Status == domain.ReceiptStatusReview || receipt.Status == domain.ReceiptStatusQuarantined {

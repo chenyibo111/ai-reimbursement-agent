@@ -15,6 +15,8 @@ func writeMappedError(response http.ResponseWriter, err error) {
 		writeError(response, http.StatusNotFound, "NOT_FOUND", "未找到可访问的报销单")
 	case errors.Is(err, application.ErrValidationBlocked):
 		writeError(response, http.StatusUnprocessableEntity, "VALIDATION_BLOCKED", "报销单尚未满足提交条件")
+	case errors.Is(err, application.ErrItemizedFieldsRequireItem):
+		writeError(response, http.StatusConflict, "ITEMIZED_FIELDS_REQUIRED", "请逐条修改票据费用明细")
 	case errors.Is(err, application.ErrStaleSubmissionConfirmation), errors.Is(err, application.ErrClaimVersionConflict), errors.Is(err, domain.ErrClaimVersionConflict):
 		writeError(response, http.StatusConflict, "VERSION_CONFLICT", "报销单已变化，请重新确认")
 	case errors.Is(err, application.ErrSubmissionConfirmationExpired):

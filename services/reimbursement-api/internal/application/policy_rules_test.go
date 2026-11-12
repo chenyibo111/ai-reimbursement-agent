@@ -18,6 +18,22 @@ func TestEvaluatePolicyRulesEnforcesOnlySupportedClaimFields(t *testing.T) {
 	}
 }
 
+func TestItemizedPolicyChecksFinalCategoriesAndClaimFields(t *testing.T) {
+	policy := PolicyVersion{ID: "mixed", EffectiveDate: "2026-10-01", Rules: []PolicyRule{
+		{Code: "ALLOWED", Name: "允许类别", Type: "CATEGORY_ALLOWED", Severity: "BLOCKING", Config: []byte(`{"categories":["交通费","餐饮费"]}`)},
+		{Code: "PROJECT", Name: "餐饮项目", Type: "CATEGORY_REQUIRED_FIELD", Severity: "BLOCKING", Config: []byte(`{"category":"餐饮费","field":"projectCode"}`)},
+	}}
+	claim := domain.Claim{ItemizationMode: domain.ClaimItemizationModeItemized, SelectedExpenseCategories: []string{"餐饮费"}}
+	items := []domain.ExpenseItem{
+		{ID: "taxi", ReceiptID: "taxi", ExpenseCategory: "其他"},
+		{ID: "dining", ReceiptID: "dining", ExpenseCategory: "交通费"},
+	}
+	issues, err := EvaluatePolicyRules(policy, claim, items)
+	if err != nil || len(issues) != 1 || issues[0].Code != "POLICY_PROJECT" || issues[0].ReceiptID != "" {
+		t.Fatalf("issues=%+v err=%v", issues, err)
+	}
+}
+
 func TestCategoryRulesRejectMissingCategoryAndBlankParticipants(t *testing.T) {
 	policy := PolicyVersion{ID: "policy-3", EffectiveDate: "2026-10-01", Rules: []PolicyRule{
 		{Code: "ALLOWED", Name: "允许类别", Type: "CATEGORY_ALLOWED", Severity: "BLOCKING", Config: []byte(`{"categories":["住宿"]}`)},

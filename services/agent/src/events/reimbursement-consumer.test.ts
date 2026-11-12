@@ -3,6 +3,18 @@ import { describe, expect, it, vi } from "vitest";
 import { createReimbursementEventConsumer } from "./reimbursement-consumer";
 
 describe("reimbursement event consumer", () => {
+  it("waits for the itemized write before notifying an OCR completion", async () => {
+    const port = { getClaimWorkbench: vi.fn().mockResolvedValueOnce({ claim: { itemizationMode: "ITEMIZED", expenseItems: [] }, receipts: [] }).mockResolvedValueOnce({ claim: { itemizationMode: "ITEMIZED", expenseItems: [{ receiptId: "receipt-1" }] }, receipts: [] }) };
+    const notify = vi.fn();
+    const markProcessed = vi.fn();
+    const consumer = createReimbursementEventConsumer({ port: port as never, wasProcessed: vi.fn().mockResolvedValue(false), markProcessed, findNotificationTarget: vi.fn().mockResolvedValue({ employeeId: "employee-1", conversationId: "conversation-1", chatId: "oc-private" }), notify });
+    const event = { event_id: "event-1", event_type: "ReceiptExtractionCompleted", aggregate_id: "receipt-1", payload: { claimId: "claim-1" } };
+    await expect(consumer.handle(event)).rejects.toThrow("not ready");
+    expect(notify).not.toHaveBeenCalled();
+    expect(markProcessed).not.toHaveBeenCalled();
+    await consumer.handle(event);
+    expect(notify).toHaveBeenCalledOnce();
+  });
   it("uses receipt.extraction.completed only to notify and refetches the workbench through agent-owned routing", async () => {
     const port = { getClaimWorkbench: vi.fn().mockResolvedValue({ claim: { id: "claim-1", version: 2, status: "DRAFT", purpose: "客户拜访" }, receipts: [] }) };
     const notify = vi.fn();

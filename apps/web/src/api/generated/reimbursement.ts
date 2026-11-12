@@ -7,6 +7,12 @@ export type ReceiptStatus = "UPLOAD_PENDING" | "READY_FOR_OCR" | "EXTRACTED" | "
 
 export interface Claim {
   id: string;
+	itemizationMode?: "LEGACY" | "ITEMIZED";
+	expenseItems?: ExpenseItem[];
+	expenseCategories?: string[];
+	selectedExpenseCategories?: string[];
+	expenseCategoriesSource?: "AUTO" | "MANUAL";
+	expenseItemTotalAmountCent?: number | null;
 	claimNumber: string;
   ownerId?: string;
   status: ClaimStatus;
@@ -29,6 +35,32 @@ export interface Claim {
   updatedAt: string;
 }
 
+export interface ExpenseItem {
+	id: string;
+	claimId: string;
+	receiptId: string;
+	receiptType: string;
+	classificationStatus?: "PENDING" | "CLASSIFIED" | "UNKNOWN" | "FAILED" | "CATEGORY_UNMAPPED";
+	classificationVersion?: string;
+	expenseCategory: string;
+	categorySource: "" | "MODEL" | "MANUAL";
+	purpose: string;
+	purposeSource: "" | "MODEL" | "MANUAL";
+	amountCent: number | null;
+	amountSource: "" | "OCR" | "MANUAL";
+	projectCode: string;
+	participants: string[];
+}
+
+export interface ExpenseItemPatch {
+	version: number;
+	expenseCategory?: string;
+	purpose?: string;
+	amountCent?: number;
+	projectCode?: string;
+	participants?: string[];
+}
+
 export type ClaimSearchQuery = {
   status?: "DRAFT" | "SUBMITTED";
   createdFrom?: string;
@@ -48,6 +80,7 @@ export interface ClaimPatch {
   version: number;
   purpose?: string;
   expenseCategory?: string;
+  selectedExpenseCategories?: string[];
   participants?: string[];
   projectCode?: string;
   requestedAmountCent?: number;
@@ -74,6 +107,8 @@ export interface ValidationIssue {
   code: string;
   severity: "BLOCKING" | "WARNING";
   message: string;
+  itemId?: string;
+  receiptId?: string;
   policyVersionId?: string;
   ruleCode?: string;
 }

@@ -3,7 +3,7 @@ import type { AgentMessageChannel, AgentMessageRole, ReimbursementIntakeStatus }
 import type { ConversationDecision, ChatModel } from "@/src/infrastructure/model/chat-model";
 import type { PolicyCitation, PolicySearchResult } from "@/src/application/search-policy-knowledge";
 import { formatClaimFacts, type ClaimFactKind } from "@/src/application/format-claim-facts";
-import type { ClaimFieldPatch, ClaimSnapshot, ReceiptSnapshot, ValidationSnapshot } from "@/services/agent/src/ports/reimbursement-port";
+import type { ClaimFieldPatch, ClaimSnapshot, ExpenseItemPatch, ReceiptSnapshot, ValidationSnapshot } from "@/services/agent/src/ports/reimbursement-port";
 import { ReimbursementApiHttpError } from "@/services/agent/src/adapters/reimbursement-api-client";
 import { formatClaimSearchPage, normalizeClaimSearch, readClaimSearchState } from "@/src/application/claim-search";
 import type { OwnedClaimSearchPage, OwnedClaimSearchQuery } from "@/services/agent/src/ports/reimbursement-port";
@@ -55,6 +55,7 @@ export type RunConversationTurnDeps = {
   extractReceipt?: (input: { actorId: string; claimId: string; receiptId: string }) => Promise<unknown>;
   updatePurpose?: (input: { actorId: string; claimId: string; value: string }) => Promise<{ version: number }>;
   updateFields?: (input: { actorId: string; claimId: string; fields: ClaimFieldPatch }) => Promise<ClaimSnapshot>;
+  updateExpenseItem?: (input: { actorId: string; claimId: string; itemId: string; fields: ExpenseItemPatch }) => Promise<ClaimSnapshot>;
   readWorkbench?: (input: { actorId: string; claimId: string }) => Promise<{ claim: ClaimSnapshot; receipts: ReceiptSnapshot[] }>;
   deleteReceipt?: (input: { actorId: string; claimId: string; receiptId: string; expectedClaimVersion: number }) => Promise<void>;
   deleteDraft?: (input: { actorId: string; claimId: string; expectedClaimVersion: number }) => Promise<void>;
@@ -436,6 +437,20 @@ async function applyDecision(
     if (writeTargetIsAmbiguous({ intakeClaimId: intake?.claimId, selectedReadClaimId, selectedEditClaimId, targetReference: decision.targetReference })) return persistReply(input, intake, "当前查询的单据与正在办理的草稿不同。请明确要办理的报销单号，或说明“修改当前草稿”。", [], deps.conversations);
     const fields = validFieldPatch(decision.fields);
     if (!fields) return persistReply(input, intake, "这项信息不能在对话中保存；金额、币种和备注请到 Web 工作台填写。", [], deps.conversations, undefined, selectedEditClaimId ?? intake?.claimId ?? undefined);
+    const explicitOrdinal = receiptOrdinalFromMessage(input.message);
+    const namedReceiptPurpose = fields.purpose !== undefined && /(?:打车|出租车|网约车|餐饮|餐费|住宿|酒店|火车|高铁|铁路|机票|飞机)(?:发票|票据|票)|\.pdf\b|(?:发票|票据)的?事由/.test(input.message);
+    const itemFieldsRequested = decision.receiptOrdinal !== undefined || explicitOrdinal !== null || namedReceiptPurpose || fields.expenseCategory !== undefined || fields.projectCode !== undefined || fields.participants !== undefined;
+    const itemClaimId = decision.targetReference === "CURRENT_INTAKE" ? intake?.claimId : selectedEditClaimId ?? intake?.claimId;
+    if (itemFieldsRequested && itemClaimId && deps.readWorkbench) {
+      try {
+        const workbench = await deps.readWorkbench({ actorId: input.actorId, claimId: itemClaimId });
+        if (workbench.claim.itemizationMode === "ITEMIZED" && itemFieldsRequested) {
+          if (workbench.claim.status !== "DRAFT") return persistReply(input, intake, "当前报销单已不能修改，请重新核对。", [], deps.conversations);
+          if (decision.receiptOrdinal && decision.receiptOrdinal !== explicitOrdinal) return persistReply(input, intake, "请明确要修改的票据序号，本次未修改。", [], deps.conversations, undefined, itemClaimId);
+          return persistReply(input, intake, "票据识别结果只读。请在报销工作台的“申请报销信息”中修改整单费用类别、报销事由或补充信息；本次未修改。", [], deps.conversations, undefined, itemClaimId);
+        }
+      } catch { return persistReply(input, intake, "当前报销单无法核验，本次未保存。", [], deps.conversations); }
+    }
     if (selectedEditClaimId && decision.targetReference !== "CURRENT_INTAKE") {
       if (!deps.updateFields) return persistReply(input, intake, "报销服务暂不可用，未确认写入。", [], deps.conversations);
       const safe = intake ? await clearSubmissionPreparation(intake, deps.conversations) : null;
@@ -533,11 +548,23 @@ async function applyDecision(
       : intake ? await clearSubmissionPreparation(intake, deps.conversations) : null;
     await deps.conversations.setPendingAction({ conversationId: input.conversationId, action: { kind: "SUBMIT", claimId: targetId, claimVersion: prepared.claimVersion, confirmationToken: prepared.token, preview: { claimNumber: claim.claimNumber, purpose: claim.purpose ?? null, requestedAmountCent: claim.requestedAmountCent ?? null, receiptCount: receipts.length }, targetScope, expiresAt: new Date(Date.now() + 5 * 60_000).toISOString() } });
     const amount = typeof claim.requestedAmountCent === "number" ? `¥${(claim.requestedAmountCent / 100).toFixed(2)}` : "未填写";
-    const reply = `提交前请核对 ${claim.claimNumber}：报销事由 ${claim.purpose || "未填写"}；申请金额 ${amount}；票据 ${receipts.length} 张。确认无误后在 5 分钟内回复“确认提交”。`;
+    const itemTotal = claim.expenseItemTotalAmountCent;
+    const itemSummary = claim.itemizationMode === "ITEMIZED"
+      ? `；明细合计 ${typeof itemTotal === "number" ? `¥${(itemTotal / 100).toFixed(2)}` : "待补充"}${typeof claim.requestedAmountCent === "number" && typeof itemTotal === "number" ? `；差额 ¥${(Math.abs(claim.requestedAmountCent - itemTotal) / 100).toFixed(2)}` : ""}`
+      : "";
+    const reply = `提交前请核对 ${claim.claimNumber}：报销事由 ${claim.purpose || "未填写"}；申请金额 ${amount}${itemSummary}；票据 ${receipts.length} 张。确认无误后在 5 分钟内回复“确认提交”。`;
     return persistReply(input, updated, reply, [], deps.conversations, undefined, targetId);
   }
 
   return persistReply(input, intake, "如需查询当前报销单或票据金额，请明确提出查询；如需继续办理，请在报销工作台查看和填写。", [], deps.conversations);
+}
+
+function receiptOrdinalFromMessage(message: string): number | null {
+  const match = /第\s*(\d{1,3}|[一二三四五六七八九十])\s*张/.exec(message);
+  if (!match) return null;
+  const names: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+  const ordinal = names[match[1]] ?? Number(match[1]);
+  return Number.isSafeInteger(ordinal) && ordinal > 0 && ordinal <= 100 ? ordinal : null;
 }
 
 function validFieldPatch(value: ConversationDecision["fields"]): ClaimFieldPatch | null {

@@ -16,6 +16,7 @@ var (
 type ClaimStatus string
 
 type RequestedAmountSource string
+type ClaimItemizationMode string
 
 const (
 	ClaimStatusDraft               ClaimStatus           = "DRAFT"
@@ -23,6 +24,8 @@ const (
 	RequestedAmountSourceSuggested RequestedAmountSource = "OCR_SUGGESTED"
 	RequestedAmountSourceManual    RequestedAmountSource = "MANUAL"
 	ClaimCurrencyCNY                                     = "CNY"
+	ClaimItemizationModeLegacy     ClaimItemizationMode  = "LEGACY"
+	ClaimItemizationModeItemized   ClaimItemizationMode  = "ITEMIZED"
 	MaxClaimRemarkRunes                                  = 1000
 )
 
@@ -31,8 +34,12 @@ type Claim struct {
 	ClaimNumber               string
 	OwnerID                   string
 	Status                    ClaimStatus
+	ItemizationMode           ClaimItemizationMode
 	Purpose                   string
+	PurposeSource             string
 	ExpenseCategory           string
+	SelectedExpenseCategories []string
+	ExpenseCategoriesSource   string
 	Participants              []string
 	ProjectCode               string
 	Version                   int64
@@ -51,14 +58,15 @@ type Claim struct {
 }
 
 type ClaimPatch struct {
-	Purpose               *string
-	ExpenseCategory       *string
-	Participants          *[]string
-	ProjectCode           *string
-	RequestedAmountCent   *int64
-	Currency              *string
-	Remark                *string
-	UseOCRSuggestedAmount bool
+	Purpose                   *string
+	ExpenseCategory           *string
+	SelectedExpenseCategories *[]string
+	Participants              *[]string
+	ProjectCode               *string
+	RequestedAmountCent       *int64
+	Currency                  *string
+	Remark                    *string
+	UseOCRSuggestedAmount     bool
 }
 
 func NewDraftClaim(id string, claimNumber string, ownerID string, purpose string) (Claim, error) {
@@ -67,16 +75,19 @@ func NewDraftClaim(id string, claimNumber string, ownerID string, purpose string
 	}
 	now := time.Now().UTC()
 	return Claim{
-		ID:                    id,
-		ClaimNumber:           claimNumber,
-		OwnerID:               ownerID,
-		Status:                ClaimStatusDraft,
-		Purpose:               strings.TrimSpace(purpose),
-		Currency:              ClaimCurrencyCNY,
-		RequestedAmountSource: RequestedAmountSourceSuggested,
-		Version:               1,
-		CreatedAt:             now,
-		UpdatedAt:             now,
+		ID:                      id,
+		ClaimNumber:             claimNumber,
+		OwnerID:                 ownerID,
+		Status:                  ClaimStatusDraft,
+		ItemizationMode:         ClaimItemizationModeLegacy,
+		Purpose:                 strings.TrimSpace(purpose),
+		PurposeSource:           "MANUAL",
+		ExpenseCategoriesSource: "AUTO",
+		Currency:                ClaimCurrencyCNY,
+		RequestedAmountSource:   RequestedAmountSourceSuggested,
+		Version:                 1,
+		CreatedAt:               now,
+		UpdatedAt:               now,
 	}, nil
 }
 
@@ -89,9 +100,27 @@ func (claim *Claim) Patch(expectedVersion int64, patch ClaimPatch) error {
 	}
 	if patch.Purpose != nil {
 		claim.Purpose = strings.TrimSpace(*patch.Purpose)
+		claim.PurposeSource = "MANUAL"
 	}
 	if patch.ExpenseCategory != nil {
 		claim.ExpenseCategory = *patch.ExpenseCategory
+	}
+	if patch.SelectedExpenseCategories != nil {
+		if claim.ItemizationMode != ClaimItemizationModeItemized || len(*patch.SelectedExpenseCategories) > 20 {
+			return ErrInvalidClaim
+		}
+		seen := make(map[string]bool, len(*patch.SelectedExpenseCategories))
+		categories := make([]string, 0, len(*patch.SelectedExpenseCategories))
+		for _, value := range *patch.SelectedExpenseCategories {
+			category := strings.TrimSpace(value)
+			if category == "" || utf8.RuneCountInString(category) > 100 || seen[category] {
+				return ErrInvalidClaim
+			}
+			seen[category] = true
+			categories = append(categories, category)
+		}
+		claim.SelectedExpenseCategories = categories
+		claim.ExpenseCategoriesSource = "MANUAL"
 	}
 	if patch.Participants != nil {
 		claim.Participants = append([]string(nil), (*patch.Participants)...)
@@ -143,6 +172,7 @@ func (claim Claim) CanDelete(expectedVersion int64) error {
 
 func (claim Claim) Clone() Claim {
 	claim.Participants = append([]string(nil), claim.Participants...)
+	claim.SelectedExpenseCategories = append([]string(nil), claim.SelectedExpenseCategories...)
 	if claim.TotalAmountCent != nil {
 		total := *claim.TotalAmountCent
 		claim.TotalAmountCent = &total

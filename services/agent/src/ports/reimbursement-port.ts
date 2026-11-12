@@ -15,6 +15,11 @@ export type ClaimSnapshot = {
   status: string;
   purpose: string | null;
   expenseCategory?: string;
+  expenseCategories?: string[];
+  selectedExpenseCategories?: string[];
+  expenseItems?: ExpenseItemSnapshot[];
+  expenseItemTotalAmountCent?: number | null;
+  itemizationMode?: "LEGACY" | "ITEMIZED";
   participants?: string[];
   projectCode?: string;
   totalAmountCent: number | null;
@@ -22,6 +27,8 @@ export type ClaimSnapshot = {
   requestedAmountCent?: number | null;
   receiptCount?: number;
 };
+export type ExpenseItemSnapshot = { id: string; receiptId: string; receiptType: string; classificationStatus?: string; expenseCategory: string; categorySource: string; purpose: string; purposeSource: string; amountCent: number | null; amountSource: string; projectCode: string; participants: string[] };
+export type ExpenseItemPatch = { expenseCategory?: string; purpose?: string; amountCent?: number; projectCode?: string; participants?: string[] };
 export type ClaimFieldPatch = { purpose?: string; expenseCategory?: string; participants?: string[]; projectCode?: string };
 export type OwnedClaimSearchQuery = {
   status?: "DRAFT" | "SUBMITTED";
@@ -58,6 +65,7 @@ export interface ReimbursementPort {
   searchOwnedClaims(input: ToolCallContext & { query: OwnedClaimSearchQuery }): Promise<OwnedClaimSearchPage>;
   findOwnedClaimByNumber(input: ToolCallContext & { claimNumber: string }): Promise<ClaimSnapshot | null>;
   updateClaimFields(input: ToolCallContext & { claimId: string; version: number; fields: ClaimFieldPatch }): Promise<ClaimSnapshot>;
+  updateExpenseItem(input: ToolCallContext & { claimId: string; itemId: string; version: number; fields: ExpenseItemPatch }): Promise<ClaimSnapshot>;
   getClaimValidation(input: ToolCallContext & { claimId: string }): Promise<ValidationSnapshot>;
   getOwnedClaimProgress(input: ToolCallContext & { claimId: string }): Promise<ClaimProgressSnapshot>;
   requestSubmissionConfirmation(input: ToolCallContext & { claimId: string; version: number }): Promise<{ confirmationToken: string; claimId: string; claimVersion: number }>;

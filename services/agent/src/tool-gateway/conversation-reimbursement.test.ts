@@ -5,6 +5,15 @@ import { ReimbursementApiHttpError } from "../adapters/reimbursement-api-client"
 import { ReimbursementToolGateway } from "./reimbursement-tools";
 
 describe("createConversationReimbursementTools", () => {
+  it("reads back a single item edit before reporting success", async () => {
+    const before = { claim: { id: "claim-1", status: "DRAFT", version: 3, expenseItems: [{ id: "taxi", receiptId: "receipt-1", expenseCategory: "交通费" }] }, receipts: [] };
+    const after = { claim: { ...before.claim, version: 4, expenseItems: [{ id: "taxi", receiptId: "receipt-1", expenseCategory: "市内交通费" }] }, receipts: [] };
+    const execute = vi.fn().mockResolvedValueOnce({ workbench: before }).mockResolvedValueOnce({ claim: after.claim }).mockResolvedValueOnce({ workbench: after });
+    const tools = createConversationReimbursementTools({ execute } as never);
+    await expect(tools.updateExpenseItem(context, "claim-1", "taxi", { expenseCategory: "市内交通费" })).resolves.toEqual(after.claim);
+    expect(execute.mock.calls.map(([call]) => call.name)).toEqual(["get_claim_workbench", "update_expense_item", "get_claim_workbench"]);
+    expect(execute.mock.calls[1][0].arguments).toEqual({ claimId: "claim-1", itemId: "taxi", version: 3, expenseCategory: "市内交通费" });
+  });
   const context = { actorId: "employee-1", actorRole: "EMPLOYEE" as const, channel: "FEISHU" as const, conversationId: "conversation-1", turnId: "message-1" };
 
   it("uses separate stable identities for pre-read, patch and post-read", async () => {

@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 
-import type { ClaimFieldPatch, ClaimProgressSnapshot, ClaimSnapshot, OwnedClaimSearchPage, OwnedClaimSearchQuery, ReimbursementPort, ReceiptSnapshot, ToolCallContext, ValidationSnapshot } from "../ports/reimbursement-port";
+import type { ClaimFieldPatch, ClaimProgressSnapshot, ClaimSnapshot, ExpenseItemPatch, OwnedClaimSearchPage, OwnedClaimSearchQuery, ReimbursementPort, ReceiptSnapshot, ToolCallContext, ValidationSnapshot } from "../ports/reimbursement-port";
 
 type ApiClientOptions = {
   baseUrl: string;
@@ -42,7 +42,7 @@ export class ReimbursementApiClient implements ReimbursementPort {
   async getClaimWorkbench(input: ToolCallContext & { claimId: string }) {
     const path = `/api/v1/claims/${encodeURIComponent(input.claimId)}`;
     const [claim, receipts] = await Promise.all([this.request<ClaimSnapshot>(input, path, "GET"), this.request<{ items: ReceiptSnapshot[] }>(input, `${path}/receipts`, "GET")]);
-    return { claim, receipts: receipts.items };
+    return { claim: assertClaimSnapshot(claim), receipts: receipts.items };
   }
   async listOwnedClaims(input: ToolCallContext & { limit: number }) {
     const response = await this.request<{ items: ClaimSnapshot[] }>(input, `/api/v1/claims?limit=${input.limit}`, "GET");
@@ -70,6 +70,7 @@ export class ReimbursementApiClient implements ReimbursementPort {
     return response.items.length ? assertClaimSnapshot(response.items[0]) : null;
   }
   updateClaimFields(input: ToolCallContext & { claimId: string; version: number; fields: ClaimFieldPatch }) { return this.request<ClaimSnapshot>(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}`, "PATCH", { version: input.version, ...input.fields }); }
+  updateExpenseItem(input: ToolCallContext & { claimId: string; itemId: string; version: number; fields: ExpenseItemPatch }) { return this.request<ClaimSnapshot>(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}/items/${encodeURIComponent(input.itemId)}`, "PATCH", { version: input.version, ...input.fields }); }
   getClaimValidation(input: ToolCallContext & { claimId: string }) { return this.request<ValidationSnapshot>(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}/validation`, "GET"); }
   getOwnedClaimProgress(input: ToolCallContext & { claimId: string }) { return this.request<ClaimProgressSnapshot>(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}/progress`, "GET"); }
   requestSubmissionConfirmation(input: ToolCallContext & { claimId: string; version: number }) { return this.request<{ confirmationToken: string; claimId: string; claimVersion: number }>(input, `/api/v1/claims/${encodeURIComponent(input.claimId)}/submission-requests`, "POST", { version: input.version }); }
@@ -92,7 +93,7 @@ export class ReimbursementApiClient implements ReimbursementPort {
 }
 
 function assertClaimSnapshot(value: ClaimSnapshot): ClaimSnapshot {
-  const participants = value?.participants === null ? [] : value?.participants;
-  if (!value || typeof value.id !== "string" || typeof value.claimNumber !== "string" || typeof value.version !== "number" || typeof value.status !== "string" || !Array.isArray(participants) || typeof value.expenseCategory !== "string" || typeof value.projectCode !== "string") throw new Error("invalid claim response");
-  return { ...value, participants };
+  const participants = value?.participants ?? [];
+  if (!value || typeof value.id !== "string" || typeof value.claimNumber !== "string" || typeof value.version !== "number" || typeof value.status !== "string" || !Array.isArray(participants) || (value.expenseCategory != null && typeof value.expenseCategory !== "string") || (value.projectCode != null && typeof value.projectCode !== "string")) throw new Error("invalid claim response");
+  return { ...value, participants, expenseCategory: value.expenseCategory ?? "", projectCode: value.projectCode ?? "" };
 }

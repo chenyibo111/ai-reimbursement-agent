@@ -29,9 +29,14 @@ export function createReimbursementEventConsumer(deps: {
         idempotencyKey: `event:${event.event_id}:read`,
         claimId,
       };
-      const current = isReceipt
-        ? { workbench: await deps.port.getClaimWorkbench(context) }
-        : { progress: await deps.port.getOwnedClaimProgress(context) };
+      let current;
+      if (isReceipt) {
+        const workbench = await deps.port.getClaimWorkbench(context);
+        if (workbench.claim.itemizationMode === "ITEMIZED" && !workbench.claim.expenseItems?.some((item) => item.receiptId === event.aggregate_id)) throw new Error("receipt expense item is not ready for notification");
+        current = { workbench };
+      } else {
+        current = { progress: await deps.port.getOwnedClaimProgress(context) };
+      }
       await deps.notify({ eventId: event.event_id, eventType: event.event_type, claimId, ...(isReceipt ? { receiptId: event.aggregate_id } : {}), conversationId: target.conversationId, chatId: target.chatId, ...current });
       await deps.markProcessed(event.event_id);
     },

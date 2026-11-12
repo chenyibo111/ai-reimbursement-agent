@@ -18,10 +18,11 @@ import (
 var claimNumberPattern = regexp.MustCompile(`^BX[0-9]{8}-[0-9]{4,}$`)
 
 type claimsHandler struct {
-	claims      ClaimService
-	submissions SubmissionService
-	progress    ClaimProgressService
-	receipts    ReceiptService
+	claims       ClaimService
+	submissions  SubmissionService
+	progress     ClaimProgressService
+	receipts     ReceiptService
+	expenseItems ExpenseItemService
 }
 
 func (handler *claimsHandler) getClaimProgress(response http.ResponseWriter, request *http.Request) {
@@ -342,7 +343,88 @@ func (handler *claimsHandler) getClaim(response http.ResponseWriter, request *ht
 		writeMappedError(response, err)
 		return
 	}
-	writeJSON(response, http.StatusOK, claimResponse(claim))
+	result, err := handler.claimDetailResponse(request.Context(), actor.ID, claim)
+	if err != nil {
+		writeMappedError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, result)
+}
+
+func (handler *claimsHandler) claimDetailResponse(ctx context.Context, actorID string, claim application.ClaimView) (map[string]any, error) {
+	result := claimResponse(claim)
+	result["expenseItems"] = []any{}
+	result["expenseCategories"] = []string{}
+	result["expenseItemTotalAmountCent"] = nil
+	if claim.ItemizationMode != domain.ClaimItemizationModeItemized {
+		return result, nil
+	}
+	if handler.expenseItems == nil || handler.receipts == nil {
+		return nil, errors.New("expense items or receipts are not configured")
+	}
+	items, err := handler.expenseItems.ListOwnedByClaim(ctx, actorID, claim.ID)
+	if err != nil {
+		return nil, err
+	}
+	receipts, err := handler.receipts.ListReceipts(ctx, actorID, claim.ID)
+	if err != nil {
+		return nil, err
+	}
+	activeReceipts := make(map[string]bool, len(receipts))
+	for _, receipt := range receipts {
+		activeReceipts[receipt.ID] = receipt.Status == domain.ReceiptStatusExtracted
+	}
+	values := make([]map[string]any, 0, len(items))
+	categories := []string{}
+	seen := map[string]bool{}
+	var itemTotal int64
+	completeAmount := true
+	activeItemCount := 0
+	for _, item := range items {
+		values = append(values, expenseItemResponse(item))
+		if !activeReceipts[item.ReceiptID] {
+			continue
+		}
+		activeItemCount++
+		if item.AmountCent == nil {
+			completeAmount = false
+		} else {
+			itemTotal += *item.AmountCent
+		}
+		if item.ExpenseCategory != "" && !seen[item.ExpenseCategory] {
+			categories = append(categories, item.ExpenseCategory)
+			seen[item.ExpenseCategory] = true
+		}
+	}
+	result["expenseItems"] = values
+	result["expenseCategories"] = categories
+	if completeAmount && activeItemCount > 0 {
+		result["expenseItemTotalAmountCent"] = itemTotal
+	}
+	return result, nil
+}
+
+func expenseItemResponse(item domain.ExpenseItem) map[string]any {
+	return map[string]any{
+		"id": item.ID, "claimId": item.ClaimID, "receiptId": item.ReceiptID,
+		"receiptType": item.ReceiptType, "classificationStatus": item.ClassificationStatus, "classificationVersion": item.ClassificationVersion, "expenseCategory": item.ExpenseCategory,
+		"categorySource": item.CategorySource, "purpose": item.Purpose, "purposeSource": item.PurposeSource,
+		"amountCent": item.AmountCent, "amountSource": item.AmountSource,
+		"projectCode": item.ProjectCode, "participants": item.Participants,
+	}
+}
+
+func (handler *claimsHandler) patchExpenseItem(response http.ResponseWriter, request *http.Request) {
+	actor, _ := ActorFromContext(request.Context())
+	if strings.TrimSpace(request.Header.Get("Idempotency-Key")) == "" {
+		writeError(response, http.StatusBadRequest, "IDEMPOTENCY_KEY_REQUIRED", "请提供 Idempotency-Key")
+		return
+	}
+	if _, err := handler.claims.GetClaim(request.Context(), actor.ID, pathClaimID(request)); err != nil {
+		writeMappedError(response, err)
+		return
+	}
+	writeError(response, http.StatusConflict, "READ_ONLY_RECOGNITION", "票据识别结果只读，请修改申请报销信息")
 }
 
 func (handler *claimsHandler) deleteClaim(response http.ResponseWriter, request *http.Request) {
@@ -401,6 +483,13 @@ func (handler *claimsHandler) patchClaim(response http.ResponseWriter, request *
 				command.UnknownFields = append(command.UnknownFields, field)
 			} else {
 				command.ExpenseCategory = &category
+			}
+		case "selectedExpenseCategories":
+			var categories []string
+			if string(value) == "null" || json.Unmarshal(value, &categories) != nil {
+				command.UnknownFields = append(command.UnknownFields, field)
+			} else {
+				command.SelectedExpenseCategories = &categories
 			}
 		case "participants":
 			var participants []string
@@ -473,9 +562,12 @@ func claimResponse(claim application.ClaimView) map[string]any {
 		"claimNumber":               claim.ClaimNumber,
 		"ownerId":                   claim.OwnerID,
 		"status":                    claim.Status,
+		"itemizationMode":           claim.ItemizationMode,
 		"version":                   claim.Version,
 		"purpose":                   claim.Purpose,
 		"expenseCategory":           claim.ExpenseCategory,
+		"selectedExpenseCategories": append([]string{}, claim.SelectedExpenseCategories...),
+		"expenseCategoriesSource":   claim.ExpenseCategoriesSource,
 		"participants":              claim.Participants,
 		"projectCode":               claim.ProjectCode,
 		"receiptCount":              claim.ReceiptCount,
@@ -550,6 +642,12 @@ func validationIssueResponse(issue domain.ValidationIssue, policyVersion string)
 		severity = "BLOCKING"
 	}
 	entry := map[string]any{"code": issue.Code, "severity": severity, "message": issue.Message}
+	if issue.ItemID != "" {
+		entry["itemId"] = issue.ItemID
+	}
+	if issue.ReceiptID != "" {
+		entry["receiptId"] = issue.ReceiptID
+	}
 	if strings.HasPrefix(issue.Code, "POLICY_") {
 		entry["policyVersionId"] = policyVersion
 		entry["ruleCode"] = strings.TrimPrefix(issue.Code, "POLICY_")

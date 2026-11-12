@@ -5,12 +5,14 @@ RUN go mod download
 COPY . .
 RUN go build -o /out/reimbursement-api ./cmd/api \
     && go build -o /out/reimbursement-worker ./cmd/worker \
+    && go build -o /out/convert-itemized-draft ./cmd/convert-itemized-draft \
     && go build -o /out/legacy-import ./cmd/legacy-import
 
 FROM nats:2.10-alpine
 RUN adduser -D -u 10001 app
 COPY --from=build /out/reimbursement-api /usr/local/bin/reimbursement-api
 COPY --from=build /out/reimbursement-worker /usr/local/bin/reimbursement-worker
+COPY --from=build /out/convert-itemized-draft /usr/local/bin/convert-itemized-draft
 COPY --from=build /out/legacy-import /usr/local/bin/legacy-import
 COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/reimbursement-entrypoint
 # Git checkouts on Windows can retain CRLF. Normalize before the shebang is

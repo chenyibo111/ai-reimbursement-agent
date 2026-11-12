@@ -71,6 +71,94 @@ func TestClaimResponseIncludesSavedSubmissionWarnings(t *testing.T) {
 	}
 }
 
+func TestItemizedClaimResponseIncludesTwoExpenseCategories(t *testing.T) {
+	router := NewRouter(Dependencies{Claims: itemizedFakeClaims{}, ExpenseItems: fakeExpenseItems{}, Receipts: itemizedFakeReceipts{}, Auth: StaticActorResolver{}})
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/claims/claim-1", nil)
+	request.Header.Set("Authorization", "Bearer employee-1")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"expenseCategories":["交通费","餐饮费"]`) || !strings.Contains(response.Body.String(), `"selectedExpenseCategories":["其他","餐饮费"]`) || !strings.Contains(response.Body.String(), `"expenseItemTotalAmountCent":9000`) || !strings.Contains(response.Body.String(), `"receiptId":"taxi"`) {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestItemizedClaimSummaryExcludesReceiptPendingReview(t *testing.T) {
+	router := NewRouter(Dependencies{Claims: itemizedFakeClaims{}, ExpenseItems: fakeExpenseItems{}, Receipts: itemizedFakeReceipts{reviewDining: true}, Auth: StaticActorResolver{}})
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/claims/claim-1", nil)
+	request.Header.Set("Authorization", "Bearer employee-1")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"expenseItemTotalAmountCent":3800`) || !strings.Contains(response.Body.String(), `"expenseCategories":["交通费"]`) || !strings.Contains(response.Body.String(), `"receiptId":"dining"`) {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestExpenseItemPatchDoesNotRevealAnotherEmployeesItem(t *testing.T) {
+	router := NewRouter(Dependencies{Claims: itemizedFakeClaims{}, ExpenseItems: fakeExpenseItems{}, Auth: StaticActorResolver{}})
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/claims/claim-1/items/taxi", bytes.NewBufferString(`{"version":1,"expenseCategory":"交通费"}`))
+	request.Header.Set("Authorization", "Bearer employee-2")
+	request.Header.Set("Idempotency-Key", "item-patch-1")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), `"code":"NOT_FOUND"`) {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestExpenseItemPatchRejectsChangesToReadOnlyRecognition(t *testing.T) {
+	router := NewRouter(Dependencies{Claims: itemizedFakeClaims{}, ExpenseItems: fakeExpenseItems{}, Auth: StaticActorResolver{}})
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/claims/claim-1/items/taxi", bytes.NewBufferString(`{"version":1,"expenseCategory":"市内交通费"}`))
+	request.Header.Set("Authorization", "Bearer employee-1")
+	request.Header.Set("Idempotency-Key", "item-patch-readonly")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"code":"READ_ONLY_RECOGNITION"`) {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+type itemizedFakeClaims struct{ fakeClaims }
+
+func (itemizedFakeClaims) GetClaim(ctx context.Context, actorID, claimID string) (application.ClaimView, error) {
+	claim, err := (fakeClaims{}).GetClaim(ctx, actorID, claimID)
+	claim.ItemizationMode = domain.ClaimItemizationModeItemized
+	claim.SelectedExpenseCategories = []string{"其他", "餐饮费"}
+	claim.ExpenseCategoriesSource = "MANUAL"
+	return claim, err
+}
+
+type fakeExpenseItems struct{}
+
+type itemizedFakeReceipts struct {
+	fakeReceipts
+	reviewDining bool
+}
+
+func (service itemizedFakeReceipts) ListReceipts(_ context.Context, actorID, claimID string) ([]application.ReceiptView, error) {
+	if actorID != "employee-1" || claimID != "claim-1" {
+		return nil, application.ErrClaimNotFound
+	}
+	diningStatus := domain.ReceiptStatusExtracted
+	if service.reviewDining {
+		diningStatus = domain.ReceiptStatusReview
+	}
+	return []application.ReceiptView{{ID: "taxi", Status: domain.ReceiptStatusExtracted}, {ID: "dining", Status: diningStatus}}, nil
+}
+
+func (fakeExpenseItems) ListOwnedByClaim(_ context.Context, actorID, claimID string) ([]domain.ExpenseItem, error) {
+	if actorID != "employee-1" || claimID != "claim-1" {
+		return nil, application.ErrClaimNotFound
+	}
+	taxiAmount, diningAmount := int64(3800), int64(5200)
+	return []domain.ExpenseItem{{ID: "taxi", ReceiptID: "taxi", ExpenseCategory: "交通费", AmountCent: &taxiAmount}, {ID: "dining", ReceiptID: "dining", ExpenseCategory: "餐饮费", AmountCent: &diningAmount}}, nil
+}
+func (fakeExpenseItems) PatchOwnedDraft(_ context.Context, actorID, claimID, itemID string, _ int64, _ domain.ExpenseItemPatch) (domain.ExpenseItem, error) {
+	if actorID != "employee-1" || claimID != "claim-1" || itemID != "taxi" {
+		return domain.ExpenseItem{}, application.ErrClaimNotFound
+	}
+	return domain.ExpenseItem{ID: itemID, ReceiptID: itemID, ExpenseCategory: "交通费"}, nil
+}
+
 func TestCreateClaimRequiresAuthenticationAndIdempotencyKey(t *testing.T) {
 	handler := NewRouter(Dependencies{Claims: fakeClaims{}, Auth: StaticActorResolver{}})
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/claims", bytes.NewBufferString(`{"purpose":"客户拜访"}`))

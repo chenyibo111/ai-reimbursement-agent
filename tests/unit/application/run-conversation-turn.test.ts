@@ -4,6 +4,70 @@ import { runConversationTurn, type ConversationStore } from "@/src/application/r
 import { ReimbursementApiHttpError } from "@/services/agent/src/adapters/reimbursement-api-client";
 import type { ClaimFieldPatch } from "@/services/agent/src/ports/reimbursement-port";
 
+it("keeps named receipt recognition read-only in a mixed draft", async () => {
+  const setup = createDeps();
+  const claim = { id: "claim-mixed", claimNumber: "BX20261110-0001", status: "DRAFT", version: 4, itemizationMode: "ITEMIZED" as const, purpose: "市内出行及餐饮", totalAmountCent: 9000, requestedAmountCent: 9000, currency: "CNY" as const, expenseItems: [
+    { id: "taxi-item", receiptId: "taxi", receiptType: "TAXI", expenseCategory: "交通费", categorySource: "MODEL", purpose: "市内出行打车费", purposeSource: "MODEL", amountCent: 3800, amountSource: "OCR", projectCode: "", participants: [] },
+    { id: "dining-item", receiptId: "dining", receiptType: "DINING", expenseCategory: "餐饮费", categorySource: "MODEL", purpose: "餐饮费用", purposeSource: "MODEL", amountCent: 5200, amountSource: "OCR", projectCode: "", participants: [] },
+  ] };
+  const receipts = [{ id: "taxi", claimId: claim.id, filename: "taxi.pdf", status: "EXTRACTED", invoiceNumber: "TAXI-1", ocrConfidence: 0.98, totalAmountCent: 3800 }, { id: "dining", claimId: claim.id, filename: "dining.pdf", status: "EXTRACTED", invoiceNumber: "DINING-1", ocrConfidence: 0.98, totalAmountCent: 5200 }];
+  const updateExpenseItem = vi.fn(async () => ({ ...claim, expenseItems: [{ ...claim.expenseItems[0], expenseCategory: "市内交通费" }, claim.expenseItems[1]] }));
+  const deps = { ...setup.deps, conversations: { ...setup.deps.conversations, getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0, selectedEditClaimId: claim.id }) },
+    model: { decideConversation: async () => ({ action: "COLLECT_FIELDS" as const, reply: "已经修改", receiptOrdinal: 1, fields: { expenseCategory: "市内交通费" } }) },
+    readWorkbench: async () => ({ claim, receipts }), updateExpenseItem };
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "把第一张打车票改为市内交通费" }, deps);
+  expect(updateExpenseItem).not.toHaveBeenCalled();
+  expect(result.reply).toContain("票据识别结果只读");
+  expect(result.reply).toContain("申请报销信息");
+  const group = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "group", message: "把第一张打车票改为市内交通费" }, deps);
+  expect(group.reply).toContain("私聊");
+  expect(updateExpenseItem).not.toHaveBeenCalled();
+});
+
+it("directs named receipt purpose changes to the claim form", async () => {
+  const setup = createDeps();
+  const claim = { id: "claim-mixed", claimNumber: "BX20261110-0001", status: "DRAFT", version: 4, itemizationMode: "ITEMIZED" as const, purpose: "市内出行及餐饮", totalAmountCent: 9000, currency: "CNY" as const, expenseItems: [
+    { id: "taxi-item", receiptId: "taxi", receiptType: "TAXI", purpose: "市内出行打车费" },
+    { id: "dining-item", receiptId: "dining", receiptType: "DINING", purpose: "工作餐费" },
+  ] };
+  const updateExpenseItem = vi.fn(async () => ({ ...claim, expenseItems: [{ ...claim.expenseItems[0], purpose: "客户拜访打车费" }, claim.expenseItems[1]] }));
+  const updateFields = vi.fn();
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "把打车票的事由改为客户拜访打车费" }, { ...setup.deps,
+    conversations: { ...setup.deps.conversations, getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0, selectedEditClaimId: claim.id }) },
+    model: { decideConversation: async () => ({ action: "COLLECT_FIELDS" as const, reply: "", fields: { purpose: "客户拜访打车费" } }) },
+    readWorkbench: async () => ({ claim, receipts: [{ id: "taxi", filename: "taxi.pdf" }, { id: "dining", filename: "dining.pdf" }] }), updateExpenseItem, updateFields,
+  } as never);
+  expect(result.reply).toContain("票据识别结果只读");
+  expect(updateExpenseItem).not.toHaveBeenCalled();
+  expect(updateFields).not.toHaveBeenCalled();
+});
+
+it("directs mixed draft category edits to the final claim field", async () => {
+  const setup = createDeps();
+  const claim = { id: "claim-mixed", claimNumber: "BX20261110-0001", status: "DRAFT", version: 4, itemizationMode: "ITEMIZED" as const, purpose: "", totalAmountCent: 9000, currency: "CNY" as const, expenseItems: [{ id: "taxi-item", receiptId: "taxi" }, { id: "dining-item", receiptId: "dining" }] };
+  const updateExpenseItem = vi.fn();
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "把费用类别改为交通费" }, { ...setup.deps,
+    conversations: { ...setup.deps.conversations, getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0, selectedEditClaimId: claim.id }) },
+    model: { decideConversation: async () => ({ action: "COLLECT_FIELDS" as const, reply: "已修改", fields: { expenseCategory: "交通费" } }) },
+    readWorkbench: async () => ({ claim, receipts: [{ id: "taxi", filename: "taxi.pdf" }, { id: "dining", filename: "dining.pdf" }] }), updateExpenseItem,
+  } as never);
+  expect(result.reply).toContain("申请报销信息");
+  expect(updateExpenseItem).not.toHaveBeenCalled();
+});
+
+it("rejects a model invented receipt ordinal", async () => {
+  const setup = createDeps();
+  const claim = { id: "claim-mixed", claimNumber: "BX20261110-0001", status: "DRAFT", version: 4, itemizationMode: "ITEMIZED" as const, purpose: "", totalAmountCent: 9000, currency: "CNY" as const, expenseItems: [{ id: "taxi-item", receiptId: "taxi" }, { id: "dining-item", receiptId: "dining" }] };
+  const updateExpenseItem = vi.fn();
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "把费用类别改为交通费" }, { ...setup.deps,
+    conversations: { ...setup.deps.conversations, getConversationByIdOrThrow: async () => ({ id: "conversation-1", summary: "", summaryThroughSequence: 0, selectedEditClaimId: claim.id }) },
+    model: { decideConversation: async () => ({ action: "COLLECT_FIELDS" as const, reply: "已修改", receiptOrdinal: 1, fields: { expenseCategory: "交通费" } }) },
+    readWorkbench: async () => ({ claim, receipts: [{ id: "taxi", filename: "taxi.pdf" }, { id: "dining", filename: "dining.pdf" }] }), updateExpenseItem,
+  } as never);
+  expect(result.reply).toContain("请明确要修改的票据序号");
+  expect(updateExpenseItem).not.toHaveBeenCalled();
+});
+
 it("searches twelve owned drafts in two private pages and selects only the current page ordinal", async () => {
   const setup = createDeps();
   let searchState: unknown = null;
@@ -909,6 +973,17 @@ it("prepares a fresh token and displays Go's current amount before asking confir
   expect(result.reply).not.toContain("999");
   expect(prepareSubmission).toHaveBeenCalledWith({ actorId: "employee-1", claimId: "agent-claim-1" });
   expect(getIntake()).toMatchObject({ status: "READY_TO_SUBMIT", submissionToken: null });
+});
+
+it("shows the item total and difference in an itemized submission confirmation", async () => {
+  const claim = { id: "agent-claim-1", claimNumber: "BX-001", version: 3, status: "DRAFT", itemizationMode: "ITEMIZED" as const, purpose: "市内出行及餐饮", requestedAmountCent: 9500, expenseItemTotalAmountCent: 9000, totalAmountCent: 9000, currency: "CNY" as const };
+  const workbench = { claim, receipts: [{ id: "taxi", claimId: claim.id, filename: "taxi.pdf", status: "EXTRACTED", invoiceNumber: "TAXI-1", ocrConfidence: 0.98, totalAmountCent: 3800 }, { id: "dining", claimId: claim.id, filename: "dining.pdf", status: "EXTRACTED", invoiceNumber: "DINING-1", ocrConfidence: 0.98, totalAmountCent: 5200 }] };
+  const { deps } = createDeps({ prepareSubmission: async () => ({ token: "token-3", claimId: claim.id, claimVersion: claim.version, workbench }), readWorkbench: async () => workbench, readValidation: async () => ({ claimId: claim.id, claimVersion: claim.version, policyVersion: "p1", issues: [] }), model: { decideConversation: async () => ({ action: "PREPARE_SUBMISSION" as const, reply: "" }) } });
+  await deps.conversations.createIntake({ employeeId: "employee-1", conversationId: "conversation-1", claimId: claim.id });
+  const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "提交当前草稿" }, deps);
+  expect(result.reply).toContain("申请金额 ¥95.00");
+  expect(result.reply).toContain("明细合计 ¥90.00");
+  expect(result.reply).toContain("差额 ¥5.00");
 });
 
 it("prepares and confirms an explicitly selected older draft without submitting the active Intake", async () => {

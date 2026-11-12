@@ -15,9 +15,10 @@ import (
 )
 
 var (
-	ErrClaimNotFound        = errors.New("claim not found")
-	ErrClaimVersionConflict = errors.New("claim version conflict")
-	ErrValidationBlocked    = errors.New("validation blocked")
+	ErrClaimNotFound             = errors.New("claim not found")
+	ErrClaimVersionConflict      = errors.New("claim version conflict")
+	ErrValidationBlocked         = errors.New("validation blocked")
+	ErrItemizedFieldsRequireItem = errors.New("itemized fields must be edited on an expense item")
 )
 
 type CreateClaimCommand struct {
@@ -25,15 +26,16 @@ type CreateClaimCommand struct {
 }
 
 type PatchClaimCommand struct {
-	Purpose               *string
-	ExpenseCategory       *string
-	Participants          *[]string
-	ProjectCode           *string
-	RequestedAmountCent   *int64
-	Currency              *string
-	Remark                *string
-	UseOCRSuggestedAmount bool
-	UnknownFields         []string
+	Purpose                   *string
+	ExpenseCategory           *string
+	SelectedExpenseCategories *[]string
+	Participants              *[]string
+	ProjectCode               *string
+	RequestedAmountCent       *int64
+	Currency                  *string
+	Remark                    *string
+	UseOCRSuggestedAmount     bool
+	UnknownFields             []string
 }
 
 type ClaimView = domain.Claim
@@ -91,11 +93,21 @@ type IDGenerator interface {
 }
 
 type ClaimService struct {
-	repository  ClaimRepository
-	suggestions ClaimOCRSuggestionRefresher
-	ids         IDGenerator
-	numbers     ClaimNumberGenerator
-	now         func() time.Time
+	repository        ClaimRepository
+	suggestions       ClaimOCRSuggestionRefresher
+	itemizedEmployees map[string]struct{}
+	ids               IDGenerator
+	numbers           ClaimNumberGenerator
+	now               func() time.Time
+}
+
+func (service *ClaimService) SetItemizedEmployeeIDs(ids []string) {
+	service.itemizedEmployees = make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if id = strings.TrimSpace(id); id != "" {
+			service.itemizedEmployees[id] = struct{}{}
+		}
+	}
 }
 
 func NewClaimService(repository ClaimRepository, ids IDGenerator, numbers ClaimNumberGenerator, now func() time.Time, suggestions ...ClaimOCRSuggestionRefresher) *ClaimService {
@@ -114,6 +126,12 @@ func (service *ClaimService) CreateClaim(ctx context.Context, actorID string, co
 	claim, err := domain.NewDraftClaim(service.ids.Next(), claimNumber, actorID, command.Purpose)
 	if err != nil {
 		return ClaimView{}, err
+	}
+	if _, enabled := service.itemizedEmployees[actorID]; enabled {
+		claim.ItemizationMode = domain.ClaimItemizationModeItemized
+		if claim.Purpose == "" {
+			claim.PurposeSource = "AUTO"
+		}
 	}
 	if err := service.repository.Create(ctx, claim, ClaimAudit{ClaimID: claim.ID, ActorID: actorID, Action: "CLAIM_DRAFT_CREATED", Version: claim.Version}, ClaimOutboxEvent{ClaimID: claim.ID, Type: "ClaimDraftCreated", Version: claim.Version}); err != nil {
 		return ClaimView{}, fmt.Errorf("persist draft claim: %w", err)
@@ -143,15 +161,19 @@ func (service *ClaimService) UpdateClaim(ctx context.Context, actorID string, cl
 	if err != nil {
 		return ClaimView{}, fmt.Errorf("find claim: %w", err)
 	}
+	if claim.ItemizationMode == domain.ClaimItemizationModeItemized && command.ExpenseCategory != nil {
+		return ClaimView{}, ErrItemizedFieldsRequireItem
+	}
 	patch := domain.ClaimPatch{
-		Purpose:               command.Purpose,
-		ExpenseCategory:       command.ExpenseCategory,
-		Participants:          command.Participants,
-		ProjectCode:           command.ProjectCode,
-		RequestedAmountCent:   command.RequestedAmountCent,
-		Currency:              command.Currency,
-		Remark:                command.Remark,
-		UseOCRSuggestedAmount: command.UseOCRSuggestedAmount,
+		Purpose:                   command.Purpose,
+		ExpenseCategory:           command.ExpenseCategory,
+		SelectedExpenseCategories: command.SelectedExpenseCategories,
+		Participants:              command.Participants,
+		ProjectCode:               command.ProjectCode,
+		RequestedAmountCent:       command.RequestedAmountCent,
+		Currency:                  command.Currency,
+		Remark:                    command.Remark,
+		UseOCRSuggestedAmount:     command.UseOCRSuggestedAmount,
 	}
 	if err := claim.Patch(expectedVersion, patch); err != nil {
 		if errors.Is(err, domain.ErrClaimVersionConflict) {

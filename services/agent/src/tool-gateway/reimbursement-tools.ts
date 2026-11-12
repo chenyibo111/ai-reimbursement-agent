@@ -1,6 +1,6 @@
-import type { ClaimFieldPatch, OwnedClaimSearchQuery, ReimbursementPort, ToolCallContext } from "../ports/reimbursement-port";
+import type { ClaimFieldPatch, ExpenseItemPatch, OwnedClaimSearchQuery, ReimbursementPort, ToolCallContext } from "../ports/reimbursement-port";
 
-export type ReimbursementToolName = "create_claim_draft" | "create_upload_session" | "finalize_receipt_upload" | "delete_owned_receipt" | "delete_owned_draft" | "get_claim_workbench" | "list_owned_claims" | "search_owned_claims" | "find_owned_claim_by_number" | "update_claim_fields" | "get_claim_validation" | "get_owned_claim_progress" | "request_submission_confirmation" | "submit_claim";
+export type ReimbursementToolName = "create_claim_draft" | "create_upload_session" | "finalize_receipt_upload" | "delete_owned_receipt" | "delete_owned_draft" | "get_claim_workbench" | "list_owned_claims" | "search_owned_claims" | "find_owned_claim_by_number" | "update_claim_fields" | "update_expense_item" | "get_claim_validation" | "get_owned_claim_progress" | "request_submission_confirmation" | "submit_claim";
 export type ToolCall = ToolCallContext & { name: ReimbursementToolName; arguments: Record<string, unknown> };
 
 export interface ToolCallResultStore {
@@ -41,6 +41,13 @@ export class ReimbursementToolGateway {
       case "search_owned_claims": result = { page: await this.port.searchOwnedClaims({ ...context, query: ownedClaimSearchQuery(call.arguments) }) }; break;
       case "find_owned_claim_by_number": result = { claim: await this.port.findOwnedClaimByNumber({ ...context, claimNumber: requiredString(call.arguments, "claimNumber") }) }; break;
       case "update_claim_fields": result = { claim: await this.port.updateClaimFields({ ...context, claimId: requiredString(call.arguments, "claimId"), version: requiredNumber(call.arguments, "version"), fields: claimFieldPatch(call.arguments) }) }; break;
+      case "update_expense_item": {
+        assertOnlyFields(call.arguments, ["claimId", "itemId", "version", "expenseCategory", "purpose", "amountCent", "projectCode", "participants"]);
+        const version = requiredNumber(call.arguments, "version");
+        if (!Number.isSafeInteger(version) || version < 1) throw new Error("invalid version");
+        result = { claim: await this.port.updateExpenseItem({ ...context, claimId: requiredString(call.arguments, "claimId"), itemId: requiredString(call.arguments, "itemId"), version, fields: expenseItemPatch(call.arguments) }) };
+        break;
+      }
       case "get_claim_validation": result = { validation: await this.port.getClaimValidation({ ...context, claimId: requiredString(call.arguments, "claimId") }) }; break;
       case "get_owned_claim_progress": assertOnlyFields(call.arguments, ["claimId"]); result = { progress: await this.port.getOwnedClaimProgress({ ...context, claimId: requiredString(call.arguments, "claimId") }) }; break;
       case "request_submission_confirmation": result = { confirmation: await this.port.requestSubmissionConfirmation({ ...context, claimId: requiredString(call.arguments, "claimId"), version: requiredNumber(call.arguments, "version") }) }; break;
@@ -102,6 +109,19 @@ function claimFieldPatch(args: Record<string, unknown>): ClaimFieldPatch {
     throw new Error(`invalid claim field ${key}`);
   }
   if (!Object.keys(fields).length) throw new Error("no claim fields supplied");
+  return fields;
+}
+
+function expenseItemPatch(args: Record<string, unknown>): ExpenseItemPatch {
+  const fields: ExpenseItemPatch = {};
+  for (const [name, value] of Object.entries(args)) {
+    if (["claimId", "itemId", "version"].includes(name)) continue;
+    if (name === "amountCent" && Number.isSafeInteger(value) && (value as number) >= 0) { fields.amountCent = value as number; continue; }
+    if (name === "participants" && Array.isArray(value) && value.length <= 20 && value.every((item) => typeof item === "string" && item.trim().length > 0)) { fields.participants = value; continue; }
+    if (["expenseCategory", "purpose", "projectCode"].includes(name) && typeof value === "string" && value.length <= 200) { fields[name as "expenseCategory" | "purpose" | "projectCode"] = value; continue; }
+    throw new Error(`invalid expense item field ${name}`);
+  }
+  if (!Object.keys(fields).length) throw new Error("no expense item fields supplied");
   return fields;
 }
 

@@ -90,3 +90,41 @@ func TestPostgresClaimSearchFiltersOwnerAndPaginatesStableTies(t *testing.T) {
 		t.Fatalf("null amount exclusion: %#v %v", amountPage, err)
 	}
 }
+
+func TestPostgresClaimSearchFindsItemizedCategory(t *testing.T) {
+	databaseURL := os.Getenv("TEST_REIMBURSEMENT_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_REIMBURSEMENT_DATABASE_URL is not configured")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	suffix := time.Now().UTC().Format("20060102150405.000000000")
+	owner, claimID, receiptID := "category-owner-"+suffix, "category-claim-"+suffix, "category-receipt-"+suffix
+	if _, err = pool.Exec(ctx, `INSERT INTO reimbursement.employees(id,display_name) VALUES ($1,'Category Fixture')`, owner); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = pool.Exec(ctx, `DELETE FROM reimbursement.employees WHERE id=$1`, owner) }()
+	if _, err = pool.Exec(ctx, `INSERT INTO reimbursement.claims(id,owner_id,purpose,itemization_mode,selected_expense_categories,expense_categories_source) VALUES ($1,$2,'混合费用','ITEMIZED',ARRAY['市内交通费','餐饮费'],'MANUAL')`, claimID, owner); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = pool.Exec(ctx, `DELETE FROM reimbursement.claims WHERE id=$1`, claimID) }()
+	if _, err = pool.Exec(ctx, `INSERT INTO reimbursement.receipts(id,claim_id,owner_id,filename,content_type,expected_size,object_key,status) VALUES ($1,$2,$3,'taxi.pdf','application/pdf',100,$1,'EXTRACTED')`, receiptID, claimID, owner); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `INSERT INTO reimbursement.expense_items(id,claim_id,receipt_id,expense_category) VALUES ($1,$2,$3,'市内交通费')`, receiptID, claimID, receiptID); err != nil {
+		t.Fatal(err)
+	}
+	repository := NewPostgresClaimRepository(pool)
+	items, count, err := repository.SearchOwned(ctx, owner, application.SearchClaimsQuery{ExpenseCategory: "市内交通费", Limit: 10})
+	if err != nil || count != 1 || len(items) != 1 || items[0].ID != claimID {
+		t.Fatalf("category search: items=%+v count=%d err=%v", items, count, err)
+	}
+	items, count, err = repository.SearchOwned(ctx, owner, application.SearchClaimsQuery{ExpenseCategory: "餐饮费", Limit: 10})
+	if err != nil || count != 1 || len(items) != 1 {
+		t.Fatalf("final category search: items=%+v count=%d err=%v", items, count, err)
+	}
+}

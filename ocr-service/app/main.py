@@ -9,6 +9,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 
 app = FastAPI()
 MAX_BYTES = 20 * 1024 * 1024
+MAX_PDF_PAGES = 20
 
 
 def log_event(level: str, event: str, message: str, **fields: str | int | float) -> None:
@@ -27,6 +28,24 @@ def health():
     return {"status": "ok"}
 
 
+@app.post("/pdf-info")
+async def pdf_info(file: UploadFile = File(...)):
+    if file.content_type != "application/pdf":
+        raise HTTPException(status_code=415, detail="unsupported media type")
+    content = await file.read(MAX_BYTES + 1)
+    if len(content) > MAX_BYTES:
+        raise HTTPException(status_code=413, detail="file too large")
+    try:
+        with fitz.open(stream=content, filetype="pdf") as document:
+            if document.page_count < 1:
+                raise HTTPException(status_code=422, detail="empty pdf")
+            return {"pages": document.page_count}
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=422, detail="invalid pdf") from error
+
+
 @lru_cache
 def get_ocr():
     from paddleocr import PaddleOCR
@@ -42,13 +61,14 @@ def decode_pages(content: bytes, content_type: str) -> list[np.ndarray]:
         return [image]
 
     try:
-        document = fitz.open(stream=content, filetype="pdf")
-        pages = []
-        for page in document:
-            pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
-            image = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(pixmap.height, pixmap.width, pixmap.n)
-            pages.append(cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
-        document.close()
+        with fitz.open(stream=content, filetype="pdf") as document:
+            if document.page_count > MAX_PDF_PAGES:
+                raise HTTPException(status_code=422, detail="pdf page limit exceeded")
+            pages = []
+            for page in document:
+                pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+                image = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(pixmap.height, pixmap.width, pixmap.n)
+                pages.append(cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
         if not pages:
             raise HTTPException(status_code=422, detail="empty pdf")
         return pages

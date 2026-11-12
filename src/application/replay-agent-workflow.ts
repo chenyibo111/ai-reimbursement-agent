@@ -15,7 +15,7 @@ export async function replayAgentWorkflow(item: AgentWorkflowCase, model?: Pick<
   const conversationId = `eval:${item.id}`;
   const claims = new Map<string, StoredClaim>(item.initial.claims.map((seed) => [seed.id, {
     ownerId: seed.ownerId,
-    claim: { id: seed.id, claimNumber: seed.claimNumber, version: seed.version, status: seed.status, purpose: seed.purpose, expenseCategory: seed.expenseCategory, participants: seed.participants, projectCode: seed.projectCode, totalAmountCent: seed.totalAmountCent, requestedAmountCent: seed.requestedAmountCent, currency: "CNY", receiptCount: seed.receipts.length },
+    claim: { id: seed.id, claimNumber: seed.claimNumber, version: seed.version, status: seed.status, purpose: seed.purpose, expenseCategory: seed.expenseCategory ?? "", expenseCategories: seed.expenseCategories, expenseItems: seed.expenseItems, expenseItemTotalAmountCent: seed.expenseItemTotalAmountCent, itemizationMode: seed.itemizationMode, participants: seed.participants, projectCode: seed.projectCode ?? "", totalAmountCent: seed.totalAmountCent, requestedAmountCent: seed.requestedAmountCent, currency: "CNY", receiptCount: seed.receipts.length },
     receipts: seed.receipts.map((receipt) => ({ ...receipt, claimId: seed.id })), issues: seed.issues ?? [],
   }]));
   let nextClaim = 1;
@@ -60,6 +60,7 @@ export async function replayAgentWorkflow(item: AgentWorkflowCase, model?: Pick<
     },
     async findOwnedClaimByNumber(input) { const found = [...claims.values()].find((entry) => entry.ownerId === input.actorEmployeeId && entry.claim.claimNumber === input.claimNumber); return found ? { ...found.claim } : null; },
     async updateClaimFields(input) { const found = own(input, input.claimId); if (found.claim.status !== "DRAFT" || found.claim.version !== input.version) throw new Error("VERSION_CONFLICT"); Object.assign(found.claim, input.fields); found.claim.version++; return { ...found.claim }; },
+    async updateExpenseItem(input) { const found = own(input, input.claimId); if (found.claim.status !== "DRAFT" || found.claim.version !== input.version) throw new Error("VERSION_CONFLICT"); const target = found.claim.expenseItems?.find((entry) => entry.id === input.itemId); if (!target) throw new Error("NOT_FOUND"); Object.assign(target, input.fields); found.claim.version++; return { ...found.claim }; },
     async getClaimValidation(input) { const found = own(input, input.claimId); return { claimId: input.claimId, claimVersion: found.claim.version, policyVersion: "fixture-policy-v1", issues: found.issues }; },
     async getOwnedClaimProgress(input) { const found = own(input, input.claimId); return { claimId: input.claimId, claimNumber: found.claim.claimNumber, status: found.claim.status as "DRAFT" | "SUBMITTED", version: found.claim.version, submissionNumber: found.claim.status === "SUBMITTED" ? `SUB-${found.claim.claimNumber}` : null, submittedAt: null, receipts: found.receipts.map((receipt) => ({ receiptId: receipt.id, filename: receipt.filename, status: receipt.status, reviewStatus: "NONE" as const })), issues: found.issues, approval: "NOT_CONNECTED", payment: "NOT_CONNECTED" }; },
     async requestSubmissionConfirmation(input) { const found = own(input, input.claimId); if (found.claim.status !== "DRAFT" || found.claim.version !== input.version || found.issues.some((issue) => issue.severity === "BLOCKING")) throw new Error("VALIDATION_BLOCKED"); const confirmationToken = `token-${input.claimId}-${input.version}`; submittedTokens.set(input.claimId, confirmationToken); return { confirmationToken, claimId: input.claimId, claimVersion: input.version }; },
@@ -117,6 +118,7 @@ export async function replayAgentWorkflow(item: AgentWorkflowCase, model?: Pick<
       uploadReceipt: async ({ claimId, filename, mimeType, bytes }) => { const result = await tools.uploadReceipt(context, claimId, { filename, mimeType, bytes }); return { id: result.receiptId }; },
       updatePurpose: ({ claimId, value }) => tools.updatePurpose(context, claimId, value),
       updateFields: ({ claimId, fields }) => tools.updateFields(context, claimId, fields),
+      updateExpenseItem: ({ claimId, itemId, fields }) => tools.updateExpenseItem(context, claimId, itemId, fields),
       readWorkbench: ({ claimId }) => tools.readWorkbench(context, claimId),
       deleteReceipt: ({ claimId, receiptId, expectedClaimVersion }) => tools.deleteReceipt(context, claimId, receiptId, expectedClaimVersion),
       deleteDraft: ({ claimId, expectedClaimVersion }) => tools.deleteDraft(context, claimId, expectedClaimVersion),

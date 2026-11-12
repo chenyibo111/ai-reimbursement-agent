@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, within } from "@testing-library/react";
+import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -10,6 +10,9 @@ import { ClaimApplicationForm, parseCNYAmountToCent } from "./claim-application-
 vi.mock("../../api/client", () => ({
   reimbursementApi: {
     updateClaim: vi.fn(),
+		updateExpenseItem: vi.fn(),
+    requestSubmission: vi.fn(),
+    submit: vi.fn(),
   },
 }));
 
@@ -28,6 +31,61 @@ function renderForm(claim: Claim = manualClaim) {
 }
 
 describe("ClaimApplicationForm", () => {
+  it("submits an itemized claim in one action when its requested amount differs from receipt totals", async () => {
+    const user = userEvent.setup();
+    const claim: Claim = { ...manualClaim, itemizationMode: "ITEMIZED", expenseItems: [{ id: "item-1", receiptId: "receipt-1", claimId: "claim-1", receiptType: "TAXI", expenseCategory: "交通费", categorySource: "MANUAL", purpose: "市内出行打车费", purposeSource: "MODEL", amountCent: 10155, amountSource: "OCR", projectCode: "", participants: [] }] };
+    const { container } = renderForm(claim);
+    const form = within(container);
+    vi.mocked(reimbursementApi.requestSubmission).mockResolvedValue({ claimId: claim.id, claimVersion: claim.version, policyVersion: "1", expiresAt: "2026-11-09T12:00:00Z", confirmationToken: "token-1", warnings: [] });
+    await user.click(form.getByRole("button", { name: "提交报销单" }));
+    await waitFor(() => expect(reimbursementApi.submit).toHaveBeenCalledWith("claim-1", "token-1"));
+    expect(form.queryByRole("button", { name: "确认提交" })).toBeNull();
+  });
+  it("submits an itemized claim immediately when the amount matches its items", async () => {
+    const claim: Claim = { ...manualClaim, itemizationMode: "ITEMIZED", requestedAmountCent: 10155, expenseItemTotalAmountCent: 10155, expenseItems: [{ id: "item-1", receiptId: "receipt-1", claimId: "claim-1", receiptType: "TAXI", expenseCategory: "交通费", categorySource: "MODEL", purpose: "市内出行打车费", purposeSource: "MODEL", amountCent: 10155, amountSource: "OCR", projectCode: "", participants: [] }] };
+    const { container } = renderForm(claim);
+    const form = within(container);
+    vi.mocked(reimbursementApi.requestSubmission).mockResolvedValue({ claimId: claim.id, claimVersion: claim.version, policyVersion: "1", expiresAt: "2026-11-09T12:00:00Z", confirmationToken: "token-1", warnings: [] });
+    await userEvent.setup().click(form.getByRole("button", { name: "提交报销单" }));
+    await waitFor(() => expect(reimbursementApi.submit).toHaveBeenCalledWith("claim-1", "token-1"));
+    expect(form.queryByRole("button", { name: "确认提交" })).toBeNull();
+  });
+  it("submits an itemized claim with a manual total when OCR omitted a receipt amount", async () => {
+    const claim: Claim = { ...manualClaim, itemizationMode: "ITEMIZED", requestedAmountCent: 8659, expenseItemTotalAmountCent: null, selectedExpenseCategories: ["餐饮费"], expenseItems: [{ id: "item-1", receiptId: "receipt-1", claimId: "claim-1", receiptType: "DINING", expenseCategory: "餐饮费", categorySource: "MODEL", purpose: "餐饮费用", purposeSource: "MODEL", amountCent: null, amountSource: "", projectCode: "", participants: [] }] };
+    const { container } = renderForm(claim);
+    vi.mocked(reimbursementApi.requestSubmission).mockResolvedValue({ claimId: claim.id, claimVersion: claim.version, policyVersion: "1", expiresAt: "2026-11-09T12:00:00Z", confirmationToken: "token-1", warnings: [] });
+    await userEvent.setup().click(within(container).getByRole("button", { name: "提交报销单" }));
+    await waitFor(() => expect(reimbursementApi.submit).toHaveBeenCalledWith("claim-1", "token-1"));
+    expect(within(container).queryByRole("button", { name: "确认提交" })).toBeNull();
+  });
+  it("saves an unchanged itemized draft without overriding OCR category suggestions", async () => {
+    const user = userEvent.setup();
+    const { container } = renderForm({ ...manualClaim, itemizationMode: "ITEMIZED", expenseItems: [] });
+    const form = within(container);
+    expect(form.getByLabelText("费用类别")).toHaveValue("");
+    await user.click(form.getByRole("button", { name: "保存草稿" }));
+    expect(reimbursementApi.updateClaim).toHaveBeenCalledWith("claim-1", expect.not.objectContaining({ expenseCategory: expect.anything() }));
+    expect(reimbursementApi.updateClaim).toHaveBeenCalledWith("claim-1", expect.not.objectContaining({ purpose: expect.anything() }));
+    expect(reimbursementApi.updateClaim).toHaveBeenCalledWith("claim-1", expect.not.objectContaining({ requestedAmountCent: expect.anything() }));
+  });
+	it("prefills multiple final categories and edits them without changing receipt recognition", async () => {
+		const claim: Claim = { ...manualClaim, itemizationMode: "ITEMIZED", purpose: "市内出行及餐饮费用", expenseCategories: ["交通费", "餐饮费"], expenseItems: [
+			{ id: "taxi", claimId: "claim-1", receiptId: "taxi", receiptType: "TAXI", expenseCategory: "交通费", categorySource: "MODEL", purpose: "市内出行打车费", purposeSource: "MODEL", amountCent: 3800, amountSource: "OCR", projectCode: "", participants: [] },
+			{ id: "dining", claimId: "claim-1", receiptId: "dining", receiptType: "DINING", expenseCategory: "餐饮费", categorySource: "MODEL", purpose: "餐饮费用", purposeSource: "MODEL", amountCent: 5200, amountSource: "OCR", projectCode: "", participants: [] },
+		] };
+		const { container } = renderForm(claim);
+		const form = within(container);
+		expect(form.getByLabelText("费用类别")).toHaveValue("交通费、餐饮费");
+		expect(form.getByLabelText(/报销事由/)).toHaveValue("市内出行及餐饮费用");
+		expect(form.queryByLabelText("第 1 条费用类别")).toBeNull();
+		expect(form.queryByText("更正分类或补充信息")).toBeNull();
+		const category = form.getByLabelText("费用类别");
+		await userEvent.setup().clear(category);
+		await userEvent.setup().type(category, "餐饮费、其他");
+		await userEvent.setup().click(form.getByRole("button", { name: "保存草稿" }));
+		expect(reimbursementApi.updateClaim).toHaveBeenCalledWith("claim-1", expect.objectContaining({ version: 3, selectedExpenseCategories: ["餐饮费", "其他"] }));
+		expect(reimbursementApi.updateExpenseItem).not.toHaveBeenCalled();
+	});
   it("lets an employee set the expense category needed by published category rules", async () => {
     const user = userEvent.setup();
     const { container } = renderForm();

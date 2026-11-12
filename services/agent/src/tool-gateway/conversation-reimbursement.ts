@@ -1,6 +1,6 @@
 import { ReimbursementToolGateway, type ReimbursementToolName } from "./reimbursement-tools";
 import { ReimbursementApiHttpError } from "../adapters/reimbursement-api-client";
-import type { ClaimFieldPatch, ClaimProgressSnapshot, ClaimSnapshot, OwnedClaimSearchPage, OwnedClaimSearchQuery, ReceiptSnapshot, ValidationSnapshot } from "../ports/reimbursement-port";
+import type { ClaimFieldPatch, ClaimProgressSnapshot, ClaimSnapshot, ExpenseItemPatch, OwnedClaimSearchPage, OwnedClaimSearchQuery, ReceiptSnapshot, ValidationSnapshot } from "../ports/reimbursement-port";
 
 export type ConversationReimbursementContext = { actorId: string; actorRole: "EMPLOYEE" | "FINANCE_REVIEWER" | "ADMIN"; channel: "WEB" | "FEISHU"; conversationId: string; turnId: string };
 type Attachment = { filename: string; mimeType: string; bytes: Uint8Array };
@@ -38,6 +38,15 @@ export function createConversationReimbursementTools(gateway: ReimbursementToolG
         return current.claim;
       }
       const after = (await execute(context, "get_claim_workbench", { claimId }, "fields.post-read")).workbench as { claim: ClaimSnapshot };
+      return after.claim;
+    },
+    async updateExpenseItem(context: ConversationReimbursementContext, claimId: string, itemId: string, fields: ExpenseItemPatch): Promise<ClaimSnapshot> {
+      const before = (await execute(context, "get_claim_workbench", { claimId }, `item:${itemId}:pre-read`)).workbench as { claim: ClaimSnapshot };
+      if (before.claim.status !== "DRAFT" || !before.claim.expenseItems?.some((item) => item.id === itemId)) throw new Error("expense item is not an owned draft item");
+      await execute(context, "update_expense_item", { claimId, itemId, version: before.claim.version, ...fields }, `item:${itemId}:patch`);
+      const after = (await execute(context, "get_claim_workbench", { claimId }, `item:${itemId}:post-read`)).workbench as { claim: ClaimSnapshot };
+      const updated = after.claim.expenseItems?.find((item) => item.id === itemId);
+      if (!updated || !Object.entries(fields).every(([name, value]) => JSON.stringify(updated[name as keyof typeof updated]) === JSON.stringify(value))) throw new Error("expense item write could not be verified");
       return after.claim;
     },
     async readWorkbench(context: ConversationReimbursementContext, claimId: string) {

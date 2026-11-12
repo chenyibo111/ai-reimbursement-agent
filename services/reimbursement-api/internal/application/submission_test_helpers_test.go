@@ -16,6 +16,7 @@ type fakeSubmissionRepository struct {
 	claim         domain.Claim
 	activePolicy  *PolicyVersion
 	receipts      []domain.Receipt
+	items         []domain.ExpenseItem
 	confirmations map[string]SubmissionConfirmation
 	submissions   map[string]SubmissionSnapshot
 	submitCalls   int
@@ -33,7 +34,7 @@ func (repository *fakeSubmissionRepository) LoadSubmissionInput(_ context.Contex
 	if repository.claim.ID != claimID || repository.claim.OwnerID != actorID {
 		return SubmissionInput{}, ErrClaimNotFound
 	}
-	return SubmissionInput{Claim: repository.claim, Receipts: append([]domain.Receipt(nil), repository.receipts...)}, nil
+	return SubmissionInput{Claim: repository.claim, Receipts: append([]domain.Receipt(nil), repository.receipts...), Items: append([]domain.ExpenseItem(nil), repository.items...)}, nil
 }
 
 func (repository *fakeSubmissionRepository) StoreConfirmation(_ context.Context, confirmation SubmissionConfirmation) error {

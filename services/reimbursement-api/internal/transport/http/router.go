@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/application"
+	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/domain"
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/store"
 )
 
@@ -34,11 +35,17 @@ type ReceiptService interface {
 	ListReceipts(ctx context.Context, actorID string, claimID string) ([]application.ReceiptView, error)
 }
 
+type ExpenseItemService interface {
+	ListOwnedByClaim(context.Context, string, string) ([]domain.ExpenseItem, error)
+	PatchOwnedDraft(context.Context, string, string, string, int64, domain.ExpenseItemPatch) (domain.ExpenseItem, error)
+}
+
 type Dependencies struct {
 	Claims             ClaimService
 	Submissions        SubmissionService
 	Progress           ClaimProgressService
 	Receipts           ReceiptService
+	ExpenseItems       ExpenseItemService
 	Auth               ActorResolver
 	AuthBFF            http.Handler
 	Admin              AdminServices
@@ -54,11 +61,12 @@ type Dependencies struct {
 
 func NewRouter(dependencies Dependencies) http.Handler {
 	mux := http.NewServeMux()
-	handler := &claimsHandler{claims: dependencies.Claims, submissions: dependencies.Submissions, progress: dependencies.Progress, receipts: dependencies.Receipts}
+	handler := &claimsHandler{claims: dependencies.Claims, submissions: dependencies.Submissions, progress: dependencies.Progress, receipts: dependencies.Receipts, expenseItems: dependencies.ExpenseItems}
 	mux.HandleFunc("POST /api/v1/claims", handler.createClaim)
 	mux.HandleFunc("GET /api/v1/claims", handler.listClaims)
 	mux.HandleFunc("GET /api/v1/claims/{claimId}", handler.getClaim)
 	mux.HandleFunc("PATCH /api/v1/claims/{claimId}", handler.patchClaim)
+	mux.HandleFunc("PATCH /api/v1/claims/{claimId}/items/{itemId}", handler.patchExpenseItem)
 	mux.HandleFunc("DELETE /api/v1/claims/{claimId}", handler.deleteClaim)
 	mux.HandleFunc("GET /api/v1/claims/{claimId}/validation", handler.validateClaim)
 	mux.HandleFunc("GET /api/v1/claims/{claimId}/progress", handler.getClaimProgress)

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { reimbursementApi } from "../../api/client";
-import type { ClaimPatch, ClaimSearchQuery } from "../../api/generated/reimbursement";
+import type { ClaimPatch, ClaimSearchQuery, ExpenseItemPatch } from "../../api/generated/reimbursement";
 
 export const claimKeys = {
   all: ["claims"] as const,
@@ -34,6 +34,20 @@ export function useUpdateClaim(claimId: string) {
 				queryClient.invalidateQueries({ queryKey: claimKeys.detail(claimId) }),
 				queryClient.invalidateQueries({ queryKey: claimKeys.all }),
 				queryClient.invalidateQueries({ queryKey: claimKeys.validation(claimId) }),
+			]);
+		},
+	});
+}
+
+export function useUpdateExpenseItem(claimId: string) {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: ({ itemId, patch }: { itemId: string; patch: ExpenseItemPatch }) => reimbursementApi.updateExpenseItem(claimId, itemId, patch),
+		onSuccess: async () => {
+			await Promise.all([
+				queryClient.invalidateQueries({ queryKey: claimKeys.detail(claimId) }),
+				queryClient.invalidateQueries({ queryKey: claimKeys.validation(claimId) }),
+				queryClient.invalidateQueries({ queryKey: claimKeys.all }),
 			]);
 		},
 	});

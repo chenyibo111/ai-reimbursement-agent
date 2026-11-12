@@ -72,7 +72,23 @@ func (scanner *fakeScanner) Scan(_ context.Context, _ []byte) (bool, error) {
 	return scanner.unsafe, nil
 }
 
-type fakeOCRClient struct{ result OCRResult }
+type fakeOCRClient struct {
+	result             OCRResult
+	pdfPages           int
+	pdfErr             error
+	pdfValidationCalls int
+}
+
+func (client *fakeOCRClient) ValidatePDF(_ context.Context, _ StoredObject) (int, error) {
+	client.pdfValidationCalls++
+	if client.pdfErr != nil {
+		return 0, client.pdfErr
+	}
+	if client.pdfPages != 0 {
+		return client.pdfPages, nil
+	}
+	return 1, nil
+}
 
 func (client *fakeOCRClient) Extract(_ context.Context, _ StoredObject) (OCRResult, error) {
 	return client.result, nil

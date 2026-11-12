@@ -33,6 +33,47 @@ func TestPublishedPolicyBlocksAndInvalidatesOldConfirmation(t *testing.T) {
 	}
 }
 
+func TestValidateItemizedClaimChecksFinalCategory(t *testing.T) {
+	repository := newFakeSubmissionRepository()
+	amount := int64(9000)
+	repository.claim = domain.Claim{ID: "mixed", OwnerID: "employee-1", Status: domain.ClaimStatusDraft, ItemizationMode: domain.ClaimItemizationModeItemized, Purpose: "市内出行及餐饮费用", SelectedExpenseCategories: []string{"餐饮费"}, RequestedAmountCent: &amount, Version: 3}
+	repository.receipts = []domain.Receipt{{ID: "taxi", Status: domain.ReceiptStatusExtracted}, {ID: "dining", Status: domain.ReceiptStatusExtracted}}
+	repository.items = []domain.ExpenseItem{{ID: "taxi", ReceiptID: "taxi", ExpenseCategory: "交通费", AmountCent: &amount}, {ID: "dining", ReceiptID: "dining", ExpenseCategory: "餐饮费", AmountCent: &amount}}
+	repository.activePolicy = &PolicyVersion{ID: "mixed-policy", EffectiveDate: "2026-10-01", Rules: []PolicyRule{{Code: "PROJECT", Name: "餐饮项目", Type: "CATEGORY_REQUIRED_FIELD", Severity: "BLOCKING", Config: json.RawMessage(`{"category":"餐饮费","field":"projectCode"}`)}}}
+	result, err := NewSubmissionService(repository, fixedClock{now: time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC)}).ValidateClaim(context.Background(), "employee-1", "mixed")
+	if err != nil || len(result.Issues) != 1 || result.Issues[0].ReceiptID != "" {
+		t.Fatalf("issues=%+v err=%v", result.Issues, err)
+	}
+}
+
+func TestItemizedClaimCanUseManualClaimAmountWhenReceiptAmountIsMissing(t *testing.T) {
+	repository := newFakeSubmissionRepository()
+	amount := int64(9000)
+	repository.claim = domain.Claim{ID: "mixed", OwnerID: "employee-1", Status: domain.ClaimStatusDraft, ItemizationMode: domain.ClaimItemizationModeItemized, Purpose: "市内出行", SelectedExpenseCategories: []string{"交通费"}, RequestedAmountCent: &amount, Version: 3}
+	repository.receipts = []domain.Receipt{{ID: "taxi", Status: domain.ReceiptStatusExtracted}}
+	repository.items = []domain.ExpenseItem{{ID: "taxi", ReceiptID: "taxi"}}
+	service := NewSubmissionService(repository, fixedClock{now: time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC)})
+	validation, err := service.ValidateClaim(context.Background(), "employee-1", "mixed")
+	if err != nil || len(validation.Issues) != 0 {
+		t.Fatalf("issues=%+v err=%v", validation.Issues, err)
+	}
+	if _, err := service.RequestSubmission(context.Background(), "employee-1", "mixed", 3); err != nil {
+		t.Fatalf("manual claim amount should permit confirmation: %v", err)
+	}
+}
+
+func TestItemizedClaimRequiresFinalCategory(t *testing.T) {
+	repository := newFakeSubmissionRepository()
+	amount := int64(3800)
+	repository.claim = domain.Claim{ID: "claim-1", OwnerID: "employee-1", Status: domain.ClaimStatusDraft, ItemizationMode: domain.ClaimItemizationModeItemized, Purpose: "出行费用", RequestedAmountCent: &amount, Version: 1}
+	repository.receipts = []domain.Receipt{{ID: "taxi", Status: domain.ReceiptStatusExtracted}}
+	repository.items = []domain.ExpenseItem{{ID: "taxi", ReceiptID: "taxi", ExpenseCategory: "交通费", AmountCent: &amount}}
+	validation, err := NewSubmissionService(repository, fixedClock{now: time.Now()}).ValidateClaim(context.Background(), "employee-1", "claim-1")
+	if err != nil || len(validation.Issues) != 1 || validation.Issues[0].Code != "EXPENSE_CATEGORY_REQUIRED" {
+		t.Fatalf("issues=%+v err=%v", validation.Issues, err)
+	}
+}
+
 func TestRequestSubmissionReturnsNonBlockingPolicyWarnings(t *testing.T) {
 	repository := newFakeSubmissionRepository()
 	amount := int64(12000)

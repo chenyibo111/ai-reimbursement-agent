@@ -5,15 +5,38 @@ from unittest.mock import patch
 
 import fitz
 import cv2
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 import numpy as np
 
-from app.main import app, get_ocr
+from app.main import app, decode_pages, get_ocr
 
 
 class ExtractRouteTest(unittest.TestCase):
     def setUp(self):
         get_ocr.cache_clear()
+
+    def test_pdf_info_accepts_compressed_page_objects_and_rejects_invalid_pdf(self):
+        document = fitz.open()
+        document.new_page()
+        content = document.tobytes(garbage=4, deflate=True, use_objstms=1)
+        document.close()
+        self.assertNotIn(b"/Type /Page ", content)
+        response = TestClient(app).post("/pdf-info", files={"file": ("invoice.pdf", content, "application/pdf")})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"pages": 1})
+        invalid = TestClient(app).post("/pdf-info", files={"file": ("invoice.pdf", b"%PDF-broken", "application/pdf")})
+        self.assertEqual(invalid.status_code, 422)
+
+    def test_pdf_page_limit_is_checked_before_rendering(self):
+        document = fitz.open()
+        for _ in range(21):
+            document.new_page()
+        content = document.tobytes()
+        document.close()
+        with self.assertRaises(HTTPException) as raised:
+            decode_pages(content, "application/pdf")
+        self.assertEqual(raised.exception.status_code, 422)
 
     def test_decodes_an_uploaded_image_before_calling_paddleocr(self):
         fake_paddleocr = types.ModuleType("paddleocr")

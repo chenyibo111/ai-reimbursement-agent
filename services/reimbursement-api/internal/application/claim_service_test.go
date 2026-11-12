@@ -70,6 +70,49 @@ func TestCreateClaimAssignsDraftToActor(t *testing.T) {
 	}
 }
 
+func TestCreateClaimItemizesOnlyAllowedEmployees(t *testing.T) {
+	service := newClaimServiceForTest(NewMemoryClaimRepository())
+	service.SetItemizedEmployeeIDs([]string{"employee-1"})
+	allowed, err := service.CreateClaim(context.Background(), "employee-1", CreateClaimCommand{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := service.CreateClaim(context.Background(), "employee-2", CreateClaimCommand{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allowed.ItemizationMode != domain.ClaimItemizationModeItemized || allowed.PurposeSource != "AUTO" || other.ItemizationMode != domain.ClaimItemizationModeLegacy || other.PurposeSource != "MANUAL" {
+		t.Fatalf("unexpected modes: allowed=%s other=%s", allowed.ItemizationMode, other.ItemizationMode)
+	}
+}
+
+func TestItemizedClaimRejectsWholeClaimCategoryWrite(t *testing.T) {
+	service := newClaimServiceForTest(NewMemoryClaimRepository())
+	service.SetItemizedEmployeeIDs([]string{"employee-1"})
+	claim, err := service.CreateClaim(context.Background(), "employee-1", CreateClaimCommand{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	category := "交通费"
+	if _, err := service.UpdateClaim(context.Background(), "employee-1", claim.ID, claim.Version, PatchClaimCommand{ExpenseCategory: &category}); !errors.Is(err, ErrItemizedFieldsRequireItem) {
+		t.Fatalf("whole-claim category write=%v", err)
+	}
+}
+
+func TestItemizedClaimAcceptsFinalCategories(t *testing.T) {
+	service := newClaimServiceForTest(NewMemoryClaimRepository())
+	service.SetItemizedEmployeeIDs([]string{"employee-1"})
+	claim, err := service.CreateClaim(context.Background(), "employee-1", CreateClaimCommand{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	categories := []string{"交通费", "餐饮费"}
+	updated, err := service.UpdateClaim(context.Background(), "employee-1", claim.ID, claim.Version, PatchClaimCommand{SelectedExpenseCategories: &categories})
+	if err != nil || len(updated.SelectedExpenseCategories) != 2 || updated.ExpenseCategoriesSource != "MANUAL" {
+		t.Fatalf("claim=%+v err=%v", updated, err)
+	}
+}
+
 func TestCreateClaimAllowsAnIncompleteDraft(t *testing.T) {
 	service := newClaimServiceForTest(NewMemoryClaimRepository())
 

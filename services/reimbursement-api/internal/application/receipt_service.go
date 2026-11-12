@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
@@ -28,7 +27,6 @@ var (
 	ErrDuplicateSubmittedInvoice = errors.New("invoice number already exists on a submitted claim")
 	ErrLowOCRConfidence          = errors.New("receipt OCR confidence requires review")
 	ErrReceiptNotFound           = errors.New("receipt not found")
-	pdfPageTypePattern           = regexp.MustCompile(`/Type\s*/Page\b`)
 )
 
 type CreateUploadSessionCommand struct {
@@ -88,6 +86,7 @@ type FileScanner interface {
 }
 
 type OCRResult struct {
+	Text            string
 	InvoiceNumber   string
 	InvoiceDate     *time.Time
 	TotalAmountCent *int64
@@ -97,6 +96,15 @@ type OCRResult struct {
 
 type OCRClient interface {
 	Extract(context.Context, StoredObject) (OCRResult, error)
+	ValidatePDF(context.Context, StoredObject) (int, error)
+}
+
+type ExpenseItemSuggester interface {
+	UpsertFromOCR(context.Context, string, string, domain.ExpenseItemSuggestion) (domain.ExpenseItem, error)
+}
+
+type ActivePolicyReader interface {
+	LoadActivePolicy(context.Context, time.Time) (*PolicyVersion, error)
 }
 
 type ClaimReader interface {
@@ -125,8 +133,20 @@ type ReceiptService struct {
 	ocr                                      OCRClient
 	ids                                      IDGenerator
 	suggestions                              ClaimOCRSuggestionRefresher
+	expenseItems                             ExpenseItemSuggester
+	classifier                               ReceiptClassifier
+	classificationPolicy                     ActivePolicyReader
 	allowDuplicateContentForTesting          bool
 	allowDuplicateSubmittedInvoiceForTesting bool
+}
+
+func (service *ReceiptService) SetExpenseItemSuggester(items ExpenseItemSuggester) {
+	service.expenseItems = items
+}
+
+func (service *ReceiptService) SetReceiptClassifier(classifier ReceiptClassifier, policy ActivePolicyReader) {
+	service.classifier = classifier
+	service.classificationPolicy = policy
 }
 
 // ReceiptServiceOptions contains explicitly opt-in runtime behavior.
@@ -213,6 +233,15 @@ func (service *ReceiptService) FinalizeReceiptUpload(ctx context.Context, actorI
 			return fmt.Errorf("quarantine unsafe receipt: %w", err)
 		}
 		return ErrUnsafeReceiptFile
+	}
+	if receipt.ContentType == "application/pdf" {
+		pages, err := service.ocr.ValidatePDF(ctx, object)
+		if err != nil {
+			return fmt.Errorf("validate pdf: %w", err)
+		}
+		if pages < 1 || pages > MaxPDFPages {
+			return ErrInvalidFileSignature
+		}
 	}
 	hash := contentHash(object.Content)
 	if service.allowDuplicateContentForTesting {
@@ -350,6 +379,11 @@ func (service *ReceiptService) ExtractReceipt(ctx context.Context, actorID strin
 			if err := service.repository.TransitionToReview(ctx, receipt.ID, "DUPLICATE_SUBMITTED_INVOICE", &result); err != nil {
 				return fmt.Errorf("flag duplicate invoice: %w", err)
 			}
+			if service.suggestions != nil {
+				if err := service.suggestions.RefreshOCRSuggestion(ctx, claimID, actorID); err != nil {
+					return fmt.Errorf("refresh ocr suggested amount: %w", err)
+				}
+			}
 			return ErrDuplicateSubmittedInvoice
 		}
 	}
@@ -357,10 +391,28 @@ func (service *ReceiptService) ExtractReceipt(ctx context.Context, actorID strin
 		if err := service.repository.TransitionToReview(ctx, receipt.ID, "OCR_LOW_CONFIDENCE", &result); err != nil {
 			return fmt.Errorf("flag low-confidence receipt: %w", err)
 		}
+		if service.suggestions != nil {
+			if err := service.suggestions.RefreshOCRSuggestion(ctx, claimID, actorID); err != nil {
+				return fmt.Errorf("refresh ocr suggested amount: %w", err)
+			}
+		}
 		return ErrLowOCRConfidence
 	}
 	if err := service.repository.MarkExtracted(ctx, receipt.ID, result); err != nil {
 		return fmt.Errorf("persist ocr result: %w", err)
+	}
+	claim, err := service.claims.FindOwned(ctx, claimID, actorID)
+	if err != nil {
+		return fmt.Errorf("find claim for OCR item: %w", err)
+	}
+	if claim.ItemizationMode == domain.ClaimItemizationModeItemized {
+		if service.expenseItems == nil {
+			return errors.New("expense item repository is not configured")
+		}
+		suggestion := service.classifyExpenseItem(ctx, result)
+		if _, err := service.expenseItems.UpsertFromOCR(ctx, actorID, receiptID, suggestion); err != nil {
+			return fmt.Errorf("persist OCR expense item: %w", err)
+		}
 	}
 	if service.suggestions != nil {
 		if err := service.suggestions.RefreshOCRSuggestion(ctx, claimID, actorID); err != nil {
@@ -368,6 +420,45 @@ func (service *ReceiptService) ExtractReceipt(ctx context.Context, actorID strin
 		}
 	}
 	return nil
+}
+
+func (service *ReceiptService) classifyExpenseItem(ctx context.Context, result OCRResult) domain.ExpenseItemSuggestion {
+	suggestion := domain.ExpenseItemSuggestion{AmountCent: result.TotalAmountCent, ClassificationStatus: "PENDING"}
+	if service.classifier == nil || service.classificationPolicy == nil {
+		return suggestion
+	}
+	suggestion.ClassificationStatus = "UNKNOWN"
+	if result.Text == "" {
+		return suggestion
+	}
+	policy, err := service.classificationPolicy.LoadActivePolicy(ctx, time.Now())
+	if err != nil {
+		suggestion.ClassificationStatus = "FAILED"
+		return suggestion
+	}
+	allowedCategories, err := AllowedReceiptCategories(policy)
+	if err != nil {
+		suggestion.ClassificationStatus = "FAILED"
+		return suggestion
+	}
+	classified, err := service.classifier.Classify(ctx, result, allowedCategories)
+	if err != nil {
+		suggestion.ClassificationStatus = "FAILED"
+		return suggestion
+	}
+	suggestion.ReceiptType = classified.ReceiptType
+	suggestion.ExpenseCategory = classified.ExpenseCategory
+	suggestion.Purpose = classified.Purpose
+	suggestion.ClassificationVersion = classified.Version
+	switch {
+	case classified.ReceiptType == ReceiptTypeUnknown:
+		suggestion.ClassificationStatus = "UNKNOWN"
+	case classified.ExpenseCategory == "":
+		suggestion.ClassificationStatus = "CATEGORY_UNMAPPED"
+	default:
+		suggestion.ClassificationStatus = "CLASSIFIED"
+	}
+	return suggestion
 }
 
 func validateUploadMetadata(command CreateUploadSessionCommand) error {
@@ -389,8 +480,7 @@ func hasValidSignature(contentType string, content []byte) bool {
 	case "image/png":
 		return len(content) >= 8 && bytes.Equal(content[:8], []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a})
 	case "application/pdf":
-		pageCount := len(pdfPageTypePattern.FindAllIndex(content, -1))
-		return len(content) >= 5 && bytes.Equal(content[:5], []byte("%PDF-")) && pageCount > 0 && pageCount <= MaxPDFPages
+		return len(content) >= 5 && bytes.Equal(content[:5], []byte("%PDF-"))
 	default:
 		return false
 	}

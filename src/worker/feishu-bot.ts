@@ -116,6 +116,7 @@ function createProcessDeps(input: {
           return { id: receipt.receiptId };
         },
         updateFields: ({ claimId, fields }) => tools.updateFields(context, claimId, fields),
+        updateExpenseItem: ({ claimId, itemId, fields }) => tools.updateExpenseItem(context, claimId, itemId, fields),
         readWorkbench: ({ claimId }) => tools.readWorkbench(context, claimId),
         deleteReceipt: ({ claimId, receiptId, expectedClaimVersion }) => tools.deleteReceipt(context, claimId, receiptId, expectedClaimVersion),
         deleteDraft: ({ claimId, expectedClaimVersion }) => tools.deleteDraft(context, claimId, expectedClaimVersion),
