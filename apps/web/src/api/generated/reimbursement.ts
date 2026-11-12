@@ -10,6 +10,8 @@ export interface Claim {
 	itemizationMode?: "LEGACY" | "ITEMIZED";
 	expenseItems?: ExpenseItem[];
 	expenseCategories?: string[];
+	selectedExpenseCategories?: string[];
+	expenseCategoriesSource?: "AUTO" | "MANUAL";
 	expenseItemTotalAmountCent?: number | null;
 	claimNumber: string;
   ownerId?: string;
@@ -78,6 +80,7 @@ export interface ClaimPatch {
   version: number;
   purpose?: string;
   expenseCategory?: string;
+  selectedExpenseCategories?: string[];
   participants?: string[];
   projectCode?: string;
   requestedAmountCent?: number;

@@ -54,3 +54,16 @@ it("opens an existing item whose participants were returned as null", () => {
 	expect(within(container).getByText("￥38.00")).toBeVisible();
 	expect(within(container).queryByRole("textbox")).toBeNull();
 });
+
+it("does not replace an incomplete authoritative total with stale receipt amounts", () => {
+	const claim = {
+		id: "claim-review", claimNumber: "BX20261112-0001", status: "DRAFT", version: 2, itemizationMode: "ITEMIZED",
+		purpose: "出行费用", expenseCategory: null, participants: [], projectCode: null,
+		receiptCount: 1, recognizedReceiptCount: 0, totalAmountCent: null, missingAmountReceiptCount: 1,
+		requestedAmountCent: 3800, currency: "CNY", requestedAmountSource: "MANUAL", remark: null,
+		createdAt: "2026-11-12T00:00:00Z", updatedAt: "2026-11-12T00:00:00Z", expenseItemTotalAmountCent: null,
+		expenseItems: [{ id: "item-review", claimId: "claim-review", receiptId: "receipt-review", receiptType: "TAXI", expenseCategory: "交通费", categorySource: "MODEL", purpose: "打车费", purposeSource: "MODEL", amountCent: 3800, amountSource: "OCR", projectCode: "", participants: [] }],
+	} satisfies Claim;
+	const { container } = render(<ExpenseItemsPanel claim={claim} />);
+	expect(within(container).getByText(/明细合计 金额未识别完整/)).toBeVisible();
+});

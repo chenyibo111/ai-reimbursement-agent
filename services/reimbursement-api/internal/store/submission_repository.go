@@ -223,7 +223,7 @@ func loadOwnedClaim(ctx context.Context, query queryRower, actorID string, claim
 	var projectCode *string
 	var requestedAmountCent *int64
 	var remark *string
-	err := query.QueryRow(ctx, `SELECT id, claim_number, owner_id, status, purpose, expense_category, participants, project_code, requested_amount_cent, currency, requested_amount_source, remark, version, created_at, updated_at, itemization_mode FROM reimbursement.claims WHERE id = $1 AND owner_id = $2`+lock, claimID, actorID).Scan(&claim.ID, &claim.ClaimNumber, &claim.OwnerID, &claim.Status, &claim.Purpose, &expenseCategory, &participants, &projectCode, &requestedAmountCent, &claim.Currency, &claim.RequestedAmountSource, &remark, &claim.Version, &claim.CreatedAt, &claim.UpdatedAt, &claim.ItemizationMode)
+	err := query.QueryRow(ctx, `SELECT id, claim_number, owner_id, status, purpose, expense_category, participants, project_code, requested_amount_cent, currency, requested_amount_source, remark, version, created_at, updated_at, itemization_mode, selected_expense_categories, expense_categories_source FROM reimbursement.claims WHERE id = $1 AND owner_id = $2`+lock, claimID, actorID).Scan(&claim.ID, &claim.ClaimNumber, &claim.OwnerID, &claim.Status, &claim.Purpose, &expenseCategory, &participants, &projectCode, &requestedAmountCent, &claim.Currency, &claim.RequestedAmountSource, &remark, &claim.Version, &claim.CreatedAt, &claim.UpdatedAt, &claim.ItemizationMode, &claim.SelectedExpenseCategories, &claim.ExpenseCategoriesSource)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Claim{}, application.ErrClaimNotFound
 	}
@@ -307,10 +307,8 @@ func blockingSubmissionInput(claim domain.Claim, receipts []domain.Receipt, item
 		return true
 	}
 	if claim.ItemizationMode == domain.ClaimItemizationModeItemized {
-		for _, item := range items {
-			if item.AmountCent == nil {
-				return true
-			}
+		if len(claim.SelectedExpenseCategories) == 0 {
+			return true
 		}
 	}
 	for _, receipt := range receipts {

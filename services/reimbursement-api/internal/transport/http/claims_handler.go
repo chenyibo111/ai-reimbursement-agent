@@ -401,11 +401,6 @@ func (handler *claimsHandler) claimDetailResponse(ctx context.Context, actorID s
 	if completeAmount && activeItemCount > 0 {
 		result["expenseItemTotalAmountCent"] = itemTotal
 	}
-	if len(categories) == 1 {
-		result["expenseCategory"] = categories[0]
-	} else {
-		result["expenseCategory"] = nil
-	}
 	return result, nil
 }
 
@@ -421,48 +416,15 @@ func expenseItemResponse(item domain.ExpenseItem) map[string]any {
 
 func (handler *claimsHandler) patchExpenseItem(response http.ResponseWriter, request *http.Request) {
 	actor, _ := ActorFromContext(request.Context())
-	if handler.expenseItems == nil {
-		writeError(response, http.StatusServiceUnavailable, "UNAVAILABLE", "费用明细暂不可用")
-		return
-	}
 	if strings.TrimSpace(request.Header.Get("Idempotency-Key")) == "" {
 		writeError(response, http.StatusBadRequest, "IDEMPOTENCY_KEY_REQUIRED", "请提供 Idempotency-Key")
 		return
 	}
-	var body struct {
-		Version         int64     `json:"version"`
-		ExpenseCategory *string   `json:"expenseCategory"`
-		Purpose         *string   `json:"purpose"`
-		AmountCent      *int64    `json:"amountCent"`
-		ProjectCode     *string   `json:"projectCode"`
-		Participants    *[]string `json:"participants"`
-	}
-	decoder := json.NewDecoder(request.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&body); err != nil || body.Version < 1 {
-		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "费用明细字段或报销单版本无效")
-		return
-	}
-	if body.ExpenseCategory == nil && body.Purpose == nil && body.AmountCent == nil && body.ProjectCode == nil && body.Participants == nil {
-		writeError(response, http.StatusBadRequest, "INVALID_REQUEST", "请提供需要修改的明细字段")
-		return
-	}
-	patch := domain.ExpenseItemPatch{ExpenseCategory: body.ExpenseCategory, Purpose: body.Purpose, AmountCent: body.AmountCent, ProjectCode: body.ProjectCode, Participants: body.Participants}
-	if _, err := handler.expenseItems.PatchOwnedDraft(request.Context(), actor.ID, pathClaimID(request), request.PathValue("itemId"), body.Version, patch); err != nil {
+	if _, err := handler.claims.GetClaim(request.Context(), actor.ID, pathClaimID(request)); err != nil {
 		writeMappedError(response, err)
 		return
 	}
-	claim, err := handler.claims.GetClaim(request.Context(), actor.ID, pathClaimID(request))
-	if err != nil {
-		writeMappedError(response, err)
-		return
-	}
-	result, err := handler.claimDetailResponse(request.Context(), actor.ID, claim)
-	if err != nil {
-		writeMappedError(response, err)
-		return
-	}
-	writeJSON(response, http.StatusOK, result)
+	writeError(response, http.StatusConflict, "READ_ONLY_RECOGNITION", "票据识别结果只读，请修改申请报销信息")
 }
 
 func (handler *claimsHandler) deleteClaim(response http.ResponseWriter, request *http.Request) {
@@ -521,6 +483,13 @@ func (handler *claimsHandler) patchClaim(response http.ResponseWriter, request *
 				command.UnknownFields = append(command.UnknownFields, field)
 			} else {
 				command.ExpenseCategory = &category
+			}
+		case "selectedExpenseCategories":
+			var categories []string
+			if string(value) == "null" || json.Unmarshal(value, &categories) != nil {
+				command.UnknownFields = append(command.UnknownFields, field)
+			} else {
+				command.SelectedExpenseCategories = &categories
 			}
 		case "participants":
 			var participants []string
@@ -597,6 +566,8 @@ func claimResponse(claim application.ClaimView) map[string]any {
 		"version":                   claim.Version,
 		"purpose":                   claim.Purpose,
 		"expenseCategory":           claim.ExpenseCategory,
+		"selectedExpenseCategories": append([]string{}, claim.SelectedExpenseCategories...),
+		"expenseCategoriesSource":   claim.ExpenseCategoriesSource,
 		"participants":              claim.Participants,
 		"projectCode":               claim.ProjectCode,
 		"receiptCount":              claim.ReceiptCount,

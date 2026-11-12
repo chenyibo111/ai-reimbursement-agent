@@ -185,10 +185,8 @@ func validateSubmissionInput(input SubmissionInput) []domain.ValidationIssue {
 		issues = append(issues, domain.ValidationIssue{Code: "EXPENSE_ITEM_REQUIRED", Message: "请完成每张票据的费用明细", Blocking: true})
 	}
 	if input.Claim.ItemizationMode == domain.ClaimItemizationModeItemized {
-		for _, item := range input.Items {
-			if item.AmountCent == nil {
-				issues = append(issues, domain.ValidationIssue{Code: "EXPENSE_ITEM_AMOUNT_REQUIRED", Message: "请补充票据的费用明细金额", ReceiptID: item.ReceiptID, Blocking: true})
-			}
+		if len(input.Claim.SelectedExpenseCategories) == 0 {
+			issues = append(issues, domain.ValidationIssue{Code: "EXPENSE_CATEGORY_REQUIRED", Message: "请选择最终费用类别", Blocking: true})
 		}
 	}
 	for _, receipt := range input.Receipts {

@@ -11,7 +11,7 @@ const claimSchema = z.object({
   purpose: z.string().nullable(), requestedAmountCent: z.number().int().nonnegative().nullable().optional(),
   totalAmountCent: z.number().int().nonnegative().nullable(),
   expenseCategory: z.string().nullable().optional(), participants: z.array(z.string()).optional(), projectCode: z.string().nullable().optional(),
-  itemizationMode: z.enum(["LEGACY", "ITEMIZED"]).optional(), expenseCategories: z.array(z.string()).optional(), expenseItemTotalAmountCent: z.number().int().nonnegative().nullable().optional(),
+  itemizationMode: z.enum(["LEGACY", "ITEMIZED"]).optional(), expenseCategories: z.array(z.string()).optional(), selectedExpenseCategories: z.array(z.string()).optional(), expenseItemTotalAmountCent: z.number().int().nonnegative().nullable().optional(),
   expenseItems: z.array(z.object({ id: z.string(), receiptId: z.string(), receiptType: z.string(), expenseCategory: z.string(), categorySource: z.string(), purpose: z.string(), purposeSource: z.string(), amountCent: z.number().int().nonnegative().nullable(), amountSource: z.string(), projectCode: z.string(), participants: z.array(z.string()) }).strict()).optional(),
   receipts: z.array(z.object({ id: z.string(), filename: z.string(), status: z.string(), invoiceNumber: z.string().default(""), ocrConfidence: z.number().default(0), totalAmountCent: z.number().int().nonnegative().nullable() }).strict()),
   issues: z.array(z.object({ code: z.string(), severity: z.enum(["BLOCKING", "WARNING"]), message: z.string() }).strict()).optional(),

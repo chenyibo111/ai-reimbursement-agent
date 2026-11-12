@@ -3,7 +3,7 @@ import { expect, it } from "vitest";
 import { formatClaimFacts } from "@/src/application/format-claim-facts";
 
 it("includes both taxi and dining item suggestions in one claim summary", () => {
-  const claim = { id: "claim-1", claimNumber: "BX20261110-0001", version: 3, status: "DRAFT", purpose: "市内出行打车费、餐饮费用", itemizationMode: "ITEMIZED" as const, expenseCategories: ["市内交通费", "餐饮费"], expenseItemTotalAmountCent: 9000, totalAmountCent: 9000, requestedAmountCent: 9000, currency: "CNY" as const, expenseItems: [
+  const claim = { id: "claim-1", claimNumber: "BX20261110-0001", version: 3, status: "DRAFT", purpose: "市内出行打车费、餐饮费用", itemizationMode: "ITEMIZED" as const, expenseCategories: ["市内交通费", "餐饮费"], selectedExpenseCategories: ["餐饮费", "其他"], expenseItemTotalAmountCent: 9000, totalAmountCent: 9000, requestedAmountCent: 9000, currency: "CNY" as const, expenseItems: [
     { id: "taxi", receiptId: "taxi", receiptType: "TAXI", expenseCategory: "市内交通费", categorySource: "MODEL", purpose: "市内出行打车费", purposeSource: "MODEL", amountCent: 3800, amountSource: "OCR", projectCode: "", participants: [] },
     { id: "dining", receiptId: "dining", receiptType: "DINING", expenseCategory: "餐饮费", categorySource: "MODEL", purpose: "餐饮费用", purposeSource: "MODEL", amountCent: 5200, amountSource: "OCR", projectCode: "", participants: [] },
   ] };
@@ -12,6 +12,7 @@ it("includes both taxi and dining item suggestions in one claim summary", () => 
   expect(answer).toContain("打车");
   expect(answer).toContain("餐饮");
   expect(answer).toContain("AI 建议类别");
+  expect(answer).toContain("最终费用类别：餐饮费、其他");
   expect(answer).toContain("明细合计：¥90.00");
 });
 

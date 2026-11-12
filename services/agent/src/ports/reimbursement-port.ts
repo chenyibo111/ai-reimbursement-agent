@@ -16,6 +16,7 @@ export type ClaimSnapshot = {
   purpose: string | null;
   expenseCategory?: string;
   expenseCategories?: string[];
+  selectedExpenseCategories?: string[];
   expenseItems?: ExpenseItemSnapshot[];
   expenseItemTotalAmountCent?: number | null;
   itemizationMode?: "LEGACY" | "ITEMIZED";

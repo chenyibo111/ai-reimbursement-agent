@@ -77,7 +77,7 @@ func TestItemizedClaimResponseIncludesTwoExpenseCategories(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer employee-1")
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"expenseCategories":["交通费","餐饮费"]`) || !strings.Contains(response.Body.String(), `"expenseItemTotalAmountCent":9000`) || !strings.Contains(response.Body.String(), `"receiptId":"taxi"`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"expenseCategories":["交通费","餐饮费"]`) || !strings.Contains(response.Body.String(), `"selectedExpenseCategories":["其他","餐饮费"]`) || !strings.Contains(response.Body.String(), `"expenseItemTotalAmountCent":9000`) || !strings.Contains(response.Body.String(), `"receiptId":"taxi"`) {
 		t.Fatalf("response=%d %s", response.Code, response.Body.String())
 	}
 }
@@ -105,11 +105,25 @@ func TestExpenseItemPatchDoesNotRevealAnotherEmployeesItem(t *testing.T) {
 	}
 }
 
+func TestExpenseItemPatchRejectsChangesToReadOnlyRecognition(t *testing.T) {
+	router := NewRouter(Dependencies{Claims: itemizedFakeClaims{}, ExpenseItems: fakeExpenseItems{}, Auth: StaticActorResolver{}})
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/claims/claim-1/items/taxi", bytes.NewBufferString(`{"version":1,"expenseCategory":"市内交通费"}`))
+	request.Header.Set("Authorization", "Bearer employee-1")
+	request.Header.Set("Idempotency-Key", "item-patch-readonly")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"code":"READ_ONLY_RECOGNITION"`) {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+}
+
 type itemizedFakeClaims struct{ fakeClaims }
 
 func (itemizedFakeClaims) GetClaim(ctx context.Context, actorID, claimID string) (application.ClaimView, error) {
 	claim, err := (fakeClaims{}).GetClaim(ctx, actorID, claimID)
 	claim.ItemizationMode = domain.ClaimItemizationModeItemized
+	claim.SelectedExpenseCategories = []string{"其他", "餐饮费"}
+	claim.ExpenseCategoriesSource = "MANUAL"
 	return claim, err
 }
 

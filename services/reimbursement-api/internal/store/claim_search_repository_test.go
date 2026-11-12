@@ -108,7 +108,7 @@ func TestPostgresClaimSearchFindsItemizedCategory(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _, _ = pool.Exec(ctx, `DELETE FROM reimbursement.employees WHERE id=$1`, owner) }()
-	if _, err = pool.Exec(ctx, `INSERT INTO reimbursement.claims(id,owner_id,purpose,itemization_mode) VALUES ($1,$2,'混合费用','ITEMIZED')`, claimID, owner); err != nil {
+	if _, err = pool.Exec(ctx, `INSERT INTO reimbursement.claims(id,owner_id,purpose,itemization_mode,selected_expense_categories,expense_categories_source) VALUES ($1,$2,'混合费用','ITEMIZED',ARRAY['市内交通费','餐饮费'],'MANUAL')`, claimID, owner); err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _, _ = pool.Exec(ctx, `DELETE FROM reimbursement.claims WHERE id=$1`, claimID) }()
@@ -122,5 +122,9 @@ func TestPostgresClaimSearchFindsItemizedCategory(t *testing.T) {
 	items, count, err := repository.SearchOwned(ctx, owner, application.SearchClaimsQuery{ExpenseCategory: "市内交通费", Limit: 10})
 	if err != nil || count != 1 || len(items) != 1 || items[0].ID != claimID {
 		t.Fatalf("category search: items=%+v count=%d err=%v", items, count, err)
+	}
+	items, count, err = repository.SearchOwned(ctx, owner, application.SearchClaimsQuery{ExpenseCategory: "餐饮费", Limit: 10})
+	if err != nil || count != 1 || len(items) != 1 {
+		t.Fatalf("final category search: items=%+v count=%d err=%v", items, count, err)
 	}
 }

@@ -111,9 +111,9 @@ func EvaluatePolicyRules(version PolicyVersion, claim domain.Claim, itemGroups .
 	issues := make([]domain.ValidationIssue, 0)
 	items := []domain.ExpenseItem{{ExpenseCategory: claim.ExpenseCategory, ProjectCode: claim.ProjectCode, Participants: claim.Participants}}
 	if claim.ItemizationMode == domain.ClaimItemizationModeItemized {
-		items = nil
-		if len(itemGroups) > 0 {
-			items = itemGroups[0]
+		items = make([]domain.ExpenseItem, 0, len(claim.SelectedExpenseCategories))
+		for _, category := range claim.SelectedExpenseCategories {
+			items = append(items, domain.ExpenseItem{ExpenseCategory: category, ProjectCode: claim.ProjectCode, Participants: claim.Participants})
 		}
 	}
 	for _, rule := range version.Rules {
@@ -132,6 +132,9 @@ func EvaluatePolicyRules(version PolicyVersion, claim domain.Claim, itemGroups .
 				Categories []string `json:"categories"`
 			}
 			_ = json.Unmarshal(rule.Config, &config)
+			if len(items) == 0 {
+				issues = append(issues, domain.ValidationIssue{Code: "POLICY_" + rule.Code, Message: rule.Name + "：请填写允许的费用类别。", Blocking: rule.Severity == "BLOCKING"})
+			}
 			for _, item := range items {
 				allowed := false
 				for _, category := range config.Categories {

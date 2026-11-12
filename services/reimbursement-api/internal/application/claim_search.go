@@ -160,8 +160,17 @@ func filterAndSortClaims(claims []domain.Claim, query SearchClaimsQuery) []domai
 		if query.PurposeContains != "" && !strings.Contains(strings.ToLower(claim.Purpose), strings.ToLower(query.PurposeContains)) {
 			continue
 		}
-		if query.ExpenseCategory != "" && claim.ExpenseCategory != query.ExpenseCategory {
-			continue
+		if query.ExpenseCategory != "" {
+			matched := claim.ItemizationMode != domain.ClaimItemizationModeItemized && claim.ExpenseCategory == query.ExpenseCategory
+			for _, category := range claim.SelectedExpenseCategories {
+				if claim.ItemizationMode == domain.ClaimItemizationModeItemized && category == query.ExpenseCategory {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
 		}
 		if query.MinRequestedAmountCent != nil && (claim.RequestedAmountCent == nil || *claim.RequestedAmountCent < *query.MinRequestedAmountCent) {
 			continue

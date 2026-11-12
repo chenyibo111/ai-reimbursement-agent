@@ -258,6 +258,11 @@ paths:
                   type: string
                   description: 报销事由。草稿可留空，提交时必填。
                 expenseCategory: { type: string }
+                  selectedExpenseCategories:
+                    type: array
+                    maxItems: 20
+                    uniqueItems: true
+                    items: { type: string, minLength: 1, maxLength: 100 }
                 participants:
                   type: array
                   items: { type: string }
@@ -298,7 +303,8 @@ paths:
   /api/v1/claims/{claimId}/items/{itemId}:
     patch:
       operationId: patchExpenseItem
-      summary: Update one expense item on an actor-owned itemized draft
+      summary: Deprecated read-only receipt recognition endpoint
+      deprecated: true
       parameters:
         - $ref: "#/components/parameters/ClaimId"
         - name: itemId
@@ -324,11 +330,11 @@ paths:
                   type: array
                   items: { type: string }
       responses:
-        "200":
-          description: Updated actor-owned claim with expense items
+        "409":
+          description: Receipt recognition is read-only; edit the final claim fields instead.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Claim" }
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
         default:
           $ref: "#/components/responses/Error"
   /api/v1/claims/{claimId}/uploads:
@@ -573,6 +579,11 @@ components:
         expenseCategories:
           type: array
           items: { type: string }
+          selectedExpenseCategories:
+            type: array
+            description: Final claim categories submitted by the employee; OCR categories only initialize the draft.
+            items: { type: string }
+          expenseCategoriesSource: { type: string, enum: [AUTO, MANUAL] }
         expenseItems:
           type: array
           items: { $ref: "#/components/schemas/ExpenseItem" }

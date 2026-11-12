@@ -43,6 +43,31 @@ func TestClaimPatchMarksEditedPurposeManual(t *testing.T) {
 	}
 }
 
+func TestItemizedClaimPatchStoresFinalCategoriesSeparatelyFromRecognition(t *testing.T) {
+	claim, err := NewDraftClaim("claim-1", "BX20261111-0001", "employee-1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim.ItemizationMode = ClaimItemizationModeItemized
+	claim.SelectedExpenseCategories = []string{"交通费", "餐饮费"}
+	selected := []string{"餐饮费", "其他"}
+	if err := claim.Patch(claim.Version, ClaimPatch{SelectedExpenseCategories: &selected}); err != nil {
+		t.Fatal(err)
+	}
+	if len(claim.SelectedExpenseCategories) != 2 || claim.SelectedExpenseCategories[0] != "餐饮费" || claim.SelectedExpenseCategories[1] != "其他" || claim.ExpenseCategoriesSource != "MANUAL" {
+		t.Fatalf("final categories=%v source=%s", claim.SelectedExpenseCategories, claim.ExpenseCategoriesSource)
+	}
+	selected[0] = "住宿费"
+	if claim.SelectedExpenseCategories[0] != "餐饮费" {
+		t.Fatal("patch must copy category slice")
+	}
+	clone := claim.Clone()
+	clone.SelectedExpenseCategories[0] = "住宿费"
+	if claim.SelectedExpenseCategories[0] != "餐饮费" {
+		t.Fatal("clone must copy category slice")
+	}
+}
+
 func TestClaimPatchStoresManualRequestedAmountCurrencyAndRemark(t *testing.T) {
 	claim, err := NewDraftClaim("claim-1", "BX20261008-0001", "employee-1", "差旅报销")
 	if err != nil {

@@ -26,15 +26,16 @@ type CreateClaimCommand struct {
 }
 
 type PatchClaimCommand struct {
-	Purpose               *string
-	ExpenseCategory       *string
-	Participants          *[]string
-	ProjectCode           *string
-	RequestedAmountCent   *int64
-	Currency              *string
-	Remark                *string
-	UseOCRSuggestedAmount bool
-	UnknownFields         []string
+	Purpose                   *string
+	ExpenseCategory           *string
+	SelectedExpenseCategories *[]string
+	Participants              *[]string
+	ProjectCode               *string
+	RequestedAmountCent       *int64
+	Currency                  *string
+	Remark                    *string
+	UseOCRSuggestedAmount     bool
+	UnknownFields             []string
 }
 
 type ClaimView = domain.Claim
@@ -128,7 +129,9 @@ func (service *ClaimService) CreateClaim(ctx context.Context, actorID string, co
 	}
 	if _, enabled := service.itemizedEmployees[actorID]; enabled {
 		claim.ItemizationMode = domain.ClaimItemizationModeItemized
-		if claim.Purpose == "" { claim.PurposeSource = "AUTO" }
+		if claim.Purpose == "" {
+			claim.PurposeSource = "AUTO"
+		}
 	}
 	if err := service.repository.Create(ctx, claim, ClaimAudit{ClaimID: claim.ID, ActorID: actorID, Action: "CLAIM_DRAFT_CREATED", Version: claim.Version}, ClaimOutboxEvent{ClaimID: claim.ID, Type: "ClaimDraftCreated", Version: claim.Version}); err != nil {
 		return ClaimView{}, fmt.Errorf("persist draft claim: %w", err)
@@ -158,18 +161,19 @@ func (service *ClaimService) UpdateClaim(ctx context.Context, actorID string, cl
 	if err != nil {
 		return ClaimView{}, fmt.Errorf("find claim: %w", err)
 	}
-	if claim.ItemizationMode == domain.ClaimItemizationModeItemized && (command.ExpenseCategory != nil || command.ProjectCode != nil || command.Participants != nil) {
+	if claim.ItemizationMode == domain.ClaimItemizationModeItemized && command.ExpenseCategory != nil {
 		return ClaimView{}, ErrItemizedFieldsRequireItem
 	}
 	patch := domain.ClaimPatch{
-		Purpose:               command.Purpose,
-		ExpenseCategory:       command.ExpenseCategory,
-		Participants:          command.Participants,
-		ProjectCode:           command.ProjectCode,
-		RequestedAmountCent:   command.RequestedAmountCent,
-		Currency:              command.Currency,
-		Remark:                command.Remark,
-		UseOCRSuggestedAmount: command.UseOCRSuggestedAmount,
+		Purpose:                   command.Purpose,
+		ExpenseCategory:           command.ExpenseCategory,
+		SelectedExpenseCategories: command.SelectedExpenseCategories,
+		Participants:              command.Participants,
+		ProjectCode:               command.ProjectCode,
+		RequestedAmountCent:       command.RequestedAmountCent,
+		Currency:                  command.Currency,
+		Remark:                    command.Remark,
+		UseOCRSuggestedAmount:     command.UseOCRSuggestedAmount,
 	}
 	if err := claim.Patch(expectedVersion, patch); err != nil {
 		if errors.Is(err, domain.ErrClaimVersionConflict) {

@@ -4,7 +4,7 @@ import { runConversationTurn, type ConversationStore } from "@/src/application/r
 import { ReimbursementApiHttpError } from "@/services/agent/src/adapters/reimbursement-api-client";
 import type { ClaimFieldPatch } from "@/services/agent/src/ports/reimbursement-port";
 
-it("updates only the named item in a mixed draft and reads back before confirming", async () => {
+it("keeps named receipt recognition read-only in a mixed draft", async () => {
   const setup = createDeps();
   const claim = { id: "claim-mixed", claimNumber: "BX20261110-0001", status: "DRAFT", version: 4, itemizationMode: "ITEMIZED" as const, purpose: "市内出行及餐饮", totalAmountCent: 9000, requestedAmountCent: 9000, currency: "CNY" as const, expenseItems: [
     { id: "taxi-item", receiptId: "taxi", receiptType: "TAXI", expenseCategory: "交通费", categorySource: "MODEL", purpose: "市内出行打车费", purposeSource: "MODEL", amountCent: 3800, amountSource: "OCR", projectCode: "", participants: [] },
@@ -16,15 +16,15 @@ it("updates only the named item in a mixed draft and reads back before confirmin
     model: { decideConversation: async () => ({ action: "COLLECT_FIELDS" as const, reply: "已经修改", receiptOrdinal: 1, fields: { expenseCategory: "市内交通费" } }) },
     readWorkbench: async () => ({ claim, receipts }), updateExpenseItem };
   const result = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "p2p", message: "把第一张打车票改为市内交通费" }, deps);
-  expect(updateExpenseItem).toHaveBeenCalledWith({ actorId: "employee-1", claimId: claim.id, itemId: "taxi-item", fields: { expenseCategory: "市内交通费" } });
-  expect(result.reply).toContain("已保存");
-  expect(result.reply).toContain("taxi.pdf");
+  expect(updateExpenseItem).not.toHaveBeenCalled();
+  expect(result.reply).toContain("票据识别结果只读");
+  expect(result.reply).toContain("申请报销信息");
   const group = await runConversationTurn({ actorId: "employee-1", conversationId: "conversation-1", channel: "FEISHU", chatType: "group", message: "把第一张打车票改为市内交通费" }, deps);
   expect(group.reply).toContain("私聊");
-  expect(updateExpenseItem).toHaveBeenCalledTimes(1);
+  expect(updateExpenseItem).not.toHaveBeenCalled();
 });
 
-it("updates a named taxi receipt purpose without replacing the whole claim purpose", async () => {
+it("directs named receipt purpose changes to the claim form", async () => {
   const setup = createDeps();
   const claim = { id: "claim-mixed", claimNumber: "BX20261110-0001", status: "DRAFT", version: 4, itemizationMode: "ITEMIZED" as const, purpose: "市内出行及餐饮", totalAmountCent: 9000, currency: "CNY" as const, expenseItems: [
     { id: "taxi-item", receiptId: "taxi", receiptType: "TAXI", purpose: "市内出行打车费" },
@@ -37,12 +37,12 @@ it("updates a named taxi receipt purpose without replacing the whole claim purpo
     model: { decideConversation: async () => ({ action: "COLLECT_FIELDS" as const, reply: "", fields: { purpose: "客户拜访打车费" } }) },
     readWorkbench: async () => ({ claim, receipts: [{ id: "taxi", filename: "taxi.pdf" }, { id: "dining", filename: "dining.pdf" }] }), updateExpenseItem, updateFields,
   } as never);
-  expect(result.reply).toContain("已保存");
-  expect(updateExpenseItem).toHaveBeenCalledWith({ actorId: "employee-1", claimId: claim.id, itemId: "taxi-item", fields: { purpose: "客户拜访打车费" } });
+  expect(result.reply).toContain("票据识别结果只读");
+  expect(updateExpenseItem).not.toHaveBeenCalled();
   expect(updateFields).not.toHaveBeenCalled();
 });
 
-it("asks which receipt to edit when a mixed itemized draft has no receipt target", async () => {
+it("directs mixed draft category edits to the final claim field", async () => {
   const setup = createDeps();
   const claim = { id: "claim-mixed", claimNumber: "BX20261110-0001", status: "DRAFT", version: 4, itemizationMode: "ITEMIZED" as const, purpose: "", totalAmountCent: 9000, currency: "CNY" as const, expenseItems: [{ id: "taxi-item", receiptId: "taxi" }, { id: "dining-item", receiptId: "dining" }] };
   const updateExpenseItem = vi.fn();
@@ -51,7 +51,7 @@ it("asks which receipt to edit when a mixed itemized draft has no receipt target
     model: { decideConversation: async () => ({ action: "COLLECT_FIELDS" as const, reply: "已修改", fields: { expenseCategory: "交通费" } }) },
     readWorkbench: async () => ({ claim, receipts: [{ id: "taxi", filename: "taxi.pdf" }, { id: "dining", filename: "dining.pdf" }] }), updateExpenseItem,
   } as never);
-  expect(result.reply).toContain("请指定要修改的票据序号");
+  expect(result.reply).toContain("申请报销信息");
   expect(updateExpenseItem).not.toHaveBeenCalled();
 });
 

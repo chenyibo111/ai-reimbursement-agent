@@ -446,20 +446,8 @@ async function applyDecision(
         const workbench = await deps.readWorkbench({ actorId: input.actorId, claimId: itemClaimId });
         if (workbench.claim.itemizationMode === "ITEMIZED" && itemFieldsRequested) {
           if (workbench.claim.status !== "DRAFT") return persistReply(input, intake, "当前报销单已不能修改，请重新核对。", [], deps.conversations);
-          const items = workbench.claim.expenseItems ?? [];
           if (decision.receiptOrdinal && decision.receiptOrdinal !== explicitOrdinal) return persistReply(input, intake, "请明确要修改的票据序号，本次未修改。", [], deps.conversations, undefined, itemClaimId);
-          const receipt = explicitOrdinal ? workbench.receipts[explicitOrdinal - 1] : matchReceiptForEdit(input.message, workbench.receipts, items) ?? (items.length === 1 ? workbench.receipts.find((candidate) => candidate.id === items[0].receiptId) : undefined);
-          if (!receipt) return persistReply(input, intake, `请指定要修改的票据序号。当前单据有 ${workbench.receipts.length} 张票据：${workbench.receipts.map((candidate, index) => `${index + 1}. ${candidate.filename}`).join("；")}`, [], deps.conversations, undefined, itemClaimId);
-          const item = items.find((candidate) => candidate.receiptId === receipt.id);
-          if (!item) return persistReply(input, intake, "该票据的费用明细尚未生成，请稍后再试或到工作台核对。", [], deps.conversations, undefined, itemClaimId);
-          if (!deps.updateExpenseItem) return persistReply(input, intake, "明细修改服务暂不可用，本次未保存。", [], deps.conversations, undefined, itemClaimId);
-          const safe = intake ? await clearSubmissionPreparation(intake, deps.conversations) : null;
-          try {
-            const updated = await deps.updateExpenseItem({ actorId: input.actorId, claimId: itemClaimId, itemId: item.id, fields });
-            const actual = updated.expenseItems?.find((candidate) => candidate.id === item.id);
-            if (!actual || !Object.entries(fields).every(([name, value]) => JSON.stringify(actual[name as keyof typeof actual]) === JSON.stringify(value))) return persistReply(input, safe, "明细写入结果无法核验，请到工作台核对。", [], deps.conversations, undefined, itemClaimId);
-            return persistReply(input, safe, `已保存到 ${workbench.claim.claimNumber} 的 ${receipt.filename} 明细。`, [], deps.conversations, undefined, itemClaimId);
-          } catch { return persistReply(input, safe, "明细未确认写入；报销单可能已变化，请重新查询后再试。", [], deps.conversations, undefined, itemClaimId); }
+          return persistReply(input, intake, "票据识别结果只读。请在报销工作台的“申请报销信息”中修改整单费用类别、报销事由或补充信息；本次未修改。", [], deps.conversations, undefined, itemClaimId);
         }
       } catch { return persistReply(input, intake, "当前报销单无法核验，本次未保存。", [], deps.conversations); }
     }
@@ -577,16 +565,6 @@ function receiptOrdinalFromMessage(message: string): number | null {
   const names: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
   const ordinal = names[match[1]] ?? Number(match[1]);
   return Number.isSafeInteger(ordinal) && ordinal > 0 && ordinal <= 100 ? ordinal : null;
-}
-
-function matchReceiptForEdit(message: string, receipts: ReceiptSnapshot[], items: NonNullable<ClaimSnapshot["expenseItems"]>): ReceiptSnapshot | undefined {
-  const named = receipts.filter((receipt) => receipt.filename && message.includes(receipt.filename));
-  if (named.length === 1) return named[0];
-  const patterns: Record<string, RegExp> = { TAXI: /打车|出租车|网约车/, DINING: /餐饮|餐费|饭票|餐票/, LODGING: /住宿|酒店/, TRANSPORT: /火车|高铁|铁路|机票|飞机/ };
-  const matchedTypes = Object.entries(patterns).filter(([, pattern]) => pattern.test(message)).map(([type]) => type);
-  if (matchedTypes.length !== 1) return undefined;
-  const candidates = items.filter((item) => item.receiptType === matchedTypes[0]);
-  return candidates.length === 1 ? receipts.find((receipt) => receipt.id === candidates[0].receiptId) : undefined;
 }
 
 function validFieldPatch(value: ConversationDecision["fields"]): ClaimFieldPatch | null {

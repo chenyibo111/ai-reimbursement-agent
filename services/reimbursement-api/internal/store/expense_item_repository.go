@@ -246,7 +246,14 @@ func advanceExpenseItemClaim(ctx context.Context, tx pgx.Tx, claimID, actorID st
 			SELECT sum(item.amount_cent) FROM reimbursement.expense_items AS item
 			JOIN reimbursement.receipts AS receipt ON receipt.id=item.receipt_id
 			WHERE item.claim_id=claim.id AND receipt.status='EXTRACTED'
-		) ELSE claim.requested_amount_cent END
+		) ELSE claim.requested_amount_cent END,
+		selected_expense_categories=CASE WHEN claim.expense_categories_source='AUTO' THEN COALESCE((
+			SELECT array_agg(category ORDER BY category) FROM (
+				SELECT DISTINCT item.expense_category AS category FROM reimbursement.expense_items AS item
+				JOIN reimbursement.receipts AS receipt ON receipt.id=item.receipt_id
+				WHERE item.claim_id=claim.id AND receipt.status='EXTRACTED' AND item.expense_category <> ''
+			) AS recognized
+		), ARRAY[]::TEXT[]) ELSE claim.selected_expense_categories END
 		WHERE claim.id=$1`, claimID)
 	if err != nil {
 		return err

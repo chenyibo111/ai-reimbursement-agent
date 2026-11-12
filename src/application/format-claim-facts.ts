@@ -25,7 +25,9 @@ export function formatClaimFacts(kind: ClaimFactKind, workbench: Workbench, vali
 function itemizedSummary({ claim, receipts }: Workbench): string {
   if (claim.itemizationMode !== "ITEMIZED") return "";
   const items = claim.expenseItems ?? [];
-  if (!items.length) return "费用明细待生成；";
+  const finalCategories = claim.selectedExpenseCategories ?? claim.expenseCategories ?? [];
+  const finalSummary = `最终费用类别：${finalCategories.join("、") || "待填写"}；`;
+  if (!items.length) return `${finalSummary}费用明细待生成；`;
   const typeNames: Record<string, string> = { TAXI: "打车", DINING: "餐饮", LODGING: "住宿", TRANSPORT: "交通" };
   const lines = items.map((item) => {
     const receipt = receipts.find((candidate) => candidate.id === item.receiptId);
@@ -33,7 +35,7 @@ function itemizedSummary({ claim, receipts }: Workbench): string {
     const category = item.expenseCategory ? `${item.categorySource === "MANUAL" ? "人工填写" : "AI 建议"}类别 ${item.expenseCategory}` : "类别待补充";
     return `${receipt?.filename ?? item.receiptId}：${type}，${category}，明细金额 ${money(item.amountCent, "待补充")}`;
   });
-  return `费用明细：${lines.join("；")}；明细合计：${money(claim.expenseItemTotalAmountCent, "待补充")}；`;
+  return `${finalSummary}费用明细：${lines.join("；")}；明细合计：${money(claim.expenseItemTotalAmountCent, "待补充")}；`;
 }
 
 function receiptTotalDescription({ claim, receipts }: Workbench): string {
