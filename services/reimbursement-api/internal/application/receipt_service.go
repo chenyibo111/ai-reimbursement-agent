@@ -135,7 +135,7 @@ type ReceiptService struct {
 	suggestions                              ClaimOCRSuggestionRefresher
 	expenseItems                             ExpenseItemSuggester
 	classifier                               ReceiptClassifier
-	classificationPolicy                     ActivePolicyReader
+	classificationCatalog                    *CachedExpenseCatalogReader
 	allowDuplicateContentForTesting          bool
 	allowDuplicateSubmittedInvoiceForTesting bool
 }
@@ -144,9 +144,9 @@ func (service *ReceiptService) SetExpenseItemSuggester(items ExpenseItemSuggeste
 	service.expenseItems = items
 }
 
-func (service *ReceiptService) SetReceiptClassifier(classifier ReceiptClassifier, policy ActivePolicyReader) {
+func (service *ReceiptService) SetReceiptClassifier(classifier ReceiptClassifier, catalog *CachedExpenseCatalogReader) {
 	service.classifier = classifier
-	service.classificationPolicy = policy
+	service.classificationCatalog = catalog
 }
 
 // ReceiptServiceOptions contains explicitly opt-in runtime behavior.
@@ -424,24 +424,19 @@ func (service *ReceiptService) ExtractReceipt(ctx context.Context, actorID strin
 
 func (service *ReceiptService) classifyExpenseItem(ctx context.Context, result OCRResult) domain.ExpenseItemSuggestion {
 	suggestion := domain.ExpenseItemSuggestion{AmountCent: result.TotalAmountCent, ClassificationStatus: "PENDING"}
-	if service.classifier == nil || service.classificationPolicy == nil {
+	if service.classifier == nil || service.classificationCatalog == nil {
 		return suggestion
 	}
 	suggestion.ClassificationStatus = "UNKNOWN"
 	if result.Text == "" {
 		return suggestion
 	}
-	policy, err := service.classificationPolicy.LoadActivePolicy(ctx, time.Now())
+	catalog, version, err := service.classificationCatalog.Load(ctx)
 	if err != nil {
 		suggestion.ClassificationStatus = "FAILED"
 		return suggestion
 	}
-	allowedCategories, err := AllowedReceiptCategories(policy)
-	if err != nil {
-		suggestion.ClassificationStatus = "FAILED"
-		return suggestion
-	}
-	classified, err := service.classifier.Classify(ctx, result, allowedCategories)
+	classified, err := service.classifier.Classify(ctx, result, catalog)
 	if err != nil {
 		suggestion.ClassificationStatus = "FAILED"
 		return suggestion
@@ -449,7 +444,7 @@ func (service *ReceiptService) classifyExpenseItem(ctx context.Context, result O
 	suggestion.ReceiptType = classified.ReceiptType
 	suggestion.ExpenseCategory = classified.ExpenseCategory
 	suggestion.Purpose = classified.Purpose
-	suggestion.ClassificationVersion = classified.Version
+	suggestion.ClassificationVersion = fmt.Sprintf("catalog-%d", version)
 	switch {
 	case classified.ReceiptType == ReceiptTypeUnknown:
 		suggestion.ClassificationStatus = "UNKNOWN"

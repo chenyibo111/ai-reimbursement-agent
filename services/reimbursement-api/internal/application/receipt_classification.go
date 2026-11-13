@@ -19,7 +19,7 @@ type ClassificationSuggestion struct {
 }
 
 type ReceiptClassifier interface {
-	Classify(context.Context, OCRResult, []string) (ClassificationSuggestion, error)
+	Classify(context.Context, OCRResult, ExpenseCatalog) (ClassificationSuggestion, error)
 }
 
 func AllowedReceiptCategories(policy *PolicyVersion) ([]string, error) {
@@ -59,7 +59,7 @@ func AllowedReceiptCategories(policy *PolicyVersion) ([]string, error) {
 	return allowed, nil
 }
 
-func ResolveClassification(receiptType, evidence, confidence, ocrText string, allowedCategories []string) ClassificationSuggestion {
+func ResolveClassification(receiptType, evidence, confidence, ocrText string, catalog ExpenseCatalog) ClassificationSuggestion {
 	unknown := ClassificationSuggestion{ReceiptType: ReceiptTypeUnknown}
 	receiptType = strings.ToUpper(strings.TrimSpace(receiptType))
 	evidence = strings.TrimSpace(evidence)
@@ -67,35 +67,16 @@ func ResolveClassification(receiptType, evidence, confidence, ocrText string, al
 	if evidence == "" || len([]rune(evidence)) > 120 || !strings.Contains(ocrText, evidence) || (confidence != "HIGH" && confidence != "MEDIUM") {
 		return unknown
 	}
-	type candidate struct {
-		purpose    string
-		categories []string
-	}
-	options := map[string]candidate{
-		"TAXI":      {"市内出行打车费", []string{"市内交通费", "打车费", "交通费"}},
-		"DINING":    {"餐饮费用", []string{"餐饮费", "餐费"}},
-		"LODGING":   {"住宿费用", []string{"住宿费", "酒店住宿费"}},
-		"TRANSPORT": {"交通出行费用", []string{"交通费", "差旅交通费", "火车票"}},
-		"OTHER":     {"其他费用", []string{"其他"}},
-	}
-	option, ok := options[receiptType]
-	if !ok {
-		return unknown
-	}
-	category := option.categories[0]
-	if len(allowedCategories) > 0 {
-		category = ""
-		for _, candidate := range option.categories {
-			for _, allowed := range allowedCategories {
-				if candidate == strings.TrimSpace(allowed) {
-					category = allowed
-					break
-				}
-			}
-			if category != "" {
-				break
+	for _, mapping := range catalog.Mappings {
+		if mapping.ReceiptType != receiptType {
+			continue
+		}
+		for _, category := range catalog.Categories {
+			if category.Code == mapping.CategoryCode && category.Enabled {
+				return ClassificationSuggestion{ReceiptType: receiptType, ExpenseCategory: category.Label, Purpose: mapping.PurposeTemplate, Evidence: evidence, Confidence: confidence, Version: "v1"}
 			}
 		}
+		return ClassificationSuggestion{ReceiptType: receiptType, Evidence: evidence, Confidence: confidence, Version: "v1"}
 	}
-	return ClassificationSuggestion{ReceiptType: receiptType, ExpenseCategory: category, Purpose: option.purpose, Evidence: evidence, Confidence: confidence, Version: "v1"}
+	return unknown
 }

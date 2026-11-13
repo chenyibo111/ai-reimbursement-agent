@@ -70,6 +70,8 @@ func main() {
 	)
 	receiptService.SetExpenseItemSuggester(store.NewPostgresExpenseItemRepository(pool))
 	if os.Getenv("MODEL_PROVIDER") == "openai-compatible" {
+		configService := application.NewConfigService(store.NewPostgresConfigRepository(pool))
+		configService.RegisterValidator("expense_catalog", application.ValidateExpenseCatalogPayload)
 		baseURL, model := strings.TrimSpace(os.Getenv("MODEL_BASE_URL")), strings.TrimSpace(os.Getenv("MODEL_NAME"))
 		if baseURL == "" || model == "" {
 			log.Fatal("MODEL_BASE_URL and MODEL_NAME are required for receipt classification")
@@ -82,7 +84,7 @@ func main() {
 			}
 			timeout = time.Duration(milliseconds) * time.Millisecond
 		}
-		receiptService.SetReceiptClassifier(infrastructure.NewHTTPReceiptClassifier(baseURL, model, os.Getenv("MODEL_PROVIDER_API_KEY"), timeout), store.NewPostgresSubmissionRepository(pool))
+		receiptService.SetReceiptClassifier(infrastructure.NewHTTPReceiptClassifier(baseURL, model, os.Getenv("MODEL_PROVIDER_API_KEY"), timeout), application.NewCachedExpenseCatalogReader(configService))
 	}
 	receiptWorker := workers.NewReceiptExtractionWorker(
 		events.NewPostgresEventDeduplicator(pool, workers.ReceiptOCRConsumer),

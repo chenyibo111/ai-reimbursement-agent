@@ -15,6 +15,12 @@ import (
 
 type configReadRepository struct{ application.ConfigRepository }
 
+type employeeCatalogRepository struct{ application.ConfigRepository }
+
+func (employeeCatalogRepository) GetActive(context.Context, string) (domain.ConfigSnapshot, error) {
+	return domain.ConfigSnapshot{Domain: "expense_catalog", Version: 2, Payload: []byte(`{"categories":[{"code":"DINING","label":"餐饮费","enabled":true},{"code":"OLD","label":"旧类别","enabled":false}],"mappings":[{"receiptType":"DINING","categoryCode":"DINING","purposeTemplate":"餐饮费用"}]}`)}, nil
+}
+
 func (configReadRepository) GetActive(_ context.Context, configDomain string) (domain.ConfigSnapshot, error) {
 	return domain.ConfigSnapshot{Domain: configDomain, Version: 3, Payload: []byte(`{"categories":[]}`), PublishedAt: time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC)}, nil
 }
@@ -82,6 +88,19 @@ func TestConfigHandlerInternalReadReturnsPublishedVersion(t *testing.T) {
 	handler.getInternal(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"version":3`) {
 		t.Fatalf("internal read got %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestConfigHandlerEmployeeReadHidesDisabledCategoriesAndMappings(t *testing.T) {
+	service := application.NewConfigService(employeeCatalogRepository{})
+	service.RegisterValidator("expense_catalog", func(json.RawMessage) error { return nil })
+	handler := &configHandler{service: service}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/config/expense_catalog", nil)
+	request.SetPathValue("domain", "expense_catalog")
+	response := httptest.NewRecorder()
+	handler.getPublic(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "餐饮费") || strings.Contains(response.Body.String(), "旧类别") || strings.Contains(response.Body.String(), "mappings") {
+		t.Fatalf("employee catalog response=%d %s", response.Code, response.Body.String())
 	}
 }
 

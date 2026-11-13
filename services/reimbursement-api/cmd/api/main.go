@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -47,6 +48,10 @@ func main() {
 	}
 	claimRepository := store.NewPostgresClaimRepository(pool)
 	configService := application.NewConfigService(store.NewPostgresConfigRepository(pool))
+	configService.RegisterValidator("expense_catalog", application.ValidateExpenseCatalogPayload)
+	configService.RegisterPublishValidator("expense_catalog", func(ctx context.Context, payload json.RawMessage) error {
+		return application.ValidateExpenseCatalogPolicyReferences(ctx, payload, store.NewPostgresSubmissionRepository(pool))
+	})
 	receiptRepository := store.NewPostgresReceiptRepository(pool)
 	reviewCaseRepository := store.NewPostgresReviewCaseRepository(pool)
 	provisioningKey := strings.TrimSpace(os.Getenv("REIMBURSEMENT_AUTH_PROVISIONING_KEY"))

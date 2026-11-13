@@ -2,9 +2,9 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/domain"
 )
@@ -62,7 +62,7 @@ func TestExtractReceiptClassifiesItemizedReceiptWithoutChangingOCRAmount(t *test
 	repository := &fakeReceiptRepository{receipts: map[string]domain.Receipt{"taxi": {ID: "taxi", ClaimID: "claim-1", OwnerID: "employee-1", ObjectKey: "receipts/taxi", Status: domain.ReceiptStatusReadyForOCR}}, submittedInvoiceNumbers: map[string]bool{}}
 	service := NewReceiptService(itemizedClaimReader{}, repository, &fakeObjectStore{objects: map[string]StoredObject{"receipts/taxi": {ContentType: "image/png", Content: validPNG()}}}, &fakeScanner{}, &fakeOCRClient{result: OCRResult{Text: "滴滴出行 网约车运输服务", TotalAmountCent: &amount, Confidence: 0.98}}, NewSequentialIDGenerator())
 	service.SetExpenseItemSuggester(items)
-	service.SetReceiptClassifier(fakeReceiptClassifier{suggestion: ClassificationSuggestion{ReceiptType: "TAXI", ExpenseCategory: "市内交通费", Purpose: "市内出行打车费"}}, fakeActivePolicyReader{})
+	service.SetReceiptClassifier(fakeReceiptClassifier{suggestion: ClassificationSuggestion{ReceiptType: "TAXI", ExpenseCategory: "市内交通费", Purpose: "市内出行打车费"}}, testCachedCatalogReader())
 	if err := service.ExtractReceipt(context.Background(), "employee-1", "claim-1", "taxi"); err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestExtractReceiptKeepsOCRAmountWhenModelFails(t *testing.T) {
 	repository := &fakeReceiptRepository{receipts: map[string]domain.Receipt{"dining": {ID: "dining", ClaimID: "claim-1", OwnerID: "employee-1", ObjectKey: "receipts/dining", Status: domain.ReceiptStatusReadyForOCR}}, submittedInvoiceNumbers: map[string]bool{}}
 	service := NewReceiptService(itemizedClaimReader{}, repository, &fakeObjectStore{objects: map[string]StoredObject{"receipts/dining": {ContentType: "image/png", Content: validPNG()}}}, &fakeScanner{}, &fakeOCRClient{result: OCRResult{Text: "餐饮服务", TotalAmountCent: &amount, Confidence: 0.98}}, NewSequentialIDGenerator())
 	service.SetExpenseItemSuggester(items)
-	service.SetReceiptClassifier(fakeReceiptClassifier{err: errors.New("model unavailable")}, fakeActivePolicyReader{})
+	service.SetReceiptClassifier(fakeReceiptClassifier{err: errors.New("model unavailable")}, testCachedCatalogReader())
 	if err := service.ExtractReceipt(context.Background(), "employee-1", "claim-1", "dining"); err != nil {
 		t.Fatal(err)
 	}
@@ -114,14 +114,13 @@ type fakeReceiptClassifier struct {
 	err        error
 }
 
-func (classifier fakeReceiptClassifier) Classify(context.Context, OCRResult, []string) (ClassificationSuggestion, error) {
+func (classifier fakeReceiptClassifier) Classify(context.Context, OCRResult, ExpenseCatalog) (ClassificationSuggestion, error) {
 	return classifier.suggestion, classifier.err
 }
 
-type fakeActivePolicyReader struct{}
-
-func (fakeActivePolicyReader) LoadActivePolicy(context.Context, time.Time) (*PolicyVersion, error) {
-	return nil, nil
+func testCachedCatalogReader() *CachedExpenseCatalogReader {
+	payload, _ := json.Marshal(testExpenseCatalog())
+	return NewCachedExpenseCatalogReader(&changingCatalogSnapshotReader{snapshot: domain.ConfigSnapshot{Domain: "expense_catalog", Version: 1, Payload: payload}})
 }
 
 type recordingOCRSuggestionRefresher struct {

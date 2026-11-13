@@ -5,13 +5,13 @@ import (
 	"testing"
 )
 
-func TestResolveClassificationUsesPublishedCategoryWhitelist(t *testing.T) {
+func TestResolveClassificationUsesConfiguredCategory(t *testing.T) {
 	text := "滴滴出行 网约车运输服务"
-	result := ResolveClassification("TAXI", "网约车运输服务", "HIGH", text, []string{"餐饮费"})
-	if result.ReceiptType != "TAXI" || result.ExpenseCategory != "" || result.Purpose != "市内出行打车费" {
-		t.Fatalf("unallowed category should remain blank: %+v", result)
+	result := ResolveClassification("TAXI", "网约车运输服务", "HIGH", text, testExpenseCatalog())
+	if result.ReceiptType != "TAXI" || result.ExpenseCategory != "市内交通费" || result.Purpose != "市内出行打车费" {
+		t.Fatalf("configured category should remain available: %+v", result)
 	}
-	defaultCategory := ResolveClassification("TAXI", "网约车运输服务", "MEDIUM", text, nil)
+	defaultCategory := ResolveClassification("TAXI", "网约车运输服务", "MEDIUM", text, testExpenseCatalog())
 	if defaultCategory.ExpenseCategory != "市内交通费" {
 		t.Fatalf("default category=%q", defaultCategory.ExpenseCategory)
 	}
@@ -19,15 +19,11 @@ func TestResolveClassificationUsesPublishedCategoryWhitelist(t *testing.T) {
 
 func TestResolveClassificationMapsEvidenceBackedOtherReceipts(t *testing.T) {
 	text := "电子发票 项目名称 *水果*水果 *蔬菜*蔬菜"
-	result := ResolveClassification("OTHER", "*水果*水果", "HIGH", text, nil)
+	result := ResolveClassification("OTHER", "*水果*水果", "HIGH", text, testExpenseCatalog())
 	if result.ReceiptType != "OTHER" || result.ExpenseCategory != "其他" || result.Purpose != "其他费用" {
 		t.Fatalf("other receipt classification=%+v", result)
 	}
-	unmapped := ResolveClassification("OTHER", "*水果*水果", "HIGH", text, []string{"餐饮费"})
-	if unmapped.ReceiptType != "OTHER" || unmapped.ExpenseCategory != "" || unmapped.Purpose != "其他费用" {
-		t.Fatalf("disallowed other category=%+v", unmapped)
-	}
-	uncertain := ResolveClassification("OTHER", "*水果*水果", "LOW", text, nil)
+	uncertain := ResolveClassification("OTHER", "*水果*水果", "LOW", text, testExpenseCatalog())
 	if uncertain.ReceiptType != ReceiptTypeUnknown || uncertain.ExpenseCategory != "" || uncertain.Purpose != "" {
 		t.Fatalf("low-confidence receipt should remain unknown: %+v", uncertain)
 	}

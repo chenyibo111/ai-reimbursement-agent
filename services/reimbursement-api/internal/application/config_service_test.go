@@ -5,7 +5,23 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+
+	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/domain"
 )
+
+type configDraftPublisherStub struct {
+	ConfigRepository
+	draft     domain.ConfigDraft
+	published bool
+}
+
+func (stub *configDraftPublisherStub) GetDraft(context.Context, string) (domain.ConfigDraft, error) {
+	return stub.draft, nil
+}
+func (stub *configDraftPublisherStub) PublishDraft(context.Context, string, string, int64) (domain.ConfigSnapshot, error) {
+	stub.published = true
+	return domain.ConfigSnapshot{}, nil
+}
 
 func TestConfigServiceRejectsUnknownDomain(t *testing.T) {
 	service := NewConfigService(nil)
@@ -33,5 +49,16 @@ func TestConfigServiceRejectsUnregisteredDomainAndInvalidPayload(t *testing.T) {
 	_, err = service.SaveDraft(context.Background(), "admin-1", "expense_catalog", 0, json.RawMessage(`{"categories":[]}`), "test")
 	if !errors.Is(err, ErrConfigInvalid) {
 		t.Fatalf("expected invalid payload, got %v", err)
+	}
+}
+
+func TestConfigServiceChecksPolicyReferencesBeforePublishing(t *testing.T) {
+	payload, _ := json.Marshal(testExpenseCatalog())
+	stub := &configDraftPublisherStub{draft: domain.ConfigDraft{Domain: "expense_catalog", Revision: 1, Payload: payload}}
+	service := NewConfigService(stub)
+	service.RegisterValidator("expense_catalog", ValidateExpenseCatalogPayload)
+	service.RegisterPublishValidator("expense_catalog", func(context.Context, json.RawMessage) error { return ErrConfigInvalid })
+	if _, err := service.PublishDraft(context.Background(), "admin-1", "expense_catalog", 1); !errors.Is(err, ErrConfigInvalid) || stub.published {
+		t.Fatalf("invalid policy reference was published: %v", err)
 	}
 }

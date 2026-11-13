@@ -183,6 +183,27 @@ func (handler *configHandler) getPublic(response http.ResponseWriter, request *h
 		writeConfigError(response, err)
 		return
 	}
+	if configDomain == "expense_catalog" {
+		var catalog struct {
+			Categories []application.Category `json:"categories"`
+		}
+		if err := json.Unmarshal(snapshot.Payload, &catalog); err != nil {
+			writeConfigError(response, err)
+			return
+		}
+		available := make([]application.Category, 0, len(catalog.Categories))
+		for _, category := range catalog.Categories {
+			if category.Enabled {
+				available = append(available, category)
+			}
+		}
+		payload, err := json.Marshal(map[string]any{"categories": available})
+		if err != nil {
+			writeConfigError(response, err)
+			return
+		}
+		snapshot.Payload = payload
+	}
 	writeJSON(response, http.StatusOK, snapshot)
 }
 
