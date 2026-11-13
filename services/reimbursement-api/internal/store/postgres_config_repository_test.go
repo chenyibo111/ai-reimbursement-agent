@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"reflect"
 	"testing"
 
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/application"
@@ -86,6 +87,105 @@ func TestPostgresConfigRepositoryRevisionPublishAndRollback(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM reimbursement.config_audit WHERE domain='expense_catalog'`).Scan(&historyCount); err != nil || historyCount != 5 {
 		t.Fatalf("audit count %d: %v", historyCount, err)
 	}
+}
+
+func TestPostgresCatalogPublishAndRollbackChangesOnlyFutureClassification(t *testing.T) {
+	url := os.Getenv("TEST_REIMBURSEMENT_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_REIMBURSEMENT_DATABASE_URL is not configured")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	if _, err := pool.Exec(ctx, `TRUNCATE reimbursement.config_audit, reimbursement.config_active_versions, reimbursement.config_versions, reimbursement.config_drafts`); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewPostgresConfigRepository(pool)
+	reader := application.NewCachedExpenseCatalogReader(repo)
+	first := application.ExpenseCatalog{
+		Categories: []application.Category{
+			{Code: "LOCAL_TRANSPORT", Label: "市内交通费", Enabled: true},
+			{Code: "DINING", Label: "餐饮费", Enabled: true},
+			{Code: "LODGING", Label: "住宿费", Enabled: true},
+			{Code: "TRANSPORT", Label: "交通费", Enabled: true},
+			{Code: "OTHER", Label: "其他", Enabled: true},
+		},
+		Mappings: []application.ReceiptMapping{
+			{ReceiptType: "TAXI", CategoryCode: "LOCAL_TRANSPORT", PurposeTemplate: "市内出行打车费"},
+			{ReceiptType: "DINING", CategoryCode: "DINING", PurposeTemplate: "餐饮费用"},
+			{ReceiptType: "LODGING", CategoryCode: "LODGING", PurposeTemplate: "住宿费用"},
+			{ReceiptType: "TRANSPORT", CategoryCode: "TRANSPORT", PurposeTemplate: "交通出行费用"},
+			{ReceiptType: "OTHER", CategoryCode: "OTHER", PurposeTemplate: "其他费用"},
+		},
+	}
+	firstPayload, err := json.Marshal(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SaveDraft(ctx, "admin-1", "expense_catalog", 0, firstPayload, "baseline"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.PublishDraft(ctx, "admin-1", "expense_catalog", 1); err != nil {
+		t.Fatal(err)
+	}
+	baseline, baselineVersion, err := reader.Load(ctx)
+	if err != nil || baselineVersion != 1 {
+		t.Fatalf("load baseline v%d: %v", baselineVersion, err)
+	}
+	oldSuggestion := application.ResolveClassification("TAXI", "出租车", "HIGH", "出租车", baseline)
+	if oldSuggestion.CategoryCode != "LOCAL_TRANSPORT" || oldSuggestion.Purpose != "市内出行打车费" {
+		t.Fatalf("baseline suggestion: %+v", oldSuggestion)
+	}
+	second := first
+	second.Mappings = append([]application.ReceiptMapping(nil), first.Mappings...)
+	second.Mappings[0].CategoryCode = "OTHER"
+	second.Mappings[0].PurposeTemplate = "其他出行费用"
+	secondPayload, err := json.Marshal(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SaveDraft(ctx, "admin-1", "expense_catalog", 1, secondPayload, "change taxi mapping"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.PublishDraft(ctx, "admin-1", "expense_catalog", 2); err != nil {
+		t.Fatal(err)
+	}
+	updated, updatedVersion, err := reader.Load(ctx)
+	if err != nil || updatedVersion != 2 {
+		t.Fatalf("load updated v%d: %v", updatedVersion, err)
+	}
+	newSuggestion := application.ResolveClassification("TAXI", "出租车", "HIGH", "出租车", updated)
+	if newSuggestion.CategoryCode != "OTHER" || newSuggestion.Purpose != "其他出行费用" {
+		t.Fatalf("updated suggestion: %+v", newSuggestion)
+	}
+	if _, err := repo.ActivateVersion(ctx, "admin-2", "expense_catalog", 2, 1, "rollback"); err != nil {
+		t.Fatal(err)
+	}
+	rolledBack, rolledBackVersion, err := reader.Load(ctx)
+	if err != nil || rolledBackVersion != 1 {
+		t.Fatalf("load rolled back v%d: %v", rolledBackVersion, err)
+	}
+	if afterRollback := application.ResolveClassification("TAXI", "出租车", "HIGH", "出租车", rolledBack); afterRollback != oldSuggestion {
+		t.Fatalf("rollback changed baseline suggestion: %+v", afterRollback)
+	}
+	if oldSuggestion.CategoryCode != "LOCAL_TRANSPORT" || newSuggestion.CategoryCode != "OTHER" {
+		t.Fatal("historical classification snapshots changed")
+	}
+	var storedSecond []byte
+	if err := pool.QueryRow(ctx, `SELECT payload FROM reimbursement.config_versions WHERE domain='expense_catalog' AND version=2`).Scan(&storedSecond); err != nil {
+		t.Fatal(err)
+	}
+	if !jsonEqual(storedSecond, secondPayload) {
+		t.Fatal("rollback modified the previously published catalog version")
+	}
+}
+
+func jsonEqual(left, right []byte) bool {
+	var leftValue, rightValue any
+	return json.Unmarshal(left, &leftValue) == nil && json.Unmarshal(right, &rightValue) == nil && reflect.DeepEqual(leftValue, rightValue)
 }
 
 func configName(t *testing.T, payload json.RawMessage) string {
