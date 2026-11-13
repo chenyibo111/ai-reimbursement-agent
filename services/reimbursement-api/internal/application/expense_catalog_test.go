@@ -123,3 +123,14 @@ func TestExpenseCatalogRejectsCategoryReferencedByActivePolicy(t *testing.T) {
 		t.Fatal("disabled policy category accepted")
 	}
 }
+
+func TestExpenseCatalogRejectsRenamingLegacyPolicyCategoryEvenWithAlias(t *testing.T) {
+	catalog := testExpenseCatalog()
+	catalog.Categories[1].Label = "工作餐费"
+	catalog.Categories[1].Aliases = []string{"餐饮费"}
+	payload, _ := json.Marshal(catalog)
+	policy := &PolicyVersion{Rules: []PolicyRule{{Type: "CATEGORY_ALLOWED", Config: json.RawMessage(`{"categories":["餐饮费"]}`)}}}
+	if err := ValidateExpenseCatalogPolicyReferences(context.Background(), payload, catalogPolicyReader{policy}); err == nil {
+		t.Fatal("legacy name rule cannot match the renamed label through an alias")
+	}
+}

@@ -26,6 +26,7 @@ var configDomains = map[string]bool{
 
 type ConfigRepository interface {
 	GetActive(context.Context, string) (domain.ConfigSnapshot, error)
+	GetVersion(context.Context, string, int64) (domain.ConfigSnapshot, error)
 	GetDraft(context.Context, string) (domain.ConfigDraft, error)
 	SaveDraft(context.Context, string, string, int64, json.RawMessage, string) (domain.ConfigDraft, error)
 	ApproveDraft(context.Context, string, string, int64) (domain.ConfigDraft, error)
@@ -157,6 +158,18 @@ func (service *ConfigService) ActivateVersion(ctx context.Context, actorID, conf
 	}
 	if strings.TrimSpace(actorID) == "" || expectedActiveVersion < 0 || targetVersion <= 0 || strings.TrimSpace(note) == "" {
 		return domain.ConfigSnapshot{}, ErrConfigInvalid
+	}
+	target, err := service.repository.GetVersion(ctx, configDomain, targetVersion)
+	if err != nil {
+		return domain.ConfigSnapshot{}, err
+	}
+	if err := service.validators[configDomain](target.Payload); err != nil {
+		return domain.ConfigSnapshot{}, errors.Join(ErrConfigInvalid, err)
+	}
+	if validate := service.publishValidators[configDomain]; validate != nil {
+		if err := validate(ctx, target.Payload); err != nil {
+			return domain.ConfigSnapshot{}, errors.Join(ErrConfigInvalid, err)
+		}
 	}
 	return service.repository.ActivateVersion(ctx, actorID, configDomain, expectedActiveVersion, targetVersion, note)
 }

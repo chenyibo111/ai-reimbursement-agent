@@ -15,6 +15,20 @@ type configDraftPublisherStub struct {
 	published bool
 }
 
+type configVersionActivatorStub struct {
+	ConfigRepository
+	payload   json.RawMessage
+	activated bool
+}
+
+func (stub *configVersionActivatorStub) GetVersion(context.Context, string, int64) (domain.ConfigSnapshot, error) {
+	return domain.ConfigSnapshot{Payload: stub.payload}, nil
+}
+func (stub *configVersionActivatorStub) ActivateVersion(context.Context, string, string, int64, int64, string) (domain.ConfigSnapshot, error) {
+	stub.activated = true
+	return domain.ConfigSnapshot{}, nil
+}
+
 func (stub *configDraftPublisherStub) GetDraft(context.Context, string) (domain.ConfigDraft, error) {
 	return stub.draft, nil
 }
@@ -60,5 +74,16 @@ func TestConfigServiceChecksPolicyReferencesBeforePublishing(t *testing.T) {
 	service.RegisterPublishValidator("expense_catalog", func(context.Context, json.RawMessage) error { return ErrConfigInvalid })
 	if _, err := service.PublishDraft(context.Background(), "admin-1", "expense_catalog", 1); !errors.Is(err, ErrConfigInvalid) || stub.published {
 		t.Fatalf("invalid policy reference was published: %v", err)
+	}
+}
+
+func TestConfigServiceChecksPolicyReferencesBeforeRollback(t *testing.T) {
+	payload, _ := json.Marshal(testExpenseCatalog())
+	stub := &configVersionActivatorStub{payload: payload}
+	service := NewConfigService(stub)
+	service.RegisterValidator("expense_catalog", ValidateExpenseCatalogPayload)
+	service.RegisterPublishValidator("expense_catalog", func(context.Context, json.RawMessage) error { return ErrConfigInvalid })
+	if _, err := service.ActivateVersion(context.Background(), "admin-1", "expense_catalog", 2, 1, "rollback"); !errors.Is(err, ErrConfigInvalid) || stub.activated {
+		t.Fatalf("incompatible catalog rollback was activated: %v", err)
 	}
 }

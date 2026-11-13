@@ -23,6 +23,10 @@ func (repository *PostgresConfigRepository) GetActive(ctx context.Context, confi
 		FROM reimbursement.config_active_versions a JOIN reimbursement.config_versions v ON v.domain=a.domain AND v.version=a.version WHERE a.domain=$1`, configDomain))
 }
 
+func (repository *PostgresConfigRepository) GetVersion(ctx context.Context, configDomain string, version int64) (domain.ConfigSnapshot, error) {
+	return scanConfigSnapshot(repository.pool.QueryRow(ctx, `SELECT domain,version,payload,published_at FROM reimbursement.config_versions WHERE domain=$1 AND version=$2`, configDomain, version))
+}
+
 func (repository *PostgresConfigRepository) GetDraft(ctx context.Context, configDomain string) (domain.ConfigDraft, error) {
 	return scanConfigDraft(repository.pool.QueryRow(ctx, `SELECT domain,revision,payload,author_id,note,COALESCE(approved_by,''),COALESCE(published_revision,0) FROM reimbursement.config_drafts WHERE domain=$1`, configDomain))
 }

@@ -92,6 +92,16 @@ describe("ClaimApplicationForm", () => {
 		expect(reimbursementApi.updateClaim).toHaveBeenCalledWith("claim-1", expect.objectContaining({ version: 3, selectedExpenseCategoryCodes: ["DINING", "OTHER"] }));
 		expect(reimbursementApi.updateExpenseItem).not.toHaveBeenCalled();
 	});
+	it("shows a previously selected disabled category so the employee can remove it", async () => {
+		const claim: Claim = { ...manualClaim, itemizationMode: "ITEMIZED", selectedExpenseCategoryCodes: ["PARKING"], selectedExpenseCategories: ["停车费"], expenseItems: [] };
+		const { container } = renderForm(claim);
+		const form = within(container);
+		const disabledCategory = await form.findByRole("checkbox", { name: "停车费（已停用，取消选择）" });
+		await userEvent.setup().click(disabledCategory);
+		await userEvent.setup().click(form.getByRole("checkbox", { name: "餐饮费" }));
+		await userEvent.setup().click(form.getByRole("button", { name: "保存草稿" }));
+		expect(reimbursementApi.updateClaim).toHaveBeenCalledWith("claim-1", expect.objectContaining({ selectedExpenseCategoryCodes: ["DINING"] }));
+	});
   it("lets an employee set the expense category needed by published category rules", async () => {
     const user = userEvent.setup();
     const { container } = renderForm();

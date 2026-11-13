@@ -102,6 +102,36 @@ func TestCategoryCodePolicyUsesFinalSelectionAfterCatalogRename(t *testing.T) {
 	}
 }
 
+func TestCodePolicyKeepsLegacyNameSnapshotForUnconvertedClaims(t *testing.T) {
+	policy := PolicyVersion{ID: "dual-v1", EffectiveDate: "2026-11-01", Rules: []PolicyRule{
+		{Code: "ALLOWED", Name: "允许类别", Type: "CATEGORY_ALLOWED", Severity: "BLOCKING", Config: []byte(`{"categoryCodes":["DINING"],"categories":["餐饮费"]}`)},
+		{Code: "PROJECT", Name: "餐饮项目", Type: "CATEGORY_REQUIRED_FIELD", Severity: "BLOCKING", Config: []byte(`{"categoryCode":"DINING","category":"餐饮费","field":"projectCode"}`)},
+	}}
+	issues, err := EvaluatePolicyRules(policy, domain.Claim{ExpenseCategory: "餐饮费"})
+	if err != nil || len(issues) != 1 || issues[0].Code != "POLICY_PROJECT" {
+		t.Fatalf("legacy claim should match the policy's name snapshot: %+v %v", issues, err)
+	}
+}
+
+func TestPolicyPublishStoresNameSnapshotForLegacyClaims(t *testing.T) {
+	catalog := testExpenseCatalog()
+	payload, _ := json.Marshal(catalog)
+	repository := NewMemoryPolicyRuleRepository()
+	service := NewPolicyRuleService(repository)
+	service.SetExpenseCatalogReader(NewCachedExpenseCatalogReader(&changingCatalogSnapshotReader{snapshot: domain.ConfigSnapshot{Domain: "expense_catalog", Version: 1, Payload: payload}}))
+	policy := PolicyVersion{ID: "codes-v2", EffectiveDate: "2026-11-01", Rules: []PolicyRule{
+		{Code: "ALLOWED", Name: "允许类别", Type: "CATEGORY_ALLOWED", Severity: "BLOCKING", Config: []byte(`{"categoryCodes":["DINING"]}`)},
+		{Code: "PROJECT", Name: "餐饮项目", Type: "CATEGORY_REQUIRED_FIELD", Severity: "BLOCKING", Config: []byte(`{"categoryCode":"DINING","field":"projectCode"}`)},
+	}}
+	if err := service.Publish("admin", policy); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := EvaluatePolicyRules(repository.Versions[policy.ID], domain.Claim{ExpenseCategory: "餐饮费"})
+	if err != nil || len(issues) != 1 || issues[0].Code != "POLICY_PROJECT" {
+		t.Fatalf("published code policy lost legacy name compatibility: %+v %v", issues, err)
+	}
+}
+
 func TestCategoryCodePolicyPublishRejectsDisabledReference(t *testing.T) {
 	catalog := testExpenseCatalog()
 	catalog.Categories = append(catalog.Categories, Category{Code: "DISABLED", Label: "停用", Enabled: false})

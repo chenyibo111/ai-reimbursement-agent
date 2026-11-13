@@ -166,18 +166,7 @@ func catalogCategoryEnabled(catalog ExpenseCatalog, reference string) bool {
 			return category.Enabled
 		}
 	}
-	matched := 0
-	enabled := false
-	for _, category := range catalog.Categories {
-		for _, alias := range category.Aliases {
-			if alias == reference {
-				matched++
-				enabled = category.Enabled
-				break
-			}
-		}
-	}
-	return matched == 1 && enabled
+	return false
 }
 
 type ExpenseCatalogSnapshotReader interface {
