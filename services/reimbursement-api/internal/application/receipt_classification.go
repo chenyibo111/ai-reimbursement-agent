@@ -12,6 +12,7 @@ const ReceiptTypeUnknown = "UNKNOWN"
 type ClassificationSuggestion struct {
 	ReceiptType     string
 	ExpenseCategory string
+	CategoryCode    string
 	Purpose         string
 	Evidence        string
 	Confidence      string
@@ -73,7 +74,7 @@ func ResolveClassification(receiptType, evidence, confidence, ocrText string, ca
 		}
 		for _, category := range catalog.Categories {
 			if category.Code == mapping.CategoryCode && category.Enabled {
-				return ClassificationSuggestion{ReceiptType: receiptType, ExpenseCategory: category.Label, Purpose: mapping.PurposeTemplate, Evidence: evidence, Confidence: confidence, Version: "v1"}
+				return ClassificationSuggestion{ReceiptType: receiptType, ExpenseCategory: category.Label, CategoryCode: category.Code, Purpose: mapping.PurposeTemplate, Evidence: evidence, Confidence: confidence, Version: "v1"}
 			}
 		}
 		return ClassificationSuggestion{ReceiptType: receiptType, Evidence: evidence, Confidence: confidence, Version: "v1"}

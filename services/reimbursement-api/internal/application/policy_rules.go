@@ -67,22 +67,24 @@ func ValidatePolicyVersion(version PolicyVersion) error {
 			}
 		case "CATEGORY_ALLOWED":
 			var config struct {
-				Categories []string `json:"categories"`
+				Categories    []string `json:"categories"`
+				CategoryCodes []string `json:"categoryCodes"`
 			}
-			if err := decodePolicyConfig(rule.Config, &config); err != nil || len(config.Categories) == 0 {
+			if err := decodePolicyConfig(rule.Config, &config); err != nil || (len(config.Categories) == 0) == (len(config.CategoryCodes) == 0) {
 				return fmt.Errorf("invalid allowed categories rule")
 			}
-			for _, category := range config.Categories {
+			for _, category := range append(config.Categories, config.CategoryCodes...) {
 				if strings.TrimSpace(category) == "" {
 					return fmt.Errorf("empty allowed category")
 				}
 			}
 		case "CATEGORY_REQUIRED_FIELD":
 			var config struct {
-				Category string `json:"category"`
-				Field    string `json:"field"`
+				Category     string `json:"category"`
+				CategoryCode string `json:"categoryCode"`
+				Field        string `json:"field"`
 			}
-			if err := decodePolicyConfig(rule.Config, &config); err != nil || strings.TrimSpace(config.Category) == "" || (config.Field != "participants" && config.Field != "projectCode") {
+			if err := decodePolicyConfig(rule.Config, &config); err != nil || (strings.TrimSpace(config.Category) == "") == (strings.TrimSpace(config.CategoryCode) == "") || (config.Field != "participants" && config.Field != "projectCode") {
 				return fmt.Errorf("invalid required field rule")
 			}
 		default:
@@ -111,9 +113,17 @@ func EvaluatePolicyRules(version PolicyVersion, claim domain.Claim, itemGroups .
 	issues := make([]domain.ValidationIssue, 0)
 	items := []domain.ExpenseItem{{ExpenseCategory: claim.ExpenseCategory, ProjectCode: claim.ProjectCode, Participants: claim.Participants}}
 	if claim.ItemizationMode == domain.ClaimItemizationModeItemized {
-		items = make([]domain.ExpenseItem, 0, len(claim.SelectedExpenseCategories))
-		for _, category := range claim.SelectedExpenseCategories {
-			items = append(items, domain.ExpenseItem{ExpenseCategory: category, ProjectCode: claim.ProjectCode, Participants: claim.Participants})
+		count := max(len(claim.SelectedExpenseCategories), len(claim.SelectedExpenseCategoryCodes))
+		items = make([]domain.ExpenseItem, 0, count)
+		for index := 0; index < count; index++ {
+			item := domain.ExpenseItem{ProjectCode: claim.ProjectCode, Participants: claim.Participants}
+			if index < len(claim.SelectedExpenseCategories) {
+				item.ExpenseCategory = claim.SelectedExpenseCategories[index]
+			}
+			if index < len(claim.SelectedExpenseCategoryCodes) {
+				item.CategoryCode = claim.SelectedExpenseCategoryCodes[index]
+			}
+			items = append(items, item)
 		}
 	}
 	for _, rule := range version.Rules {
@@ -129,7 +139,8 @@ func EvaluatePolicyRules(version PolicyVersion, claim domain.Claim, itemGroups .
 			message = rule.Name + "：申请报销总额超过上限。"
 		case "CATEGORY_ALLOWED":
 			var config struct {
-				Categories []string `json:"categories"`
+				Categories    []string `json:"categories"`
+				CategoryCodes []string `json:"categoryCodes"`
 			}
 			_ = json.Unmarshal(rule.Config, &config)
 			if len(items) == 0 {
@@ -137,8 +148,12 @@ func EvaluatePolicyRules(version PolicyVersion, claim domain.Claim, itemGroups .
 			}
 			for _, item := range items {
 				allowed := false
-				for _, category := range config.Categories {
-					if strings.TrimSpace(category) == strings.TrimSpace(item.ExpenseCategory) && strings.TrimSpace(item.ExpenseCategory) != "" {
+				values, actual := config.Categories, item.ExpenseCategory
+				if len(config.CategoryCodes) > 0 {
+					values, actual = config.CategoryCodes, item.CategoryCode
+				}
+				for _, category := range values {
+					if strings.TrimSpace(category) == strings.TrimSpace(actual) && strings.TrimSpace(actual) != "" {
 						allowed = true
 						break
 					}
@@ -149,12 +164,17 @@ func EvaluatePolicyRules(version PolicyVersion, claim domain.Claim, itemGroups .
 			}
 		case "CATEGORY_REQUIRED_FIELD":
 			var config struct {
-				Category string `json:"category"`
-				Field    string `json:"field"`
+				Category     string `json:"category"`
+				CategoryCode string `json:"categoryCode"`
+				Field        string `json:"field"`
 			}
 			_ = json.Unmarshal(rule.Config, &config)
 			for _, item := range items {
-				if strings.TrimSpace(item.ExpenseCategory) == strings.TrimSpace(config.Category) {
+				match := config.Category != "" && strings.TrimSpace(item.ExpenseCategory) == strings.TrimSpace(config.Category)
+				if config.CategoryCode != "" {
+					match = strings.TrimSpace(item.CategoryCode) == strings.TrimSpace(config.CategoryCode)
+				}
+				if match {
 					itemViolation := false
 					itemMessage := ""
 					if config.Field == "projectCode" {
@@ -201,10 +221,16 @@ func (repository *MemoryPolicyRuleRepository) Publish(_ context.Context, _ strin
 	return nil
 }
 
-type PolicyRuleService struct{ repository PolicyRuleRepository }
+type PolicyRuleService struct {
+	repository PolicyRuleRepository
+	catalog    *CachedExpenseCatalogReader
+}
 
 func NewPolicyRuleService(repository PolicyRuleRepository) *PolicyRuleService {
-	return &PolicyRuleService{repository}
+	return &PolicyRuleService{repository: repository}
+}
+func (service *PolicyRuleService) SetExpenseCatalogReader(reader *CachedExpenseCatalogReader) {
+	service.catalog = reader
 }
 func (service *PolicyRuleService) Publish(actorID string, version PolicyVersion) error {
 	if actorID == "" {
@@ -212,6 +238,47 @@ func (service *PolicyRuleService) Publish(actorID string, version PolicyVersion)
 	}
 	if err := ValidatePolicyVersion(version); err != nil {
 		return err
+	}
+	for _, rule := range version.Rules {
+		var codes []string
+		switch rule.Type {
+		case "CATEGORY_ALLOWED":
+			var config struct {
+				CategoryCodes []string `json:"categoryCodes"`
+			}
+			_ = json.Unmarshal(rule.Config, &config)
+			codes = config.CategoryCodes
+		case "CATEGORY_REQUIRED_FIELD":
+			var config struct {
+				CategoryCode string `json:"categoryCode"`
+			}
+			_ = json.Unmarshal(rule.Config, &config)
+			if config.CategoryCode != "" {
+				codes = []string{config.CategoryCode}
+			}
+		}
+		if len(codes) == 0 {
+			continue
+		}
+		if service.catalog == nil {
+			return ErrConfigInvalid
+		}
+		catalog, _, err := service.catalog.LoadCurrent(context.Background())
+		if err != nil {
+			return err
+		}
+		for _, code := range codes {
+			enabled := false
+			for _, category := range catalog.Categories {
+				if category.Code == code && category.Enabled {
+					enabled = true
+					break
+				}
+			}
+			if !enabled {
+				return fmt.Errorf("%w: policy references disabled or missing category code %s", ErrConfigInvalid, code)
+			}
+		}
 	}
 	if version.Rules == nil {
 		version.Rules = []PolicyRule{}

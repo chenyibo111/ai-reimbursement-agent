@@ -44,10 +44,13 @@ func (repository *PostgresClaimRepository) Create(ctx context.Context, claim dom
 	if claim.SelectedExpenseCategories == nil {
 		claim.SelectedExpenseCategories = []string{}
 	}
+	if claim.SelectedExpenseCategoryCodes == nil {
+		claim.SelectedExpenseCategoryCodes = []string{}
+	}
 	if _, err = tx.Exec(ctx, `
-		INSERT INTO reimbursement.claims (id, claim_number, owner_id, status, purpose, expense_category, participants, project_code, requested_amount_cent, currency, requested_amount_source, remark, version, created_at, updated_at, itemization_mode, purpose_source, selected_expense_categories, expense_categories_source)
-		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7::jsonb, NULLIF($8, ''), $9, $10, $11, NULLIF($12, ''), $13, $14, $15, $16, $17, $18, $19)
-	`, claim.ID, claim.ClaimNumber, claim.OwnerID, claim.Status, claim.Purpose, claim.ExpenseCategory, participants, claim.ProjectCode, claim.RequestedAmountCent, claim.Currency, claim.RequestedAmountSource, claim.Remark, claim.Version, claim.CreatedAt, claim.UpdatedAt, claim.ItemizationMode, claim.PurposeSource, claim.SelectedExpenseCategories, claim.ExpenseCategoriesSource); err != nil {
+		INSERT INTO reimbursement.claims (id, claim_number, owner_id, status, purpose, expense_category, participants, project_code, requested_amount_cent, currency, requested_amount_source, remark, version, created_at, updated_at, itemization_mode, purpose_source, selected_expense_categories, expense_categories_source, selected_expense_category_codes, expense_catalog_version)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7::jsonb, NULLIF($8, ''), $9, $10, $11, NULLIF($12, ''), $13, $14, $15, $16, $17, $18, $19, $20, $21)
+	`, claim.ID, claim.ClaimNumber, claim.OwnerID, claim.Status, claim.Purpose, claim.ExpenseCategory, participants, claim.ProjectCode, claim.RequestedAmountCent, claim.Currency, claim.RequestedAmountSource, claim.Remark, claim.Version, claim.CreatedAt, claim.UpdatedAt, claim.ItemizationMode, claim.PurposeSource, claim.SelectedExpenseCategories, claim.ExpenseCategoriesSource, claim.SelectedExpenseCategoryCodes, claim.ExpenseCatalogVersion); err != nil {
 		return fmt.Errorf("insert claim: %w", err)
 	}
 	if err = writeClaimAuditAndEvent(ctx, tx, audit, event); err != nil {
@@ -63,7 +66,7 @@ func (repository *PostgresClaimRepository) FindOwned(ctx context.Context, claimI
 	claim, err := scanClaim(repository.pool.QueryRow(ctx, `
 		SELECT claim.id, claim.claim_number, claim.owner_id, claim.status, claim.purpose, claim.expense_category, claim.participants, claim.project_code,
 		       claim.requested_amount_cent, claim.currency, claim.requested_amount_source, claim.remark,
-		       claim.version, claim.created_at, claim.updated_at, claim.itemization_mode, claim.purpose_source, claim.selected_expense_categories, claim.expense_categories_source,
+		       claim.version, claim.created_at, claim.updated_at, claim.itemization_mode, claim.purpose_source, claim.selected_expense_categories, claim.expense_categories_source, claim.selected_expense_category_codes, claim.expense_catalog_version, claim.category_review_required,
 		       summary.receipt_count, summary.recognized_receipt_count, summary.total_amount_cent, summary.missing_amount_receipt_count
 		FROM reimbursement.claims AS claim
 		LEFT JOIN LATERAL (
@@ -132,7 +135,7 @@ func scanClaim(row claimRow) (domain.Claim, error) {
 	var remark *string
 	err := row.Scan(
 		&claim.ID, &claim.ClaimNumber, &claim.OwnerID, &claim.Status, &claim.Purpose, &expenseCategory, &participants,
-		&projectCode, &claim.RequestedAmountCent, &claim.Currency, &claim.RequestedAmountSource, &remark, &claim.Version, &claim.CreatedAt, &claim.UpdatedAt, &claim.ItemizationMode, &claim.PurposeSource, &claim.SelectedExpenseCategories, &claim.ExpenseCategoriesSource,
+		&projectCode, &claim.RequestedAmountCent, &claim.Currency, &claim.RequestedAmountSource, &remark, &claim.Version, &claim.CreatedAt, &claim.UpdatedAt, &claim.ItemizationMode, &claim.PurposeSource, &claim.SelectedExpenseCategories, &claim.ExpenseCategoriesSource, &claim.SelectedExpenseCategoryCodes, &claim.ExpenseCatalogVersion, &claim.CategoryReviewRequired,
 		&claim.ReceiptCount, &claim.RecognizedReceiptCount, &claim.TotalAmountCent, &claim.MissingAmountReceiptCount,
 	)
 	if err != nil {
@@ -157,7 +160,7 @@ func (repository *PostgresClaimRepository) ListOwned(ctx context.Context, actorI
 	rows, err := repository.pool.Query(ctx, `
 		SELECT claim.id, claim.claim_number, claim.owner_id, claim.status, claim.purpose, claim.expense_category, claim.participants, claim.project_code,
 		       claim.requested_amount_cent, claim.currency, claim.requested_amount_source, claim.remark,
-		       claim.version, claim.created_at, claim.updated_at, claim.itemization_mode, claim.purpose_source, claim.selected_expense_categories, claim.expense_categories_source,
+		       claim.version, claim.created_at, claim.updated_at, claim.itemization_mode, claim.purpose_source, claim.selected_expense_categories, claim.expense_categories_source, claim.selected_expense_category_codes, claim.expense_catalog_version, claim.category_review_required,
 		       summary.receipt_count, summary.recognized_receipt_count, summary.total_amount_cent, summary.missing_amount_receipt_count
 		FROM reimbursement.claims AS claim
 		LEFT JOIN LATERAL (
@@ -303,6 +306,9 @@ func escapeLike(value string) string {
 }
 
 func (repository *PostgresClaimRepository) Update(ctx context.Context, claim domain.Claim, expectedVersion int64, audit application.ClaimAudit, event application.ClaimOutboxEvent) error {
+	if claim.SelectedExpenseCategoryCodes == nil {
+		claim.SelectedExpenseCategoryCodes = []string{}
+	}
 	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin claim update: %w", err)
@@ -317,9 +323,9 @@ func (repository *PostgresClaimRepository) Update(ctx context.Context, claim dom
 		SET purpose = $4, purpose_source = $14, expense_category = NULLIF($5, ''), participants = $6::jsonb,
 		    project_code = NULLIF($7, ''), requested_amount_cent = $8, currency = $9,
 		    requested_amount_source = $10, remark = NULLIF($11, ''), version = $12, updated_at = $13,
-		    selected_expense_categories = $15, expense_categories_source = $16
+		    selected_expense_categories = $15, expense_categories_source = $16, selected_expense_category_codes = $17, expense_catalog_version = $18, category_review_required = $19
 		WHERE id = $1 AND owner_id = $2 AND status = 'DRAFT' AND version = $3
-	`, claim.ID, claim.OwnerID, expectedVersion, claim.Purpose, claim.ExpenseCategory, participants, claim.ProjectCode, claim.RequestedAmountCent, claim.Currency, claim.RequestedAmountSource, claim.Remark, claim.Version, claim.UpdatedAt, claim.PurposeSource, claim.SelectedExpenseCategories, claim.ExpenseCategoriesSource)
+	`, claim.ID, claim.OwnerID, expectedVersion, claim.Purpose, claim.ExpenseCategory, participants, claim.ProjectCode, claim.RequestedAmountCent, claim.Currency, claim.RequestedAmountSource, claim.Remark, claim.Version, claim.UpdatedAt, claim.PurposeSource, claim.SelectedExpenseCategories, claim.ExpenseCategoriesSource, claim.SelectedExpenseCategoryCodes, claim.ExpenseCatalogVersion, claim.CategoryReviewRequired)
 	if err != nil {
 		return fmt.Errorf("update claim: %w", err)
 	}
@@ -365,13 +371,23 @@ func (repository *PostgresClaimRepository) RefreshOCRSuggestion(ctx context.Cont
 				 SELECT DISTINCT item.expense_category AS category FROM reimbursement.expense_items AS item
 				 JOIN reimbursement.receipts AS receipt ON receipt.id = item.receipt_id
 				 WHERE item.claim_id = source.id AND receipt.status = 'EXTRACTED' AND item.expense_category <> ''
-				 ) AS recognized), ARRAY[]::TEXT[]) AS selected_expense_categories
+				 ) AS recognized), ARRAY[]::TEXT[]) AS selected_expense_categories,
+				 COALESCE((SELECT array_agg(code ORDER BY category) FROM (
+				 SELECT item.expense_category AS category, min(item.category_code) AS code FROM reimbursement.expense_items AS item
+				 JOIN reimbursement.receipts AS receipt ON receipt.id = item.receipt_id
+				 WHERE item.claim_id = source.id AND receipt.status = 'EXTRACTED' AND item.expense_category <> ''
+				 GROUP BY item.expense_category
+				 ) AS recognized), ARRAY[]::TEXT[]) AS selected_expense_category_codes,
+				 COALESCE((SELECT max(item.expense_catalog_version) FROM reimbursement.expense_items AS item WHERE item.claim_id=source.id), 0) AS expense_catalog_version
 			FROM reimbursement.claims AS source WHERE source.id = $1
 		)
 		UPDATE reimbursement.claims AS claim
 		SET requested_amount_cent = CASE WHEN claim.requested_amount_source = 'OCR_SUGGESTED' THEN suggestion.requested_amount_cent ELSE claim.requested_amount_cent END,
 		    purpose = CASE WHEN claim.itemization_mode = 'ITEMIZED' AND claim.purpose_source = 'AUTO' THEN COALESCE(suggestion.purpose, '') ELSE claim.purpose END,
 		    selected_expense_categories = CASE WHEN claim.itemization_mode = 'ITEMIZED' AND claim.expense_categories_source = 'AUTO' THEN suggestion.selected_expense_categories ELSE claim.selected_expense_categories END,
+		    selected_expense_category_codes = CASE WHEN claim.itemization_mode = 'ITEMIZED' AND claim.expense_categories_source = 'AUTO' THEN suggestion.selected_expense_category_codes ELSE claim.selected_expense_category_codes END,
+		    expense_catalog_version = CASE WHEN claim.itemization_mode = 'ITEMIZED' AND claim.expense_categories_source = 'AUTO' THEN suggestion.expense_catalog_version ELSE claim.expense_catalog_version END,
+		    category_review_required = CASE WHEN claim.itemization_mode = 'ITEMIZED' AND claim.expense_categories_source = 'AUTO' THEN array_position(suggestion.selected_expense_category_codes, '') IS NOT NULL ELSE claim.category_review_required END,
 		    version = claim.version + 1,
 		    updated_at = now()
 		FROM suggestion
@@ -380,7 +396,7 @@ func (repository *PostgresClaimRepository) RefreshOCRSuggestion(ctx context.Cont
 		  AND claim.status = 'DRAFT'
 		  AND ((claim.requested_amount_source = 'OCR_SUGGESTED' AND claim.requested_amount_cent IS DISTINCT FROM suggestion.requested_amount_cent)
 		    OR (claim.itemization_mode = 'ITEMIZED' AND claim.purpose_source = 'AUTO' AND claim.purpose IS DISTINCT FROM COALESCE(suggestion.purpose, ''))
-		    OR (claim.itemization_mode = 'ITEMIZED' AND claim.expense_categories_source = 'AUTO' AND claim.selected_expense_categories IS DISTINCT FROM suggestion.selected_expense_categories))
+		    OR (claim.itemization_mode = 'ITEMIZED' AND claim.expense_categories_source = 'AUTO' AND (claim.selected_expense_categories IS DISTINCT FROM suggestion.selected_expense_categories OR claim.selected_expense_category_codes IS DISTINCT FROM suggestion.selected_expense_category_codes OR claim.expense_catalog_version IS DISTINCT FROM suggestion.expense_catalog_version)))
 		RETURNING claim.version
 	`, claimID, actorID).Scan(&version)
 	if errors.Is(err, pgx.ErrNoRows) {

@@ -386,6 +386,12 @@ paths:
                   maxItems: 20
                   uniqueItems: true
                   items: { type: string, minLength: 1, maxLength: 100 }
+                selectedExpenseCategoryCodes:
+                  type: array
+                  maxItems: 20
+                  uniqueItems: true
+                  description: Final category codes selected by the employee; labels are snapshotted by the server.
+                  items: { type: string, pattern: '^[A-Z][A-Z0-9_]{0,63}$' }
                 participants:
                   type: array
                   items: { type: string }
@@ -740,11 +746,17 @@ components:
         expenseCategories:
           type: array
           items: { type: string }
-          selectedExpenseCategories:
-            type: array
-            description: Final claim categories submitted by the employee; OCR categories only initialize the draft.
-            items: { type: string }
-          expenseCategoriesSource: { type: string, enum: [AUTO, MANUAL] }
+        selectedExpenseCategories:
+          type: array
+          description: Display labels captured when the final selection was made.
+          items: { type: string }
+        selectedExpenseCategoryCodes:
+          type: array
+          description: Stable codes for the final claim selection.
+          items: { type: string }
+        expenseCategoriesSource: { type: string, enum: [AUTO, MANUAL] }
+        expenseCatalogVersion: { type: integer, format: int64, minimum: 0 }
+        categoryReviewRequired: { type: boolean }
         expenseItems:
           type: array
           items: { $ref: "#/components/schemas/ExpenseItem" }
@@ -801,6 +813,9 @@ components:
         classificationStatus: { type: string, enum: [PENDING, CLASSIFIED, UNKNOWN, FAILED, CATEGORY_UNMAPPED] }
         classificationVersion: { type: string }
         expenseCategory: { type: string }
+        categoryCode: { type: string }
+        expenseCatalogVersion: { type: integer, format: int64, minimum: 0 }
+        categoryReviewRequired: { type: boolean }
         categorySource: { type: string, enum: ["", MODEL, MANUAL] }
         purpose: { type: string }
         purposeSource: { type: string, enum: ["", MODEL, MANUAL] }

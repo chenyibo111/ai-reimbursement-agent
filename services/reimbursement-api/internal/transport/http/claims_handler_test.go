@@ -267,6 +267,27 @@ func TestAdminAuthorizationRequiresMatchingTokenAndStoredRole(t *testing.T) {
 	}
 }
 
+func TestCategoryCodeResponsesKeepRecognitionAndFinalSelectionSeparate(t *testing.T) {
+	claim := claimResponse(domain.Claim{SelectedExpenseCategories: []string{"餐饮费"}, SelectedExpenseCategoryCodes: []string{"DINING"}, ExpenseCatalogVersion: 7})
+	item := expenseItemResponse(domain.ExpenseItem{ExpenseCategory: "市内交通费", CategoryCode: "LOCAL_TRANSPORT", ExpenseCatalogVersion: 6})
+	if claim["expenseCatalogVersion"] != int64(7) || claim["selectedExpenseCategoryCodes"].([]string)[0] != "DINING" || item["categoryCode"] != "LOCAL_TRANSPORT" || item["expenseCatalogVersion"] != int64(6) {
+		t.Fatalf("claim=%v item=%v", claim, item)
+	}
+}
+
+func TestPatchClaimAcceptsFinalCategoryCodes(t *testing.T) {
+	claims := &capturingApplicationClaims{}
+	handler := &claimsHandler{claims: claims}
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/claims/claim-1", strings.NewReader(`{"version":1,"selectedExpenseCategoryCodes":["LOCAL_TRANSPORT","DINING"]}`))
+	request.SetPathValue("claimId", "claim-1")
+	request = request.WithContext(context.WithValue(request.Context(), actorContextKey{}, Actor{ID: "employee-1", Role: "EMPLOYEE", Channel: "web"}))
+	response := httptest.NewRecorder()
+	handler.patchClaim(response, request)
+	if response.Code != http.StatusOK || claims.command.SelectedExpenseCategoryCodes == nil || len(*claims.command.SelectedExpenseCategoryCodes) != 2 {
+		t.Fatalf("status=%d command=%+v body=%s", response.Code, claims.command, response.Body.String())
+	}
+}
+
 func TestAdminAuthorizationRejectsOrdinaryEmployee(t *testing.T) {
 	handler := &adminHandler{services: AdminServices{Role: func(context.Context, string) (string, error) { return "EMPLOYEE", nil }}}
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/policies/publish", nil)

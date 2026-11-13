@@ -130,23 +130,28 @@ func ValidateExpenseCatalogPolicyReferences(ctx context.Context, payload json.Ra
 		switch rule.Type {
 		case "CATEGORY_ALLOWED":
 			var config struct {
-				Categories []string `json:"categories"`
+				Categories    []string `json:"categories"`
+				CategoryCodes []string `json:"categoryCodes"`
 			}
 			if err := decodePolicyConfig(rule.Config, &config); err != nil {
 				return err
 			}
-			references = config.Categories
+			references = append(config.Categories, config.CategoryCodes...)
 		case "CATEGORY_REQUIRED_FIELD":
 			var config struct {
-				Category string `json:"category"`
-				Field    string `json:"field"`
+				Category     string `json:"category"`
+				CategoryCode string `json:"categoryCode"`
+				Field        string `json:"field"`
 			}
 			if err := decodePolicyConfig(rule.Config, &config); err != nil {
 				return err
 			}
-			references = []string{config.Category}
+			references = []string{config.Category, config.CategoryCode}
 		}
 		for _, reference := range references {
+			if reference == "" {
+				continue
+			}
 			if !catalogCategoryEnabled(catalog, reference) {
 				return fmt.Errorf("%w: policy rule %s references disabled or missing category %s", ErrConfigInvalid, rule.Code, reference)
 			}
@@ -188,6 +193,21 @@ type CachedExpenseCatalogReader struct {
 
 func NewCachedExpenseCatalogReader(source ExpenseCatalogSnapshotReader) *CachedExpenseCatalogReader {
 	return &CachedExpenseCatalogReader{source: source}
+}
+
+func (reader *CachedExpenseCatalogReader) LoadCurrent(ctx context.Context) (ExpenseCatalog, int64, error) {
+	snapshot, err := reader.source.GetActive(ctx, "expense_catalog")
+	if err != nil {
+		return ExpenseCatalog{}, 0, err
+	}
+	var catalog ExpenseCatalog
+	if err := json.Unmarshal(snapshot.Payload, &catalog); err != nil {
+		return ExpenseCatalog{}, 0, err
+	}
+	if issues := ValidateExpenseCatalog(catalog); len(issues) > 0 {
+		return ExpenseCatalog{}, 0, fmt.Errorf("invalid expense catalog snapshot: %s", issues[0].Message)
+	}
+	return catalog, snapshot.Version, nil
 }
 
 func (reader *CachedExpenseCatalogReader) Load(ctx context.Context) (ExpenseCatalog, int64, error) {

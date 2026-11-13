@@ -443,6 +443,8 @@ func (service *ReceiptService) classifyExpenseItem(ctx context.Context, result O
 	}
 	suggestion.ReceiptType = classified.ReceiptType
 	suggestion.ExpenseCategory = classified.ExpenseCategory
+	suggestion.CategoryCode = classified.CategoryCode
+	suggestion.ExpenseCatalogVersion = version
 	suggestion.Purpose = classified.Purpose
 	suggestion.ClassificationVersion = fmt.Sprintf("catalog-%d", version)
 	switch {

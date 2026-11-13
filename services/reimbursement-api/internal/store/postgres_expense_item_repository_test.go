@@ -35,7 +35,7 @@ func TestExpenseItemUpsertPreservesManualCategoryAndOneRowPerReceipt(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	applyMigrationsThrough(t, ctx, conn, filepath.Join("..", "..", "db", "migrations"), "000023")
+	applyMigrationsThrough(t, ctx, conn, filepath.Join("..", "..", "db", "migrations"), "000026")
 	_ = conn.Close(ctx)
 	pool, err := pgxpool.New(ctx, testURL)
 	if err != nil {
@@ -56,13 +56,13 @@ func TestExpenseItemUpsertPreservesManualCategoryAndOneRowPerReceipt(t *testing.
 	}
 	repository := NewPostgresExpenseItemRepository(pool)
 	amount := int64(3800)
-	first, err := repository.UpsertFromOCR(ctx, "employee-1", "receipt-1", domain.ExpenseItemSuggestion{ReceiptType: "TAXI", ExpenseCategory: "交通费", Purpose: "市内出行打车费", AmountCent: &amount})
+	first, err := repository.UpsertFromOCR(ctx, "employee-1", "receipt-1", domain.ExpenseItemSuggestion{ReceiptType: "TAXI", ExpenseCategory: "交通费", CategoryCode: "LOCAL_TRANSPORT", ExpenseCatalogVersion: 1, Purpose: "市内出行打车费", AmountCent: &amount})
 	if err != nil {
 		t.Fatal(err)
 	}
 	claimRepository := NewPostgresClaimRepository(pool)
 	selectedClaim, err := claimRepository.FindOwned(ctx, "claim-1", "employee-1")
-	if err != nil || len(selectedClaim.SelectedExpenseCategories) != 1 || selectedClaim.SelectedExpenseCategories[0] != "交通费" || selectedClaim.ExpenseCategoriesSource != "AUTO" {
+	if err != nil || len(selectedClaim.SelectedExpenseCategories) != 1 || selectedClaim.SelectedExpenseCategories[0] != "交通费" || len(selectedClaim.SelectedExpenseCategoryCodes) != 1 || selectedClaim.SelectedExpenseCategoryCodes[0] != "LOCAL_TRANSPORT" || selectedClaim.ExpenseCatalogVersion != 1 || selectedClaim.ExpenseCategoriesSource != "AUTO" {
 		t.Fatalf("initial final categories=%v source=%s err=%v", selectedClaim.SelectedExpenseCategories, selectedClaim.ExpenseCategoriesSource, err)
 	}
 	var participantsKind string
@@ -209,5 +209,53 @@ func TestExpenseItemUpsertPreservesManualCategoryAndOneRowPerReceipt(t *testing.
 	}
 	if err = pool.QueryRow(ctx, `SELECT purpose FROM reimbursement.claims WHERE id='mixed'`).Scan(&autoPurpose); err != nil || autoPurpose != "客户拜访" {
 		t.Fatalf("manual purpose overwritten=%q err=%v", autoPurpose, err)
+	}
+}
+
+func TestExpenseCategoryCodeMigrationBackfillsOnlyUniqueNames(t *testing.T) {
+	databaseURL := os.Getenv("TEST_REIMBURSEMENT_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_REIMBURSEMENT_DATABASE_URL is not configured")
+	}
+	ctx := context.Background()
+	testURL, adminURL, databaseName := isolatedDatabaseURLs(t, databaseURL)
+	admin, err := pgx.Connect(ctx, adminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		defer admin.Close(ctx)
+		_, _ = admin.Exec(ctx, "DROP DATABASE IF EXISTS "+pgx.Identifier{databaseName}.Sanitize()+" WITH (FORCE)")
+	})
+	if _, err = admin.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{databaseName}.Sanitize()); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := pgx.Connect(ctx, testURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	dir := filepath.Join("..", "..", "db", "migrations")
+	applyMigrationsThrough(t, ctx, conn, dir, "000025")
+	if _, err = conn.Exec(ctx, `INSERT INTO reimbursement.employees(id,display_name) VALUES ('migration-employee','Migration')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = conn.Exec(ctx, `INSERT INTO reimbursement.claims(id,owner_id,purpose,itemization_mode,selected_expense_categories,expense_categories_source) VALUES ('migration-claim','migration-employee','History','ITEMIZED',ARRAY['餐饮费','交通费','不存在'],'MANUAL')`); err != nil {
+		t.Fatal(err)
+	}
+	migration, err := os.ReadFile(filepath.Join(dir, "000026_expense_category_codes.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, string(migration)); err != nil {
+		t.Fatal(err)
+	}
+	var names, codes []string
+	var review bool
+	if err := conn.QueryRow(ctx, `SELECT selected_expense_categories,selected_expense_category_codes,category_review_required FROM reimbursement.claims WHERE id='migration-claim'`).Scan(&names, &codes, &review); err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 3 || names[0] != "餐饮费" || len(codes) != 3 || codes[0] != "DINING" || codes[1] != "" || codes[2] != "" || !review {
+		t.Fatalf("migration names=%v codes=%v review=%v", names, codes, review)
 	}
 }

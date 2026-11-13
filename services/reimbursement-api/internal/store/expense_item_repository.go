@@ -164,6 +164,9 @@ func (repository *PostgresExpenseItemRepository) PatchOwnedDraft(ctx context.Con
 	}
 	if patch.ExpenseCategory != nil {
 		item.ExpenseCategory = *patch.ExpenseCategory
+		item.CategoryCode = ""
+		item.ExpenseCatalogVersion = 0
+		item.CategoryReviewRequired = item.ExpenseCategory != ""
 		item.CategorySource = domain.FieldSourceManual
 	}
 	if patch.Purpose != nil {
@@ -193,14 +196,14 @@ func (repository *PostgresExpenseItemRepository) PatchOwnedDraft(ctx context.Con
 	return item, tx.Commit(ctx)
 }
 
-const expenseItemSelect = `SELECT id, claim_id, receipt_id, receipt_type, classification_status, classification_version, expense_category, category_source, purpose, purpose_source, amount_cent, amount_source, project_code, participants FROM reimbursement.expense_items`
+const expenseItemSelect = `SELECT id, claim_id, receipt_id, receipt_type, classification_status, classification_version, expense_category, category_source, purpose, purpose_source, amount_cent, amount_source, project_code, participants, category_code, expense_catalog_version, category_review_required FROM reimbursement.expense_items`
 
 type expenseItemRow interface{ Scan(...any) error }
 
 func scanExpenseItem(row expenseItemRow) (domain.ExpenseItem, error) {
 	var item domain.ExpenseItem
 	var participants []byte
-	err := row.Scan(&item.ID, &item.ClaimID, &item.ReceiptID, &item.ReceiptType, &item.ClassificationStatus, &item.ClassificationVersion, &item.ExpenseCategory, &item.CategorySource, &item.Purpose, &item.PurposeSource, &item.AmountCent, &item.AmountSource, &item.ProjectCode, &participants)
+	err := row.Scan(&item.ID, &item.ClaimID, &item.ReceiptID, &item.ReceiptType, &item.ClassificationStatus, &item.ClassificationVersion, &item.ExpenseCategory, &item.CategorySource, &item.Purpose, &item.PurposeSource, &item.AmountCent, &item.AmountSource, &item.ProjectCode, &participants, &item.CategoryCode, &item.ExpenseCatalogVersion, &item.CategoryReviewRequired)
 	if err != nil {
 		return domain.ExpenseItem{}, err
 	}
@@ -225,12 +228,12 @@ func saveExpenseItem(ctx context.Context, tx pgx.Tx, item domain.ExpenseItem) er
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO reimbursement.expense_items(id,claim_id,receipt_id,receipt_type,classification_status,classification_version,expense_category,category_source,purpose,purpose_source,amount_cent,amount_source,project_code,participants)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb)
+	_, err = tx.Exec(ctx, `INSERT INTO reimbursement.expense_items(id,claim_id,receipt_id,receipt_type,classification_status,classification_version,expense_category,category_source,purpose,purpose_source,amount_cent,amount_source,project_code,participants,category_code,expense_catalog_version,category_review_required)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16,$17)
 		ON CONFLICT(receipt_id) DO UPDATE SET receipt_type=EXCLUDED.receipt_type, classification_status=EXCLUDED.classification_status, classification_version=EXCLUDED.classification_version, expense_category=EXCLUDED.expense_category, category_source=EXCLUDED.category_source,
 		purpose=EXCLUDED.purpose, purpose_source=EXCLUDED.purpose_source, amount_cent=EXCLUDED.amount_cent, amount_source=EXCLUDED.amount_source,
-		project_code=EXCLUDED.project_code, participants=EXCLUDED.participants, updated_at=now()`,
-		item.ID, item.ClaimID, item.ReceiptID, item.ReceiptType, item.ClassificationStatus, item.ClassificationVersion, item.ExpenseCategory, item.CategorySource, item.Purpose, item.PurposeSource, item.AmountCent, item.AmountSource, item.ProjectCode, participants)
+		project_code=EXCLUDED.project_code, participants=EXCLUDED.participants, category_code=EXCLUDED.category_code, expense_catalog_version=EXCLUDED.expense_catalog_version, category_review_required=EXCLUDED.category_review_required, updated_at=now()`,
+		item.ID, item.ClaimID, item.ReceiptID, item.ReceiptType, item.ClassificationStatus, item.ClassificationVersion, item.ExpenseCategory, item.CategorySource, item.Purpose, item.PurposeSource, item.AmountCent, item.AmountSource, item.ProjectCode, participants, item.CategoryCode, item.ExpenseCatalogVersion, item.CategoryReviewRequired)
 	return err
 }
 
@@ -253,7 +256,17 @@ func advanceExpenseItemClaim(ctx context.Context, tx pgx.Tx, claimID, actorID st
 				JOIN reimbursement.receipts AS receipt ON receipt.id=item.receipt_id
 				WHERE item.claim_id=claim.id AND receipt.status='EXTRACTED' AND item.expense_category <> ''
 			) AS recognized
-		), ARRAY[]::TEXT[]) ELSE claim.selected_expense_categories END
+		), ARRAY[]::TEXT[]) ELSE claim.selected_expense_categories END,
+		selected_expense_category_codes=CASE WHEN claim.expense_categories_source='AUTO' THEN COALESCE((
+			SELECT array_agg(code ORDER BY category) FROM (
+				SELECT item.expense_category AS category, min(item.category_code) AS code FROM reimbursement.expense_items AS item
+				JOIN reimbursement.receipts AS receipt ON receipt.id=item.receipt_id
+				WHERE item.claim_id=claim.id AND receipt.status='EXTRACTED' AND item.expense_category <> ''
+				GROUP BY item.expense_category
+			) AS recognized
+		), ARRAY[]::TEXT[]) ELSE claim.selected_expense_category_codes END,
+		expense_catalog_version=CASE WHEN claim.expense_categories_source='AUTO' THEN COALESCE((SELECT max(item.expense_catalog_version) FROM reimbursement.expense_items AS item WHERE item.claim_id=claim.id), 0) ELSE claim.expense_catalog_version END,
+		category_review_required=CASE WHEN claim.expense_categories_source='AUTO' THEN EXISTS(SELECT 1 FROM reimbursement.expense_items AS item WHERE item.claim_id=claim.id AND item.expense_category <> '' AND item.category_code='') ELSE claim.category_review_required END
 		WHERE claim.id=$1`, claimID)
 	if err != nil {
 		return err

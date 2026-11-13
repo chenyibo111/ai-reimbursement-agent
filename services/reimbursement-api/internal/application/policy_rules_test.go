@@ -1,6 +1,7 @@
 package application
 
 import (
+	"encoding/json"
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/domain"
 	"testing"
 )
@@ -81,5 +82,38 @@ func TestPublishPolicy_PreservesEarlierEffectiveVersion(t *testing.T) {
 	}
 	if repository.Versions["v1"].Status != PolicyStatusPublished || repository.Versions["v2"].Status != PolicyStatusPublished {
 		t.Fatalf("unexpected versions: %#v", repository.Versions)
+	}
+}
+
+func TestCategoryCodePolicyUsesFinalSelectionAfterCatalogRename(t *testing.T) {
+	policy := PolicyVersion{ID: "codes-v1", EffectiveDate: "2026-11-01", Rules: []PolicyRule{
+		{Code: "ALLOWED", Name: "允许类别", Type: "CATEGORY_ALLOWED", Severity: "BLOCKING", Config: []byte(`{"categoryCodes":["LOCAL_TRANSPORT"]}`)},
+		{Code: "PROJECT", Name: "项目编码", Type: "CATEGORY_REQUIRED_FIELD", Severity: "BLOCKING", Config: []byte(`{"categoryCode":"LOCAL_TRANSPORT","field":"projectCode"}`)},
+	}}
+	claim := domain.Claim{ItemizationMode: domain.ClaimItemizationModeItemized, SelectedExpenseCategories: []string{"市内交通费"}, SelectedExpenseCategoryCodes: []string{"LOCAL_TRANSPORT"}}
+	issues, err := EvaluatePolicyRules(policy, claim)
+	if err != nil || len(issues) != 1 || issues[0].Code != "POLICY_PROJECT" {
+		t.Fatalf("code policy issues=%+v err=%v", issues, err)
+	}
+	legacy := PolicyVersion{ID: "legacy-v1", EffectiveDate: "2026-10-01", Rules: []PolicyRule{{Code: "OLD", Name: "旧名称规则", Type: "CATEGORY_ALLOWED", Severity: "BLOCKING", Config: []byte(`{"categories":["市内交通费"]}`)}}}
+	issues, err = EvaluatePolicyRules(legacy, claim)
+	if err != nil || len(issues) != 0 {
+		t.Fatalf("legacy policy issues=%+v err=%v", issues, err)
+	}
+}
+
+func TestCategoryCodePolicyPublishRejectsDisabledReference(t *testing.T) {
+	catalog := testExpenseCatalog()
+	catalog.Categories = append(catalog.Categories, Category{Code: "DISABLED", Label: "停用", Enabled: false})
+	payload, _ := json.Marshal(catalog)
+	service := NewPolicyRuleService(NewMemoryPolicyRuleRepository())
+	service.SetExpenseCatalogReader(NewCachedExpenseCatalogReader(&changingCatalogSnapshotReader{snapshot: domain.ConfigSnapshot{Domain: "expense_catalog", Version: 1, Payload: payload}}))
+	policy := PolicyVersion{ID: "invalid-code", EffectiveDate: "2026-11-01", Rules: []PolicyRule{{Code: "ALLOW", Name: "类别", Type: "CATEGORY_ALLOWED", Severity: "BLOCKING", Config: []byte(`{"categoryCodes":["DISABLED"]}`)}}}
+	if err := service.Publish("admin", policy); err == nil {
+		t.Fatal("disabled category policy was published")
+	}
+	policy.Rules[0].Config = []byte(`{"categoryCodes":["DINING"]}`)
+	if err := service.Publish("admin", policy); err != nil {
+		t.Fatalf("enabled category publish: %v", err)
 	}
 }

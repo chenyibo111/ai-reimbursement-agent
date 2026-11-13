@@ -9,20 +9,23 @@ const (
 )
 
 type ExpenseItem struct {
-	ID                    string
-	ClaimID               string
-	ReceiptID             string
-	ReceiptType           string
-	ClassificationStatus  string
-	ClassificationVersion string
-	ExpenseCategory       string
-	CategorySource        FieldSource
-	Purpose               string
-	PurposeSource         FieldSource
-	AmountCent            *int64
-	AmountSource          FieldSource
-	ProjectCode           string
-	Participants          []string
+	ID                     string
+	ClaimID                string
+	ReceiptID              string
+	ReceiptType            string
+	ClassificationStatus   string
+	ClassificationVersion  string
+	ExpenseCategory        string
+	CategoryCode           string
+	ExpenseCatalogVersion  int64
+	CategoryReviewRequired bool
+	CategorySource         FieldSource
+	Purpose                string
+	PurposeSource          FieldSource
+	AmountCent             *int64
+	AmountSource           FieldSource
+	ProjectCode            string
+	Participants           []string
 }
 
 type ExpenseItemSuggestion struct {
@@ -30,6 +33,8 @@ type ExpenseItemSuggestion struct {
 	ClassificationStatus  string
 	ClassificationVersion string
 	ExpenseCategory       string
+	CategoryCode          string
+	ExpenseCatalogVersion int64
 	Purpose               string
 	AmountCent            *int64
 }
@@ -53,6 +58,9 @@ func (item *ExpenseItem) ApplySuggestion(suggestion ExpenseItemSuggestion) {
 	}
 	if item.CategorySource != FieldSourceManual && (fullRefresh || suggestion.ExpenseCategory != "") {
 		item.ExpenseCategory = suggestion.ExpenseCategory
+		item.CategoryCode = suggestion.CategoryCode
+		item.ExpenseCatalogVersion = suggestion.ExpenseCatalogVersion
+		item.CategoryReviewRequired = item.ExpenseCategory != "" && item.CategoryCode == ""
 		item.CategorySource = ""
 		if suggestion.ExpenseCategory != "" {
 			item.CategorySource = FieldSourceModel
