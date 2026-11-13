@@ -3,6 +3,129 @@ info:
   title: AI Reimbursement API
   version: 1.0.0
 paths:
+  /api/v1/admin/config/{domain}:
+    get:
+      operationId: getAdminConfiguration
+      parameters: [{ $ref: "#/components/parameters/ConfigDomain" }]
+      responses:
+        "200":
+          description: Current draft and active version, when present
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  draft: { $ref: "#/components/schemas/ConfigDraft" }
+                  active: { $ref: "#/components/schemas/ConfigSnapshot" }
+        default: { $ref: "#/components/responses/Error" }
+  /api/v1/admin/config/{domain}/draft:
+    post:
+      operationId: saveConfigurationDraft
+      parameters: [{ $ref: "#/components/parameters/ConfigDomain" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedRevision, payload]
+              additionalProperties: false
+              properties:
+                expectedRevision: { type: integer, format: int64 }
+                payload: { type: object }
+                note: { type: string }
+      responses:
+        "200": { description: Draft saved }
+        "409": { description: Draft revision conflict }
+        default: { $ref: "#/components/responses/Error" }
+  /api/v1/admin/config/{domain}/preview:
+    post:
+      operationId: previewConfigurationDraft
+      parameters: [{ $ref: "#/components/parameters/ConfigDomain" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConfigRevisionRequest" }
+      responses:
+        "200": { description: Draft and active snapshot for comparison }
+        default: { $ref: "#/components/responses/Error" }
+  /api/v1/admin/config/{domain}/approve:
+    post:
+      operationId: approveConfigurationDraft
+      parameters: [{ $ref: "#/components/parameters/ConfigDomain" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConfigRevisionRequest" }
+      responses:
+        "200": { description: Draft approved by another administrator }
+        default: { $ref: "#/components/responses/Error" }
+  /api/v1/admin/config/{domain}/publish:
+    post:
+      operationId: publishConfigurationDraft
+      parameters: [{ $ref: "#/components/parameters/ConfigDomain" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConfigRevisionRequest" }
+      responses:
+        "201":
+          description: Published immutable snapshot
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConfigSnapshot" }
+        default: { $ref: "#/components/responses/Error" }
+  /api/v1/admin/config/{domain}/history:
+    get:
+      operationId: listConfigurationHistory
+      parameters: [{ $ref: "#/components/parameters/ConfigDomain" }]
+      responses:
+        "200": { description: Configuration audit history }
+        default: { $ref: "#/components/responses/Error" }
+  /api/v1/admin/config/{domain}/activate:
+    post:
+      operationId: activateConfigurationVersion
+      parameters: [{ $ref: "#/components/parameters/ConfigDomain" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedActiveVersion, version, note]
+              additionalProperties: false
+              properties:
+                expectedActiveVersion: { type: integer, format: int64 }
+                version: { type: integer, format: int64 }
+                note: { type: string }
+      responses:
+        "200": { description: Active pointer switched to an existing version }
+        default: { $ref: "#/components/responses/Error" }
+  /api/v1/config/{domain}:
+    get:
+      operationId: getEmployeeConfiguration
+      parameters: [{ $ref: "#/components/parameters/EmployeeConfigDomain" }]
+      responses:
+        "200":
+          description: Active employee-facing configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConfigSnapshot" }
+        default: { $ref: "#/components/responses/Error" }
+  /internal/v1/config/{domain}/active:
+    get:
+      operationId: getInternalActiveConfiguration
+      parameters: [{ $ref: "#/components/parameters/ConfigDomain" }]
+      responses:
+        "200":
+          description: Active configuration for authenticated services
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConfigSnapshot" }
+        default: { $ref: "#/components/responses/Error" }
   /api/v1/admin/policies/publish:
     post:
       operationId: publishPolicy
@@ -258,11 +381,11 @@ paths:
                   type: string
                   description: 报销事由。草稿可留空，提交时必填。
                 expenseCategory: { type: string }
-                  selectedExpenseCategories:
-                    type: array
-                    maxItems: 20
-                    uniqueItems: true
-                    items: { type: string, minLength: 1, maxLength: 100 }
+                selectedExpenseCategories:
+                  type: array
+                  maxItems: 20
+                  uniqueItems: true
+                  items: { type: string, minLength: 1, maxLength: 100 }
                 participants:
                   type: array
                   items: { type: string }
@@ -528,6 +651,20 @@ paths:
           $ref: "#/components/responses/Error"
 components:
   parameters:
+    ConfigDomain:
+      name: domain
+      in: path
+      required: true
+      schema:
+        type: string
+        enum: [expense_catalog, form_options, feature_rollout, receipt_review, notification_templates, knowledge_runtime, model_runtime]
+    EmployeeConfigDomain:
+      name: domain
+      in: path
+      required: true
+      schema:
+        type: string
+        enum: [expense_catalog, form_options]
     ClaimId:
       name: claimId
       in: path
@@ -556,6 +693,30 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
   schemas:
+    ConfigRevisionRequest:
+      type: object
+      required: [revision]
+      additionalProperties: false
+      properties:
+        revision: { type: integer, format: int64 }
+    ConfigDraft:
+      type: object
+      required: [domain, revision, payload, authorId, note]
+      properties:
+        domain: { type: string }
+        revision: { type: integer, format: int64 }
+        payload: { type: object }
+        authorId: { type: string }
+        note: { type: string }
+        approvedBy: { type: string }
+    ConfigSnapshot:
+      type: object
+      required: [domain, version, payload, publishedAt]
+      properties:
+        domain: { type: string }
+        version: { type: integer, format: int64 }
+        payload: { type: object }
+        publishedAt: { type: string, format: date-time }
     Claim:
       type: object
       required: [id, claimNumber, ownerId, status, version, purpose, participants, receiptCount, recognizedReceiptCount, missingAmountReceiptCount, requestedAmountCent, currency, requestedAmountSource, remark, createdAt, updatedAt]

@@ -46,6 +46,7 @@ func main() {
 		log.Fatal("OCR_SERVICE_URL is required")
 	}
 	claimRepository := store.NewPostgresClaimRepository(pool)
+	configService := application.NewConfigService(store.NewPostgresConfigRepository(pool))
 	receiptRepository := store.NewPostgresReceiptRepository(pool)
 	reviewCaseRepository := store.NewPostgresReviewCaseRepository(pool)
 	provisioningKey := strings.TrimSpace(os.Getenv("REIMBURSEMENT_AUTH_PROVISIONING_KEY"))
@@ -129,6 +130,7 @@ func main() {
 		Receipts:           application.NewReceiptServiceWithOptions(claimRepository, receiptRepository, objects, infrastructure.NewClamAVScanner(clamAddress), infrastructure.NewHTTPReceiptOCRClient(ocrURL), application.SecureIDGenerator{}, application.ReceiptServiceOptions{AllowDuplicateContentForTesting: allowDuplicateContentForTesting, AllowDuplicateSubmittedInvoiceForTesting: allowDuplicateSubmittedInvoiceForTesting}, ocrSuggestionRefresher),
 		ExpenseItems:       store.NewPostgresExpenseItemRepository(pool),
 		Admin:              transport.AdminServices{Policies: application.NewPolicyRuleService(store.NewPostgresPolicyRuleRepository(pool)), Reviews: application.NewReviewCaseService(reviewCaseRepository), Previews: application.NewReceiptPreviewService(reviewCaseRepository, receiptRepository, objects), Role: store.EmployeeRole(pool)},
+		Configs:            configService,
 		PolicySources:      policySources,
 		EmployeeIdentities: application.NewEmployeeIdentityService(store.NewPostgresEmployeeIdentityRepository(pool)),
 		Members:            store.NewWebAuthRepository(pool), BotAppID: os.Getenv("FEISHU_APP_ID"), TenantKey: os.Getenv("FEISHU_TENANT_KEY"),
