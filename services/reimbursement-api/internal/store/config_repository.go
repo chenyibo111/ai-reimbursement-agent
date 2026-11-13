@@ -24,7 +24,7 @@ func (repository *PostgresConfigRepository) GetActive(ctx context.Context, confi
 }
 
 func (repository *PostgresConfigRepository) GetDraft(ctx context.Context, configDomain string) (domain.ConfigDraft, error) {
-	return scanConfigDraft(repository.pool.QueryRow(ctx, `SELECT domain,revision,payload,author_id,note,COALESCE(approved_by,'') FROM reimbursement.config_drafts WHERE domain=$1`, configDomain))
+	return scanConfigDraft(repository.pool.QueryRow(ctx, `SELECT domain,revision,payload,author_id,note,COALESCE(approved_by,''),COALESCE(published_revision,0) FROM reimbursement.config_drafts WHERE domain=$1`, configDomain))
 }
 
 func (repository *PostgresConfigRepository) SaveDraft(ctx context.Context, actorID, configDomain string, expectedRevision int64, payload json.RawMessage, note string) (domain.ConfigDraft, error) {
@@ -37,11 +37,11 @@ func (repository *PostgresConfigRepository) SaveDraft(ctx context.Context, actor
 	if expectedRevision == 0 {
 		row = tx.QueryRow(ctx, `INSERT INTO reimbursement.config_drafts(domain,revision,payload,author_id,note)
 			VALUES($1,1,$2,$3,$4) ON CONFLICT(domain) DO NOTHING
-			RETURNING domain,revision,payload,author_id,note,COALESCE(approved_by,'')`, configDomain, payload, actorID, note)
+			RETURNING domain,revision,payload,author_id,note,COALESCE(approved_by,''),COALESCE(published_revision,0)`, configDomain, payload, actorID, note)
 	} else {
 		row = tx.QueryRow(ctx, `UPDATE reimbursement.config_drafts SET revision=revision+1,payload=$1,author_id=$2,note=$3,
 			approved_revision=NULL,approved_by=NULL,updated_at=now() WHERE domain=$4 AND revision=$5
-			RETURNING domain,revision,payload,author_id,note,COALESCE(approved_by,'')`, payload, actorID, note, configDomain, expectedRevision)
+			RETURNING domain,revision,payload,author_id,note,COALESCE(approved_by,''),COALESCE(published_revision,0)`, payload, actorID, note, configDomain, expectedRevision)
 	}
 	draft, err := scanConfigDraft(row)
 	if errors.Is(err, application.ErrConfigNotFound) {
@@ -66,7 +66,7 @@ func (repository *PostgresConfigRepository) ApproveDraft(ctx context.Context, ap
 	}
 	defer tx.Rollback(ctx)
 	draft, err := scanConfigDraft(tx.QueryRow(ctx, `UPDATE reimbursement.config_drafts SET approved_by=$1,approved_revision=$2,updated_at=now()
-		WHERE domain=$3 AND revision=$2 AND author_id<>$1 RETURNING domain,revision,payload,author_id,note,COALESCE(approved_by,'')`, approverID, revision, configDomain))
+		WHERE domain=$3 AND revision=$2 AND author_id<>$1 RETURNING domain,revision,payload,author_id,note,COALESCE(approved_by,''),COALESCE(published_revision,0)`, approverID, revision, configDomain))
 	if err == application.ErrConfigNotFound {
 		current, getErr := repository.getDraftTx(ctx, tx, configDomain)
 		if getErr == nil && current.Revision != revision {
@@ -200,12 +200,12 @@ func (repository *PostgresConfigRepository) ListHistory(ctx context.Context, con
 }
 
 func (repository *PostgresConfigRepository) getDraftTx(ctx context.Context, tx pgx.Tx, configDomain string) (domain.ConfigDraft, error) {
-	return scanConfigDraft(tx.QueryRow(ctx, `SELECT domain,revision,payload,author_id,note,COALESCE(approved_by,'') FROM reimbursement.config_drafts WHERE domain=$1`, configDomain))
+	return scanConfigDraft(tx.QueryRow(ctx, `SELECT domain,revision,payload,author_id,note,COALESCE(approved_by,''),COALESCE(published_revision,0) FROM reimbursement.config_drafts WHERE domain=$1`, configDomain))
 }
 
 func scanConfigDraft(row pgx.Row) (domain.ConfigDraft, error) {
 	var draft domain.ConfigDraft
-	if err := row.Scan(&draft.Domain, &draft.Revision, &draft.Payload, &draft.AuthorID, &draft.Note, &draft.ApprovedBy); err != nil {
+	if err := row.Scan(&draft.Domain, &draft.Revision, &draft.Payload, &draft.AuthorID, &draft.Note, &draft.ApprovedBy, &draft.PublishedRevision); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ConfigDraft{}, application.ErrConfigNotFound
 		}

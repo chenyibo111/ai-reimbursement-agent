@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import { reimbursementApi, ReimbursementApiError } from "../../api/client";
 import type { Claim, ClaimPatch, ValidationIssue } from "../../api/generated/reimbursement";
@@ -22,10 +23,6 @@ export function parseParticipants(value: string): string[] {
 	return value.split(/[,，、\n]/).map((item) => item.trim()).filter(Boolean);
 }
 
-export function parseCategories(value: string): string[] {
-	return [...new Set(parseParticipants(value))];
-}
-
 function formatAmountInput(value: number | null) {
 	return value === null ? "" : (value / 100).toFixed(2);
 }
@@ -38,7 +35,8 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 	const mutation = useUpdateClaim(claim.id);
 	const [purpose, setPurpose] = useState(claim.purpose ?? "");
 	const [expenseCategory, setExpenseCategory] = useState(claim.expenseCategory ?? "");
-	const [selectedCategoriesText, setSelectedCategoriesText] = useState(() => (claim.selectedExpenseCategories ?? claim.expenseCategories ?? []).join("、"));
+	const [selectedCodes, setSelectedCodes] = useState<string[]>(() => (claim.selectedExpenseCategoryCodes ?? []).filter(Boolean));
+	const [categoryEdited, setCategoryEdited] = useState(false);
 	const [projectCode, setProjectCode] = useState(claim.projectCode ?? "");
 	const [participantsText, setParticipantsText] = useState((claim.participants ?? []).join("，"));
 	const [amountText, setAmountText] = useState(() => formatAmountInput(claim.requestedAmountCent));
@@ -50,18 +48,20 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 	const [isEditing, setIsEditing] = useState(false);
 	const isDraft = claim.status === "DRAFT";
 	const isItemized = claim.itemizationMode === "ITEMIZED";
+	const catalog = useQuery({ queryKey: ["expense-catalog"], queryFn: reimbursementApi.getExpenseCatalog, enabled: isDraft && isItemized, retry: false });
 	const difference = useMemo(() => claim.requestedAmountCent === null || recognizedAmountCent === null ? null : claim.requestedAmountCent - recognizedAmountCent, [claim.requestedAmountCent, recognizedAmountCent]);
 	useEffect(() => {
 		if (isEditing) return;
 		setPurpose(claim.purpose ?? "");
 		setExpenseCategory(claim.expenseCategory ?? "");
-		setSelectedCategoriesText((claim.selectedExpenseCategories ?? claim.expenseCategories ?? []).join("、"));
+		setSelectedCodes((claim.selectedExpenseCategoryCodes ?? []).filter(Boolean));
+		setCategoryEdited(false);
 		setProjectCode(claim.projectCode ?? "");
 		setParticipantsText((claim.participants ?? []).join("，"));
 		setAmountText(formatAmountInput(claim.requestedAmountCent));
 		setRemark(claim.remark ?? "");
 		setAmountError("");
-	}, [claim.id, claim.version, claim.purpose, claim.expenseCategory, claim.selectedExpenseCategories, claim.expenseCategories, claim.projectCode, claim.participants, claim.requestedAmountCent, claim.remark, isEditing]);
+	}, [claim.id, claim.version, claim.purpose, claim.expenseCategory, claim.selectedExpenseCategoryCodes, claim.projectCode, claim.participants, claim.requestedAmountCent, claim.remark, isEditing]);
 
 	function markEdited() {
 		setIsEditing(true);
@@ -75,13 +75,11 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 			return null;
 		}
 		setAmountError("");
-		const selectedCategories = parseCategories(selectedCategoriesText);
-		const savedCategories = claim.selectedExpenseCategories ?? claim.expenseCategories ?? [];
 		return {
 			version: claim.version,
 			...(!isItemized || purpose.trim() !== (claim.purpose ?? "") ? { purpose: purpose.trim() } : {}),
 			...(!isItemized ? { expenseCategory: expenseCategory.trim() } : {}),
-			...(isItemized && selectedCategories.join("\u0000") !== savedCategories.join("\u0000") ? { selectedExpenseCategories: selectedCategories } : {}),
+			...(isItemized && categoryEdited ? { selectedExpenseCategoryCodes: selectedCodes } : {}),
 			...(!isItemized || projectCode.trim() !== (claim.projectCode ?? "") ? { projectCode: projectCode.trim() } : {}),
 			...(!isItemized || parseParticipants(participantsText).join("\u0000") !== (claim.participants ?? []).join("\u0000") ? { participants: parseParticipants(participantsText) } : {}),
 			...(parsed && (!isItemized || parsed.cents !== claim.requestedAmountCent) ? { requestedAmountCent: parsed.cents } : {}),
@@ -96,7 +94,8 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 		const updated = await mutation.mutateAsync(patch);
 		setPurpose(updated.purpose ?? "");
 		setExpenseCategory(updated.expenseCategory ?? "");
-		setSelectedCategoriesText((updated.selectedExpenseCategories ?? updated.expenseCategories ?? []).join("、"));
+		setSelectedCodes((updated.selectedExpenseCategoryCodes ?? []).filter(Boolean));
+		setCategoryEdited(false);
 		setProjectCode(updated.projectCode ?? "");
 		setParticipantsText((updated.participants ?? []).join("，"));
 		setAmountText(formatAmountInput(updated.requestedAmountCent));
@@ -170,11 +169,11 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 					<input id="claim-purpose" name="purpose" value={purpose} onChange={(event) => { markEdited(); setPurpose(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} placeholder="例如：杭州客户拜访" />
 					<p className="field-hint">简要说明这笔报销对应的业务事项。</p>
 				</div>
-				{isItemized && <div className="field-stack">
-					<label htmlFor="claim-selected-categories">费用类别</label>
-					<input id="claim-selected-categories" name="selectedExpenseCategories" value={selectedCategoriesText} onChange={(event) => { markEdited(); setSelectedCategoriesText(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} aria-describedby="claim-selected-categories-help" placeholder="例如：交通费、餐饮费" />
-					<p id="claim-selected-categories-help" className="field-hint">这是最终提交的类别，可填写多个并用顿号分隔；票据识别类别只提供初始建议。</p>
-				</div>}
+				{isItemized && <fieldset className="field-stack category-selector" aria-describedby="claim-selected-categories-help"><legend>费用类别</legend>
+					<p id="claim-selected-categories-help" className="field-hint">整单最终提交类别，可多选；票据识别只提供初始建议。</p>
+					{claim.categoryReviewRequired && <p className="field-hint category-review-note">历史类别未能确定编码，请核对后选择当前类别。</p>}
+					{isDraft ? catalog.isPending ? <p role="status" className="field-hint">正在读取可选类别…</p> : catalog.isError ? <div className="field-error" role="alert">可选类别暂时无法读取。<button className="text-action" type="button" onClick={() => void catalog.refetch()}>重试</button></div> : catalog.data?.payload.categories.length ? <div className="category-choice-list">{catalog.data.payload.categories.map((option) => <label className="category-choice" key={option.code}><input type="checkbox" checked={selectedCodes.includes(option.code)} disabled={mutation.isPending || isSubmitting} onChange={(event) => { markEdited(); setCategoryEdited(true); setSelectedCodes((current) => event.target.checked ? [...current, option.code] : current.filter((code) => code !== option.code)); }} /><span>{option.label}</span></label>)}</div> : <p className="field-hint">当前没有启用的费用类别，请联系管理员配置。</p> : <p className="category-readonly">{(claim.selectedExpenseCategories ?? []).join("、") || "未填写"}</p>}
+				</fieldset>}
 				{!isItemized && <div className="field-stack">
 					<label htmlFor="claim-expense-category">费用类别</label>
 					<input id="claim-expense-category" name="expenseCategory" value={expenseCategory} onChange={(event) => { markEdited(); setExpenseCategory(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} placeholder="例如：住宿费" />

@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Link, Navigate, Route, Routes, useParams } from "react-router-dom";
 
 import { ClaimWorkbenchPage } from "./routes/claim-workbench-page";
+import { AdminConfigPage } from "./routes/admin-config-page";
 import { ClaimListPage } from "./routes/claims-list-page";
 import { NewClaimPage } from "./routes/new-claim-page";
 import { PolicyRulesPage } from "./routes/policy-rules-page";
@@ -44,6 +45,7 @@ export function App() {
     <header className="session-bar">
       <div className="session-bar-inner">
         <Link to="/claims">报销工作台</Link>
+        {session.employee.role === "ADMIN" && <Link to="/admin/config">配置中心</Link>}
         <div className="session-actions">
           <span>{session.employee.displayName}</span>
           <button className="secondary-action" type="button" onClick={() => { void logout(); }}>退出登录</button>
@@ -55,6 +57,7 @@ export function App() {
       <Route path="/claims/new" element={<NewClaimPage />} />
       <Route path="/claims/:claimId" element={<ClaimWorkbenchPage />} />
       <Route path="/admin/policies" element={<PolicyRulesPage />} />
+      <Route path="/admin/config" element={<AdminConfigPage isAdmin={session.employee.role === "ADMIN"} />} />
       <Route path="/admin/policy-sources" element={<PolicySourcesPage />} />
       <Route path="/admin/reviews" element={<ReviewCenterPage />} />
       <Route path="/policies" element={<RetiredPage title="旧政策页面已停用" description="政策问答已转到飞书机器人。报销单和政策规则仍可在当前工作台查看。" />} />

@@ -11,6 +11,7 @@ vi.mock("../../api/client", () => ({
   reimbursementApi: {
     updateClaim: vi.fn(),
 		updateExpenseItem: vi.fn(),
+    getExpenseCatalog: vi.fn(),
     requestSubmission: vi.fn(),
     submit: vi.fn(),
   },
@@ -26,6 +27,11 @@ const manualClaim: Claim = {
 
 function renderForm(claim: Claim = manualClaim) {
 	vi.mocked(reimbursementApi.updateClaim).mockResolvedValue(claim);
+  vi.mocked(reimbursementApi.getExpenseCatalog).mockResolvedValue({ domain: "expense_catalog", version: 1, publishedAt: "2026-11-01T00:00:00Z", payload: { categories: [
+    { code: "LOCAL_TRANSPORT", label: "交通费", aliases: [], enabled: true, sortOrder: 10 },
+    { code: "DINING", label: "餐饮费", aliases: [], enabled: true, sortOrder: 20 },
+    { code: "OTHER", label: "其他", aliases: [], enabled: true, sortOrder: 30 },
+  ] } });
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   return render(<QueryClientProvider client={queryClient}><ClaimApplicationForm claim={claim} recognizedAmountCent={claim.totalAmountCent} /></QueryClientProvider>);
 }
@@ -62,28 +68,28 @@ describe("ClaimApplicationForm", () => {
     const user = userEvent.setup();
     const { container } = renderForm({ ...manualClaim, itemizationMode: "ITEMIZED", expenseItems: [] });
     const form = within(container);
-    expect(form.getByLabelText("费用类别")).toHaveValue("");
+    expect(await form.findByRole("group", { name: "费用类别" })).toBeVisible();
     await user.click(form.getByRole("button", { name: "保存草稿" }));
     expect(reimbursementApi.updateClaim).toHaveBeenCalledWith("claim-1", expect.not.objectContaining({ expenseCategory: expect.anything() }));
     expect(reimbursementApi.updateClaim).toHaveBeenCalledWith("claim-1", expect.not.objectContaining({ purpose: expect.anything() }));
     expect(reimbursementApi.updateClaim).toHaveBeenCalledWith("claim-1", expect.not.objectContaining({ requestedAmountCent: expect.anything() }));
   });
 	it("prefills multiple final categories and edits them without changing receipt recognition", async () => {
-		const claim: Claim = { ...manualClaim, itemizationMode: "ITEMIZED", purpose: "市内出行及餐饮费用", expenseCategories: ["交通费", "餐饮费"], expenseItems: [
-			{ id: "taxi", claimId: "claim-1", receiptId: "taxi", receiptType: "TAXI", expenseCategory: "交通费", categorySource: "MODEL", purpose: "市内出行打车费", purposeSource: "MODEL", amountCent: 3800, amountSource: "OCR", projectCode: "", participants: [] },
-			{ id: "dining", claimId: "claim-1", receiptId: "dining", receiptType: "DINING", expenseCategory: "餐饮费", categorySource: "MODEL", purpose: "餐饮费用", purposeSource: "MODEL", amountCent: 5200, amountSource: "OCR", projectCode: "", participants: [] },
+		const claim: Claim = { ...manualClaim, itemizationMode: "ITEMIZED", purpose: "市内出行及餐饮费用", selectedExpenseCategories: ["交通费", "餐饮费"], selectedExpenseCategoryCodes: ["LOCAL_TRANSPORT", "DINING"], expenseItems: [
+			{ id: "taxi", claimId: "claim-1", receiptId: "taxi", receiptType: "TAXI", expenseCategory: "交通费", categoryCode: "LOCAL_TRANSPORT", categorySource: "MODEL", purpose: "市内出行打车费", purposeSource: "MODEL", amountCent: 3800, amountSource: "OCR", projectCode: "", participants: [] },
+			{ id: "dining", claimId: "claim-1", receiptId: "dining", receiptType: "DINING", expenseCategory: "餐饮费", categoryCode: "DINING", categorySource: "MODEL", purpose: "餐饮费用", purposeSource: "MODEL", amountCent: 5200, amountSource: "OCR", projectCode: "", participants: [] },
 		] };
 		const { container } = renderForm(claim);
 		const form = within(container);
-		expect(form.getByLabelText("费用类别")).toHaveValue("交通费、餐饮费");
+		expect(await form.findByRole("checkbox", { name: "交通费" })).toBeChecked();
+		expect(form.getByRole("checkbox", { name: "餐饮费" })).toBeChecked();
 		expect(form.getByLabelText(/报销事由/)).toHaveValue("市内出行及餐饮费用");
 		expect(form.queryByLabelText("第 1 条费用类别")).toBeNull();
 		expect(form.queryByText("更正分类或补充信息")).toBeNull();
-		const category = form.getByLabelText("费用类别");
-		await userEvent.setup().clear(category);
-		await userEvent.setup().type(category, "餐饮费、其他");
+		await userEvent.setup().click(form.getByRole("checkbox", { name: "交通费" }));
+		await userEvent.setup().click(form.getByRole("checkbox", { name: "其他" }));
 		await userEvent.setup().click(form.getByRole("button", { name: "保存草稿" }));
-		expect(reimbursementApi.updateClaim).toHaveBeenCalledWith("claim-1", expect.objectContaining({ version: 3, selectedExpenseCategories: ["餐饮费", "其他"] }));
+		expect(reimbursementApi.updateClaim).toHaveBeenCalledWith("claim-1", expect.objectContaining({ version: 3, selectedExpenseCategoryCodes: ["DINING", "OTHER"] }));
 		expect(reimbursementApi.updateExpenseItem).not.toHaveBeenCalled();
 	});
   it("lets an employee set the expense category needed by published category rules", async () => {

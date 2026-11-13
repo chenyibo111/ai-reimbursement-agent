@@ -37,6 +37,10 @@ func TestPostgresConfigRepositoryRevisionPublishAndRollback(t *testing.T) {
 	if err != nil || published.Version != 1 || configName(t, published.Payload) != "first" {
 		t.Fatalf("publish first: %+v %v", published, err)
 	}
+	publishedDraft, err := repo.GetDraft(ctx, "expense_catalog")
+	if err != nil || publishedDraft.PublishedRevision != 1 {
+		t.Fatalf("published draft revision: %+v %v", publishedDraft, err)
+	}
 	if _, err := repo.PublishDraft(ctx, "admin-1", "expense_catalog", 1); !errors.Is(err, application.ErrConfigConflict) {
 		t.Fatalf("repeated publish created another version: %v", err)
 	}
@@ -50,6 +54,9 @@ func TestPostgresConfigRepositoryRevisionPublishAndRollback(t *testing.T) {
 	if err != nil || second.Revision != 2 {
 		t.Fatalf("save second: %+v %v", second, err)
 	}
+	if second.PublishedRevision != 1 {
+		t.Fatalf("saving a new draft changed published revision: %+v", second)
+	}
 	if _, err := repo.PublishDraft(ctx, "admin-1", "expense_catalog", 1); !errors.Is(err, application.ErrConfigConflict) {
 		t.Fatalf("expected stale publish conflict, got %v", err)
 	}
@@ -62,6 +69,10 @@ func TestPostgresConfigRepositoryRevisionPublishAndRollback(t *testing.T) {
 	active, err := repo.ActivateVersion(ctx, "admin-2", "expense_catalog", 2, 1, "revert")
 	if err != nil || active.Version != 1 {
 		t.Fatalf("activate old version: %+v %v", active, err)
+	}
+	rolledBackDraft, err := repo.GetDraft(ctx, "expense_catalog")
+	if err != nil || rolledBackDraft.Revision != 2 || rolledBackDraft.PublishedRevision != 2 {
+		t.Fatalf("rollback should leave the published draft identifiable: %+v %v", rolledBackDraft, err)
 	}
 	current, err := repo.GetActive(ctx, "expense_catalog")
 	if err != nil || configName(t, current.Payload) != "first" {

@@ -1,9 +1,9 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { reimbursementApi, type PublishedPolicyRule } from "../api/client";
+import { reimbursementApi, type ExpenseCategoryOption, type PublishedPolicyRule } from "../api/client";
 
-type Draft = { key: string; code: string; name: string; type: PublishedPolicyRule["type"]; severity: PublishedPolicyRule["severity"]; amount: string; categories: string; category: string; field: "participants" | "projectCode" };
-const blank = (): Draft => ({ key: crypto.randomUUID(), code: "", name: "", type: "CLAIM_TOTAL_MAX", severity: "BLOCKING", amount: "", categories: "", category: "", field: "projectCode" });
+type Draft = { key: string; code: string; name: string; type: PublishedPolicyRule["type"]; severity: PublishedPolicyRule["severity"]; amount: string; categoryCodes: string[]; categoryCode: string; field: "participants" | "projectCode" };
+const blank = (): Draft => ({ key: crypto.randomUUID(), code: "", name: "", type: "CLAIM_TOTAL_MAX", severity: "BLOCKING", amount: "", categoryCodes: [], categoryCode: "", field: "projectCode" });
 
 function asRule(draft: Draft): PublishedPolicyRule {
   const code = draft.code.trim(), name = draft.name.trim();
@@ -16,12 +16,11 @@ function asRule(draft: Draft): PublishedPolicyRule {
     return { code, name, type: draft.type, severity: draft.severity, config: { maxAmountCents: Number(cents) } };
   }
   if (draft.type === "CATEGORY_ALLOWED") {
-    const categories = draft.categories.split(/[,，、]/).map((value) => value.trim()).filter(Boolean);
-    if (!categories.length) throw new Error(`${name}：请填写允许的费用类别。`);
-    return { code, name, type: draft.type, severity: draft.severity, config: { categories } };
+    if (!draft.categoryCodes.length) throw new Error(`${name}：请选择允许的费用类别。`);
+    return { code, name, type: draft.type, severity: draft.severity, config: { categoryCodes: draft.categoryCodes } };
   }
-  if (!draft.category.trim()) throw new Error(`${name}：请填写适用类别。`);
-  return { code, name, type: draft.type, severity: draft.severity, config: { category: draft.category.trim(), field: draft.field } };
+  if (!draft.categoryCode) throw new Error(`${name}：请选择适用类别。`);
+  return { code, name, type: draft.type, severity: draft.severity, config: { categoryCode: draft.categoryCode, field: draft.field } };
 }
 
 export function PolicyRulesPage() {
@@ -29,6 +28,13 @@ export function PolicyRulesPage() {
   const [rules, setRules] = useState<Draft[]>([]);
   const [notice, setNotice] = useState(""), [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [categories, setCategories] = useState<ExpenseCategoryOption[]>([]);
+  const [catalogError, setCatalogError] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    reimbursementApi.getExpenseCatalog().then((result) => { if (!cancelled) setCategories(result.payload.categories); }).catch(() => { if (!cancelled) setCatalogError("费用类别暂时无法读取，请刷新页面后重试。"); });
+    return () => { cancelled = true; };
+  }, []);
   const update = (key: string, patch: Partial<Draft>) => { setRules((current) => current.map((rule) => rule.key === key ? { ...rule, ...patch } : rule)); setNotice(""); };
   async function publish(event: FormEvent) {
     event.preventDefault(); setError(""); setNotice("");
@@ -43,7 +49,7 @@ export function PolicyRulesPage() {
     finally { setSaving(false); }
   }
   return <main className="page-shell" aria-labelledby="policy-title">
-    <header className="page-header"><div><p className="eyebrow">财务管理</p><h1 id="policy-title">政策版本</h1><p className="page-summary">版本生效后，报销系统将在预校验和最终提交时执行这些规则。</p></div><Link className="secondary-action" to="/admin/policy-sources">政策知识来源</Link></header>
+    <header className="page-header"><div><p className="eyebrow">财务管理</p><h1 id="policy-title">政策版本</h1><p className="page-summary">版本生效后，报销系统将在预校验和最终提交时执行这些规则。</p></div><div className="admin-config-links"><Link className="secondary-action" to="/admin/config">配置中心</Link><Link className="secondary-action" to="/admin/policy-sources">政策知识来源</Link></div></header>
     <section className="workbench-panel policy-publish-panel" aria-labelledby="publish-title">
       <h2 id="publish-title">发布可执行规则</h2>
       <p className="field-hint">飞书文档用于制度问答。发布前请对照制度原文核对规则；文档更新不会自动修改这些规则。城市住宿档位、单笔费用上限暂缺对应单据字段，需人工核对。</p>
@@ -61,8 +67,8 @@ export function PolicyRulesPage() {
             <div className="field-stack"><label htmlFor={`type-${rule.key}`}>校验方式</label><select id={`type-${rule.key}`} value={rule.type} onChange={(event) => update(rule.key, { type: event.target.value as Draft["type"] })}><option value="CLAIM_TOTAL_MAX">整单金额上限</option><option value="CATEGORY_ALLOWED">允许的费用类别</option><option value="CATEGORY_REQUIRED_FIELD">类别必填信息</option></select></div>
             <div className="field-stack"><label htmlFor={`severity-${rule.key}`}>处理方式</label><select id={`severity-${rule.key}`} value={rule.severity} onChange={(event) => update(rule.key, { severity: event.target.value as Draft["severity"] })}><option value="BLOCKING">阻断提交</option><option value="WARNING">仅提示</option></select></div>
             {rule.type === "CLAIM_TOTAL_MAX" && <div className="field-stack"><label htmlFor={`amount-${rule.key}`}>上限金额（元）</label><input id={`amount-${rule.key}`} inputMode="decimal" value={rule.amount} onChange={(event) => update(rule.key, { amount: event.target.value })} required placeholder="例如：1000.00" /></div>}
-            {rule.type === "CATEGORY_ALLOWED" && <div className="field-stack"><label htmlFor={`categories-${rule.key}`}>允许的类别</label><input id={`categories-${rule.key}`} value={rule.categories} onChange={(event) => update(rule.key, { categories: event.target.value })} required placeholder="交通费，住宿费" /></div>}
-            {rule.type === "CATEGORY_REQUIRED_FIELD" && <><div className="field-stack"><label htmlFor={`category-${rule.key}`}>适用类别</label><input id={`category-${rule.key}`} value={rule.category} onChange={(event) => update(rule.key, { category: event.target.value })} required placeholder="例如：住宿费" /></div><div className="field-stack"><label htmlFor={`field-${rule.key}`}>必填信息</label><select id={`field-${rule.key}`} value={rule.field} onChange={(event) => update(rule.key, { field: event.target.value as Draft["field"] })}><option value="projectCode">项目编码</option><option value="participants">同行人</option></select></div></>}
+            {rule.type === "CATEGORY_ALLOWED" && <fieldset className="field-stack category-selector"><legend>允许的类别</legend>{categories.length ? <div className="category-choice-list">{categories.map((category) => <label key={category.code} className="category-choice"><input type="checkbox" checked={rule.categoryCodes.includes(category.code)} onChange={(event) => update(rule.key, { categoryCodes: event.target.checked ? [...rule.categoryCodes, category.code] : rule.categoryCodes.filter((code) => code !== category.code) })} /><span>{category.label}</span></label>)}</div> : <p className="field-hint">{catalogError || "正在读取费用类别…"}</p>}</fieldset>}
+            {rule.type === "CATEGORY_REQUIRED_FIELD" && <><div className="field-stack"><label htmlFor={`category-${rule.key}`}>适用类别</label><select id={`category-${rule.key}`} value={rule.categoryCode} onChange={(event) => update(rule.key, { categoryCode: event.target.value })}><option value="">请选择类别</option>{categories.map((category) => <option key={category.code} value={category.code}>{category.label}</option>)}</select>{catalogError && <p className="field-error">{catalogError}</p>}</div><div className="field-stack"><label htmlFor={`field-${rule.key}`}>必填信息</label><select id={`field-${rule.key}`} value={rule.field} onChange={(event) => update(rule.key, { field: event.target.value as Draft["field"] })}><option value="projectCode">项目编码</option><option value="participants">同行人</option></select></div></>}
           </div><button type="button" className="text-action policy-remove-rule" onClick={() => setRules((current) => current.filter((item) => item.key !== rule.key))}>移除规则 {index + 1}</button>
         </fieldset>)}</div>
         {notice && <p className="inline-notice" role="status">{notice}</p>}{error && <p className="field-error" role="alert">{error}</p>}

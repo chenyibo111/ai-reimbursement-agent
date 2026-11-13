@@ -707,7 +707,7 @@ components:
         revision: { type: integer, format: int64 }
     ConfigDraft:
       type: object
-      required: [domain, revision, payload, authorId, note]
+      required: [domain, revision, payload, authorId, note, publishedRevision]
       properties:
         domain: { type: string }
         revision: { type: integer, format: int64 }
@@ -715,6 +715,7 @@ components:
         authorId: { type: string }
         note: { type: string }
         approvedBy: { type: string }
+        publishedRevision: { type: integer, format: int64, minimum: 0 }
     ConfigSnapshot:
       type: object
       required: [domain, version, payload, publishedAt]

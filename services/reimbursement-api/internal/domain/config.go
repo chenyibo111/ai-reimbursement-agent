@@ -13,12 +13,13 @@ type ConfigSnapshot struct {
 }
 
 type ConfigDraft struct {
-	Domain     string          `json:"domain"`
-	Revision   int64           `json:"revision"`
-	Payload    json.RawMessage `json:"payload"`
-	AuthorID   string          `json:"authorId"`
-	Note       string          `json:"note"`
-	ApprovedBy string          `json:"approvedBy,omitempty"`
+	Domain            string          `json:"domain"`
+	Revision          int64           `json:"revision"`
+	Payload           json.RawMessage `json:"payload"`
+	AuthorID          string          `json:"authorId"`
+	Note              string          `json:"note"`
+	ApprovedBy        string          `json:"approvedBy,omitempty"`
+	PublishedRevision int64           `json:"publishedRevision"`
 }
 
 type ConfigPreview struct {
