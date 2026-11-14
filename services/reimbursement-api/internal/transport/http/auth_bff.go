@@ -71,6 +71,8 @@ func (handler *AuthBFF) ServeHTTP(response http.ResponseWriter, request *http.Re
 		handler.callback(response, request)
 	case request.Method == http.MethodGet && request.URL.Path == "/api/auth/access-token":
 		handler.accessToken(response, request)
+	case request.Method == http.MethodPost && request.URL.Path == "/api/auth/activity":
+		handler.activity(response, request)
 	case request.Method == http.MethodGet && request.URL.Path == "/api/auth/sso/logout":
 		handler.logout(response, request)
 	case request.Method == http.MethodPost && request.URL.Path == "/api/auth/sso/backchannel-logout":
@@ -78,6 +80,42 @@ func (handler *AuthBFF) ServeHTTP(response http.ResponseWriter, request *http.Re
 	default:
 		http.NotFound(response, request)
 	}
+}
+
+func (handler *AuthBFF) activity(response http.ResponseWriter, request *http.Request) {
+	response.Header().Set("Cache-Control", "no-store")
+	if request.Header.Get("X-SSO-Activity") != "1" {
+		writeAuthError(response, http.StatusForbidden, "INVALID_ACTIVITY_REQUEST")
+		return
+	}
+	cookie := readAuthCookie(request, ssoSessionCookieName)
+	session, err := handler.sessions.Active(request.Context(), cookie)
+	if err != nil {
+		if errors.Is(err, auth.ErrUnauthenticated) {
+			writeAuthError(response, http.StatusUnauthorized, "UNAUTHENTICATED")
+		} else {
+			writeAuthError(response, http.StatusServiceUnavailable, "SSO_UNAVAILABLE")
+		}
+		return
+	}
+	employee, err := handler.employees.FindEmployeeByID(request.Context(), session.EmployeeID)
+	if err != nil {
+		writeAuthError(response, http.StatusServiceUnavailable, "IDENTITY_PROVISIONING_UNAVAILABLE")
+		return
+	}
+	if employee == nil || !employee.IsActive {
+		writeAuthError(response, http.StatusUnauthorized, "UNAUTHENTICATED")
+		return
+	}
+	if err := handler.sessions.RecordActivity(request.Context(), cookie); err != nil {
+		if errors.Is(err, auth.ErrUnauthenticated) {
+			writeAuthError(response, http.StatusUnauthorized, "UNAUTHENTICATED")
+		} else {
+			writeAuthError(response, http.StatusServiceUnavailable, "SSO_UNAVAILABLE")
+		}
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
 }
 
 func (handler *AuthBFF) logout(response http.ResponseWriter, request *http.Request) {

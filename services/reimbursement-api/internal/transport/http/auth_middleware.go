@@ -43,6 +43,9 @@ type SSOSessionFunc func(context.Context, string) (bool, error)
 func (fn SSOSessionFunc) IsActive(ctx context.Context, sid string) (bool, error) {
 	return fn(ctx, sid)
 }
+func (fn SSOSessionFunc) RecordActivity(ctx context.Context, sid string) (bool, error) {
+	return fn(ctx, sid)
+}
 
 // StaticActorResolver is intentionally suitable only for tests and local
 // development wiring. Production replaces it with a signed OIDC resolver.

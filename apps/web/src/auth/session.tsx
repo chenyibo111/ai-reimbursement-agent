@@ -24,6 +24,8 @@ export function createAuthSessionManager(deps: AuthSessionManagerDeps = {}) {
   const now = deps.now ?? (() => new Date());
   const navigate = deps.navigate ?? ((url: string) => window.location.assign(url));
   let snapshot: AuthSessionSnapshot = { status: "loading" };
+  let lastActivityReport = Number.NEGATIVE_INFINITY;
+  let activityRequest: Promise<void> | null = null;
   const listeners = new Set<() => void>();
   const notify = () => listeners.forEach((listener) => listener());
   const setSnapshot = (next: AuthSessionSnapshot) => { snapshot = next; notify(); };
@@ -63,6 +65,20 @@ export function createAuthSessionManager(deps: AuthSessionManagerDeps = {}) {
       return remainingMs <= 60_000 ? refresh() : snapshot.accessToken;
     },
     getAccessToken() { return snapshot.status === "authenticated" ? snapshot.accessToken : null; },
+    async recordActivity() {
+      if (snapshot.status !== "authenticated") return;
+      if (activityRequest) return activityRequest;
+      const reportedAt = now().getTime();
+      if (reportedAt - lastActivityReport < 60_000) return;
+      lastActivityReport = reportedAt;
+      activityRequest = (async () => {
+        const response = await fetcher("/api/auth/activity", { method: "POST", credentials: "same-origin", headers: { "X-SSO-Activity": "1" } });
+        if (response.status === 401) {
+          setSnapshot({ status: "unauthenticated" });
+        }
+      })().finally(() => { activityRequest = null; });
+      return activityRequest;
+    },
     snapshot() { return snapshot; },
     subscribe(listener: () => void) {
       listeners.add(listener);
@@ -88,6 +104,15 @@ export function AuthSessionProvider({ children }: PropsWithChildren) {
   useEffect(() => manager.subscribe(() => setSession(manager.snapshot())), [manager]);
   useEffect(() => { if (!["/logged-out", "/login"].includes(window.location.pathname)) void manager.initialize().catch(() => undefined); }, [manager]);
   useEffect(() => { configureReimbursementApiTokenProvider(manager); }, [manager]);
+  useEffect(() => {
+    const onInput = () => { void manager.recordActivity().catch(() => undefined); };
+    window.addEventListener("pointerdown", onInput, { passive: true });
+    window.addEventListener("keydown", onInput, { passive: true });
+    return () => {
+      window.removeEventListener("pointerdown", onInput);
+      window.removeEventListener("keydown", onInput);
+    };
+  }, [manager]);
   useEffect(() => {
     const revalidate = () => {
       if (document.visibilityState === "visible" && manager.snapshot().status === "authenticated") {

@@ -179,6 +179,52 @@ func TestAuthBFFLogoutKeepsRetryableSessionUntilHydraRevokes(t *testing.T) {
 	}
 }
 
+func TestAuthBFFActivityRequiresLiveSession(t *testing.T) {
+	fixture := newAuthBFFFixture(t, "")
+	callback := authBFFLoginAndCallback(t, fixture, "/claims")
+	var cookie *http.Cookie
+	for _, item := range callback.Result().Cookies() {
+		if item.Name == ssoSessionCookieName {
+			cookie = item
+		}
+	}
+	if cookie == nil {
+		t.Fatal("missing session cookie")
+	}
+	request := func() int {
+		r := httptest.NewRequest(http.MethodPost, "http://localhost:8088/api/auth/activity", nil)
+		r.AddCookie(cookie)
+		r.Header.Set("X-SSO-Activity", "1")
+		w := httptest.NewRecorder()
+		fixture.router.ServeHTTP(w, r)
+		return w.Code
+	}
+	{
+		r := httptest.NewRequest(http.MethodPost, "http://localhost:8088/api/auth/activity", nil)
+		r.AddCookie(cookie)
+		w := httptest.NewRecorder()
+		fixture.router.ServeHTTP(w, r)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("activity without same-origin marker: %d", w.Code)
+		}
+	}
+	if got := request(); got != http.StatusNoContent {
+		t.Fatalf("active activity: %d", got)
+	}
+	employee := fixture.employees.rows["employee-web-1"]
+	employee.IsActive = false
+	fixture.employees.rows[employee.ID] = employee
+	if got := request(); got != http.StatusUnauthorized {
+		t.Fatalf("disabled employee activity: %d", got)
+	}
+	employee.IsActive = true
+	fixture.employees.rows[employee.ID] = employee
+	*fixture.status = "revoked"
+	if got := request(); got != http.StatusUnauthorized {
+		t.Fatalf("revoked activity: %d", got)
+	}
+}
+
 func TestAuthBFFCallbackResolvesCanonicalTenantMember(t *testing.T) {
 	fixture := newAuthBFFFixture(t, "ou_member")
 	callback := authBFFLoginAndCallback(t, fixture, "/claims")
