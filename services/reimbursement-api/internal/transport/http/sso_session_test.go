@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -75,5 +76,34 @@ func TestHTTPSSOSessionCheckerSendsServiceKeyAndSid(t *testing.T) {
 	active, err := checker.IsActive(context.Background(), "hydra-session-1")
 	if err != nil || !active {
 		t.Fatalf("active=%v err=%v", active, err)
+	}
+}
+
+func TestHTTPSSOSessionCheckerMarksOnlyUserActivity(t *testing.T) {
+	var received []bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			SID      string `json:"sid"`
+			Activity bool   `json:"activity"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.SID != "sid-1" {
+			t.Errorf("body: %+v %v", body, err)
+		}
+		received = append(received, body.Activity)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	checker, err := NewHTTPSSOSessionChecker(server.URL, "test-service-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active, err := checker.IsActive(context.Background(), "sid-1"); err != nil || !active {
+		t.Fatalf("check: %v %v", active, err)
+	}
+	if active, err := checker.RecordActivity(context.Background(), "sid-1"); err != nil || !active {
+		t.Fatalf("activity: %v %v", active, err)
+	}
+	if len(received) != 2 || received[0] || !received[1] {
+		t.Fatalf("flags: %v", received)
 	}
 }

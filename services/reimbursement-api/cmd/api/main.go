@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -46,6 +47,11 @@ func main() {
 		log.Fatal("OCR_SERVICE_URL is required")
 	}
 	claimRepository := store.NewPostgresClaimRepository(pool)
+	configService := application.NewConfigService(store.NewPostgresConfigRepository(pool))
+	configService.RegisterValidator("expense_catalog", application.ValidateExpenseCatalogPayload)
+	configService.RegisterPublishValidator("expense_catalog", func(ctx context.Context, payload json.RawMessage) error {
+		return application.ValidateExpenseCatalogPolicyReferences(ctx, payload, store.NewPostgresSubmissionRepository(pool))
+	})
 	receiptRepository := store.NewPostgresReceiptRepository(pool)
 	reviewCaseRepository := store.NewPostgresReviewCaseRepository(pool)
 	provisioningKey := strings.TrimSpace(os.Getenv("REIMBURSEMENT_AUTH_PROVISIONING_KEY"))
@@ -121,6 +127,9 @@ func main() {
 		}
 	}
 	claimService := application.NewClaimService(claimRepository, application.SecureIDGenerator{}, store.NewPostgresClaimNumberGenerator(pool), time.Now, ocrSuggestionRefresher)
+	claimService.SetExpenseCatalogReader(application.NewCachedExpenseCatalogReader(configService))
+	policyRuleService := application.NewPolicyRuleService(store.NewPostgresPolicyRuleRepository(pool))
+	policyRuleService.SetExpenseCatalogReader(application.NewCachedExpenseCatalogReader(configService))
 	claimService.SetItemizedEmployeeIDs(strings.Split(os.Getenv("REIMBURSEMENT_ITEMIZED_EMPLOYEE_IDS"), ","))
 	router := transport.NewRouter(transport.Dependencies{
 		Claims:             claimService,
@@ -128,7 +137,8 @@ func main() {
 		Progress:           application.NewClaimProgressService(store.NewPostgresClaimProgressRepository(pool), submissionService),
 		Receipts:           application.NewReceiptServiceWithOptions(claimRepository, receiptRepository, objects, infrastructure.NewClamAVScanner(clamAddress), infrastructure.NewHTTPReceiptOCRClient(ocrURL), application.SecureIDGenerator{}, application.ReceiptServiceOptions{AllowDuplicateContentForTesting: allowDuplicateContentForTesting, AllowDuplicateSubmittedInvoiceForTesting: allowDuplicateSubmittedInvoiceForTesting}, ocrSuggestionRefresher),
 		ExpenseItems:       store.NewPostgresExpenseItemRepository(pool),
-		Admin:              transport.AdminServices{Policies: application.NewPolicyRuleService(store.NewPostgresPolicyRuleRepository(pool)), Reviews: application.NewReviewCaseService(reviewCaseRepository), Previews: application.NewReceiptPreviewService(reviewCaseRepository, receiptRepository, objects), Role: store.EmployeeRole(pool)},
+		Admin:              transport.AdminServices{Policies: policyRuleService, Reviews: application.NewReviewCaseService(reviewCaseRepository), Previews: application.NewReceiptPreviewService(reviewCaseRepository, receiptRepository, objects), Role: store.EmployeeRole(pool)},
+		Configs:            configService,
 		PolicySources:      policySources,
 		EmployeeIdentities: application.NewEmployeeIdentityService(store.NewPostgresEmployeeIdentityRepository(pool)),
 		Members:            store.NewWebAuthRepository(pool), BotAppID: os.Getenv("FEISHU_APP_ID"), TenantKey: os.Getenv("FEISHU_TENANT_KEY"),

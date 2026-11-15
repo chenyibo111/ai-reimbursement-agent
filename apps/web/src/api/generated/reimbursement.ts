@@ -11,6 +11,9 @@ export interface Claim {
 	expenseItems?: ExpenseItem[];
 	expenseCategories?: string[];
 	selectedExpenseCategories?: string[];
+	selectedExpenseCategoryCodes?: string[];
+	expenseCatalogVersion?: number;
+	categoryReviewRequired?: boolean;
 	expenseCategoriesSource?: "AUTO" | "MANUAL";
 	expenseItemTotalAmountCent?: number | null;
 	claimNumber: string;
@@ -43,6 +46,9 @@ export interface ExpenseItem {
 	classificationStatus?: "PENDING" | "CLASSIFIED" | "UNKNOWN" | "FAILED" | "CATEGORY_UNMAPPED";
 	classificationVersion?: string;
 	expenseCategory: string;
+	categoryCode?: string;
+	expenseCatalogVersion?: number;
+	categoryReviewRequired?: boolean;
 	categorySource: "" | "MODEL" | "MANUAL";
 	purpose: string;
 	purposeSource: "" | "MODEL" | "MANUAL";
@@ -81,6 +87,7 @@ export interface ClaimPatch {
   purpose?: string;
   expenseCategory?: string;
   selectedExpenseCategories?: string[];
+  selectedExpenseCategoryCodes?: string[];
   participants?: string[];
   projectCode?: string;
   requestedAmountCent?: number;

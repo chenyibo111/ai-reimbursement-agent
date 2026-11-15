@@ -26,9 +26,18 @@ func NewHTTPSSOSessionChecker(endpoint, serviceKey string) (*HTTPSSOSessionCheck
 }
 
 func (checker *HTTPSSOSessionChecker) IsActive(ctx context.Context, sid string) (bool, error) {
+	return checker.check(ctx, sid, false)
+}
+
+func (checker *HTTPSSOSessionChecker) RecordActivity(ctx context.Context, sid string) (bool, error) {
+	return checker.check(ctx, sid, true)
+}
+
+func (checker *HTTPSSOSessionChecker) check(ctx context.Context, sid string, activity bool) (bool, error) {
 	payload, _ := json.Marshal(struct {
-		SID string `json:"sid"`
-	}{SID: sid})
+		SID      string `json:"sid"`
+		Activity bool   `json:"activity,omitempty"`
+	}{SID: sid, Activity: activity})
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, checker.endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return false, err

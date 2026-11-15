@@ -49,6 +49,7 @@ type Dependencies struct {
 	Auth               ActorResolver
 	AuthBFF            http.Handler
 	Admin              AdminServices
+	Configs            *application.ConfigService
 	PolicySources      http.Handler
 	EmployeeIdentities EmployeeIdentityService
 	ProvisioningKey    string
@@ -91,6 +92,17 @@ func NewRouter(dependencies Dependencies) http.Handler {
 		mux.Handle("/api/v1/admin/policy-sources", dependencies.PolicySources)
 		mux.Handle("/api/v1/admin/policy-sources/", dependencies.PolicySources)
 	}
+	if dependencies.Configs != nil {
+		config := &configHandler{service: dependencies.Configs, role: dependencies.Admin.Role, serviceKey: []byte(dependencies.ProvisioningKey)}
+		mux.HandleFunc("GET /api/v1/admin/config/{domain}", config.getAdmin)
+		mux.HandleFunc("POST /api/v1/admin/config/{domain}/draft", config.saveDraft)
+		mux.HandleFunc("POST /api/v1/admin/config/{domain}/preview", config.preview)
+		mux.HandleFunc("POST /api/v1/admin/config/{domain}/approve", config.approve)
+		mux.HandleFunc("POST /api/v1/admin/config/{domain}/publish", config.publish)
+		mux.HandleFunc("GET /api/v1/admin/config/{domain}/history", config.history)
+		mux.HandleFunc("POST /api/v1/admin/config/{domain}/activate", config.activate)
+		mux.HandleFunc("GET /api/v1/config/{domain}", config.getPublic)
+	}
 	mux.HandleFunc("GET /healthz", func(response http.ResponseWriter, _ *http.Request) { response.WriteHeader(http.StatusNoContent) })
 	if dependencies.Auth == nil {
 		dependencies.Auth = StaticActorResolver{}
@@ -104,6 +116,10 @@ func NewRouter(dependencies Dependencies) http.Handler {
 	if dependencies.Members != nil && strings.TrimSpace(dependencies.ProvisioningKey) != "" {
 		memberHandler := &internalMemberHandler{members: dependencies.Members, serviceKey: []byte(dependencies.ProvisioningKey), botAppID: dependencies.BotAppID, tenantKey: dependencies.TenantKey}
 		internal.HandleFunc("POST /internal/v1/employee-identities/resolve", memberHandler.resolve)
+	}
+	if dependencies.Configs != nil && strings.TrimSpace(dependencies.ProvisioningKey) != "" {
+		config := &configHandler{service: dependencies.Configs, serviceKey: []byte(dependencies.ProvisioningKey)}
+		internal.HandleFunc("GET /internal/v1/config/{domain}/active", config.getInternal)
 	}
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if strings.HasPrefix(request.URL.Path, "/api/auth/") && dependencies.AuthBFF != nil {

@@ -407,7 +407,7 @@ func (handler *claimsHandler) claimDetailResponse(ctx context.Context, actorID s
 func expenseItemResponse(item domain.ExpenseItem) map[string]any {
 	return map[string]any{
 		"id": item.ID, "claimId": item.ClaimID, "receiptId": item.ReceiptID,
-		"receiptType": item.ReceiptType, "classificationStatus": item.ClassificationStatus, "classificationVersion": item.ClassificationVersion, "expenseCategory": item.ExpenseCategory,
+		"receiptType": item.ReceiptType, "classificationStatus": item.ClassificationStatus, "classificationVersion": item.ClassificationVersion, "expenseCategory": item.ExpenseCategory, "categoryCode": item.CategoryCode, "expenseCatalogVersion": item.ExpenseCatalogVersion, "categoryReviewRequired": item.CategoryReviewRequired,
 		"categorySource": item.CategorySource, "purpose": item.Purpose, "purposeSource": item.PurposeSource,
 		"amountCent": item.AmountCent, "amountSource": item.AmountSource,
 		"projectCode": item.ProjectCode, "participants": item.Participants,
@@ -491,6 +491,13 @@ func (handler *claimsHandler) patchClaim(response http.ResponseWriter, request *
 			} else {
 				command.SelectedExpenseCategories = &categories
 			}
+		case "selectedExpenseCategoryCodes":
+			var codes []string
+			if string(value) == "null" || json.Unmarshal(value, &codes) != nil {
+				command.UnknownFields = append(command.UnknownFields, field)
+			} else {
+				command.SelectedExpenseCategoryCodes = &codes
+			}
 		case "participants":
 			var participants []string
 			if json.Unmarshal(value, &participants) != nil {
@@ -558,30 +565,33 @@ func claimResponse(claim application.ClaimView) map[string]any {
 		warnings = append(warnings, validationIssueResponse(issue, claim.SubmissionPolicyVersion))
 	}
 	return map[string]any{
-		"id":                        claim.ID,
-		"claimNumber":               claim.ClaimNumber,
-		"ownerId":                   claim.OwnerID,
-		"status":                    claim.Status,
-		"itemizationMode":           claim.ItemizationMode,
-		"version":                   claim.Version,
-		"purpose":                   claim.Purpose,
-		"expenseCategory":           claim.ExpenseCategory,
-		"selectedExpenseCategories": append([]string{}, claim.SelectedExpenseCategories...),
-		"expenseCategoriesSource":   claim.ExpenseCategoriesSource,
-		"participants":              claim.Participants,
-		"projectCode":               claim.ProjectCode,
-		"receiptCount":              claim.ReceiptCount,
-		"recognizedReceiptCount":    claim.RecognizedReceiptCount,
-		"totalAmountCent":           claim.TotalAmountCent,
-		"missingAmountReceiptCount": claim.MissingAmountReceiptCount,
-		"requestedAmountCent":       claim.RequestedAmountCent,
-		"currency":                  claim.Currency,
-		"requestedAmountSource":     claim.RequestedAmountSource,
-		"remark":                    nullableString(claim.Remark),
-		"submissionPolicyVersion":   claim.SubmissionPolicyVersion,
-		"submissionWarnings":        warnings,
-		"createdAt":                 claim.CreatedAt,
-		"updatedAt":                 claim.UpdatedAt,
+		"id":                           claim.ID,
+		"claimNumber":                  claim.ClaimNumber,
+		"ownerId":                      claim.OwnerID,
+		"status":                       claim.Status,
+		"itemizationMode":              claim.ItemizationMode,
+		"version":                      claim.Version,
+		"purpose":                      claim.Purpose,
+		"expenseCategory":              claim.ExpenseCategory,
+		"selectedExpenseCategories":    append([]string{}, claim.SelectedExpenseCategories...),
+		"selectedExpenseCategoryCodes": append([]string{}, claim.SelectedExpenseCategoryCodes...),
+		"expenseCatalogVersion":        claim.ExpenseCatalogVersion,
+		"categoryReviewRequired":       claim.CategoryReviewRequired,
+		"expenseCategoriesSource":      claim.ExpenseCategoriesSource,
+		"participants":                 claim.Participants,
+		"projectCode":                  claim.ProjectCode,
+		"receiptCount":                 claim.ReceiptCount,
+		"recognizedReceiptCount":       claim.RecognizedReceiptCount,
+		"totalAmountCent":              claim.TotalAmountCent,
+		"missingAmountReceiptCount":    claim.MissingAmountReceiptCount,
+		"requestedAmountCent":          claim.RequestedAmountCent,
+		"currency":                     claim.Currency,
+		"requestedAmountSource":        claim.RequestedAmountSource,
+		"remark":                       nullableString(claim.Remark),
+		"submissionPolicyVersion":      claim.SubmissionPolicyVersion,
+		"submissionWarnings":           warnings,
+		"createdAt":                    claim.CreatedAt,
+		"updatedAt":                    claim.UpdatedAt,
 	}
 }
 

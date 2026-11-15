@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -110,6 +111,38 @@ func TestItemizedClaimAcceptsFinalCategories(t *testing.T) {
 	updated, err := service.UpdateClaim(context.Background(), "employee-1", claim.ID, claim.Version, PatchClaimCommand{SelectedExpenseCategories: &categories})
 	if err != nil || len(updated.SelectedExpenseCategories) != 2 || updated.ExpenseCategoriesSource != "MANUAL" {
 		t.Fatalf("claim=%+v err=%v", updated, err)
+	}
+}
+
+func TestCategoryCodeSelectionSnapshotsCurrentLabelsAndRejectsUnknownCode(t *testing.T) {
+	catalog := testExpenseCatalog()
+	catalog.Categories[0].Label = "市区交通费"
+	catalog.Categories = append(catalog.Categories, Category{Code: "DISABLED", Label: "停用类别", Enabled: false})
+	payload, _ := json.Marshal(catalog)
+	service := newClaimServiceForTest(NewMemoryClaimRepository())
+	source := &changingCatalogSnapshotReader{snapshot: domain.ConfigSnapshot{Domain: "expense_catalog", Version: 9, Payload: payload}}
+	service.SetExpenseCatalogReader(NewCachedExpenseCatalogReader(source))
+	service.SetItemizedEmployeeIDs([]string{"employee-1"})
+	claim, err := service.CreateClaim(context.Background(), "employee-1", CreateClaimCommand{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	codes := []string{"LOCAL_TRANSPORT", "DINING"}
+	updated, err := service.UpdateClaim(context.Background(), "employee-1", claim.ID, claim.Version, PatchClaimCommand{SelectedExpenseCategoryCodes: &codes})
+	if err != nil || updated.ExpenseCatalogVersion != 9 || updated.SelectedExpenseCategories[0] != "市区交通费" || updated.SelectedExpenseCategoryCodes[1] != "DINING" {
+		t.Fatalf("selection=%+v err=%v", updated, err)
+	}
+	codes[0] = "OTHER"
+	if updated.SelectedExpenseCategoryCodes[0] != "LOCAL_TRANSPORT" {
+		t.Fatal("selected code slice was not copied")
+	}
+	invalid := []string{"DISABLED"}
+	if _, err := service.UpdateClaim(context.Background(), "employee-1", claim.ID, updated.Version, PatchClaimCommand{SelectedExpenseCategoryCodes: &invalid}); !errors.Is(err, ErrValidationBlocked) {
+		t.Fatalf("disabled category was accepted: %v", err)
+	}
+	source.err = errors.New("catalog unavailable")
+	if _, err := service.UpdateClaim(context.Background(), "employee-1", claim.ID, updated.Version, PatchClaimCommand{SelectedExpenseCategoryCodes: &codes}); err == nil {
+		t.Fatal("new selection accepted without current catalog")
 	}
 }
 

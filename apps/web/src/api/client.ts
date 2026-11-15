@@ -11,9 +11,14 @@ export class ReimbursementApiError extends Error {
 }
 
 export type TokenProvider = { getAccessToken(): string | null; refreshAccessToken(): Promise<string> };
-export type PublishedPolicyRule = { code: string; name: string; type: "CLAIM_TOTAL_MAX" | "CATEGORY_ALLOWED" | "CATEGORY_REQUIRED_FIELD"; severity: "BLOCKING" | "WARNING"; config: { maxAmountCents: number } | { categories: string[] } | { category: string; field: "participants" | "projectCode" } };
+export type PublishedPolicyRule = { code: string; name: string; type: "CLAIM_TOTAL_MAX" | "CATEGORY_ALLOWED" | "CATEGORY_REQUIRED_FIELD"; severity: "BLOCKING" | "WARNING"; config: { maxAmountCents: number } | { categoryCodes: string[] } | { categoryCode: string; field: "participants" | "projectCode" } };
 export type PolicySourceJob = { jobId: string; status: string; failureCode: string | null; resultKind: "SYNCED" | "UNCHANGED" | null };
 export type PolicySource = { id: string; type: "FEISHU_DOCX" | "FEISHU_WIKI"; title: string; canonicalUrl: string; enabled: boolean; lastSuccessfulSyncAt: string | null; lastFailureCode: string | null; sectionCount: number | null; chunkCount: number | null; lastJob: PolicySourceJob | null; createdAt: string; updatedAt: string };
+export type ExpenseCategoryOption = { code: string; label: string; aliases: string[]; enabled: boolean; sortOrder: number };
+export type ExpenseCatalog = { categories: ExpenseCategoryOption[]; mappings: { receiptType: string; categoryCode: string; purposeTemplate: string }[] };
+export type ConfigSnapshot<T> = { domain: string; version: number; payload: T; publishedAt: string };
+export type ConfigDraft<T> = { domain: string; revision: number; payload: T; authorId: string; note: string; approvedBy: string; publishedRevision?: number };
+export type ConfigHistory = { action: string; actorId: string; version: number; previousVersion: number; draftRevision: number; note: string; at: string };
 type RequestOptions = Omit<RequestInit, "body"> & { body?: unknown; idempotent?: boolean };
 type ApiClientDeps = { fetcher?: typeof fetch; randomId?: () => string };
 
@@ -69,6 +74,13 @@ export function createReimbursementApi(tokenProvider: TokenProvider, deps: ApiCl
     requestSubmission: (claimId: string, version: number) => request<SubmissionRequest>(`/api/v1/claims/${encodeURIComponent(claimId)}/submission-requests`, { method: "POST", body: { version }, idempotent: true }),
     submit: (claimId: string, confirmationToken: string) => request<SubmissionSnapshot>(`/api/v1/claims/${encodeURIComponent(claimId)}/submit`, { method: "POST", body: { confirmationToken }, idempotent: true }),
     publishPolicy: (id: string, effectiveDate: string, rules: PublishedPolicyRule[]) => request<{ id: string; status: string }>("/api/v1/admin/policies/publish", { method: "POST", body: { id, effectiveDate, rules }, idempotent: true }),
+    getExpenseCatalog: () => request<ConfigSnapshot<{ categories: ExpenseCategoryOption[] }>>("/api/v1/config/expense_catalog"),
+    getAdminConfig: () => request<{ active?: ConfigSnapshot<ExpenseCatalog>; draft?: ConfigDraft<ExpenseCatalog> }>("/api/v1/admin/config/expense_catalog"),
+    saveConfigDraft: (domain: string, input: { expectedRevision: number; payload: ExpenseCatalog; note: string }) => request<ConfigDraft<ExpenseCatalog>>(`/api/v1/admin/config/${encodeURIComponent(domain)}/draft`, { method: "POST", body: input }),
+    previewConfigDraft: (domain: string, revision: number) => request<{ draft: ConfigDraft<ExpenseCatalog>; active?: ConfigSnapshot<ExpenseCatalog> }>(`/api/v1/admin/config/${encodeURIComponent(domain)}/preview`, { method: "POST", body: { revision } }),
+    publishConfigDraft: (domain: string, revision: number) => request<ConfigSnapshot<ExpenseCatalog>>(`/api/v1/admin/config/${encodeURIComponent(domain)}/publish`, { method: "POST", body: { revision } }),
+    activateConfigVersion: (domain: string, input: { expectedActiveVersion: number; version: number; note: string }) => request<ConfigSnapshot<ExpenseCatalog>>(`/api/v1/admin/config/${encodeURIComponent(domain)}/activate`, { method: "POST", body: input }),
+    listConfigHistory: (domain: string) => request<{ items: ConfigHistory[] }>(`/api/v1/admin/config/${encodeURIComponent(domain)}/history`),
     listPolicySources: () => request<{ sources: PolicySource[] }>("/api/v1/admin/policy-sources"),
     createPolicySource: (input: { title: string; url: string }) => request<PolicySource>("/api/v1/admin/policy-sources", { method: "POST", body: input, idempotent: true }),
     setPolicySourceEnabled: (sourceId: string, enabled: boolean) => request<PolicySource>(`/api/v1/admin/policy-sources/${encodeURIComponent(sourceId)}`, { method: "PATCH", body: { enabled }, idempotent: true }),

@@ -37,6 +37,33 @@ func (repository *memorySessionRepository) DeleteSessionsBySID(_ context.Context
 type statusFunc func(context.Context, string) (bool, error)
 
 func (fn statusFunc) IsActive(ctx context.Context, sid string) (bool, error) { return fn(ctx, sid) }
+func (fn statusFunc) RecordActivity(ctx context.Context, sid string) (bool, error) {
+	return fn(ctx, sid)
+}
+
+func TestSessionActivityRequiresActiveCookieAndSID(t *testing.T) {
+	now := time.Date(2026, 11, 14, 1, 0, 0, 0, time.UTC)
+	repository := &memorySessionRepository{rows: make(map[string]store.SessionRecord)}
+	status := "active"
+	service, err := NewSessionService(repository, statusFunc(func(context.Context, string) (bool, error) { return status == "active", nil }), strings.Repeat("s", 32), func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie, err := service.Create(context.Background(), "employee-1", "sid-1", "signed-id-token", now.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.RecordActivity(context.Background(), cookie); err != nil {
+		t.Fatalf("active activity: %v", err)
+	}
+	status = "expired"
+	if err := service.RecordActivity(context.Background(), cookie); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("expired sid renewed: %v", err)
+	}
+	if err := service.RecordActivity(context.Background(), "invalid"); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("invalid cookie renewed: %v", err)
+	}
+}
 
 func TestSessionStoresOnlyHashedCookieAndEncryptedIDToken(t *testing.T) {
 	now := time.Date(2026, 11, 3, 1, 0, 0, 0, time.UTC)

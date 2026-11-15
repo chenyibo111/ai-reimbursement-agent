@@ -208,3 +208,47 @@ select { width: 100%; min-height: 46px; padding: 0 13px; border: 1px solid #cbd7
 .expense-item-card { display: grid; gap: 1rem; padding: 1rem; border: 1px solid var(--line, #DCE4F0); border-radius: 0.875rem; background: #fff; }
 .expense-item-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 .expense-item-card .secondary-action { justify-self: start; }
+
+.category-selector { margin: 0; padding: 16px; border: 1px solid #dce4f0; border-radius: 12px; }
+.category-selector legend { padding: 0 6px; color: #13233d; font-weight: 700; }
+.category-choice-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 5px; }
+.category-choice { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 13px; border: 1px solid #cbd7e8; border-radius: 10px; background: #fff; font-weight: 600; cursor: pointer; }
+.category-choice:has(input:checked) { border-color: #3569e8; background: #eaf0ff; color: #2857cb; }
+.category-choice:has(input:focus-visible) { outline: 3px solid #3569e8; outline-offset: 3px; }
+.category-choice input, .admin-category-footer input { width: 18px; min-height: 18px; height: 18px; margin: 0; accent-color: #3569e8; }
+.category-review-note { color: #a15c00; }
+.category-readonly { margin: 5px 0 0; font-weight: 700; }
+.admin-config-page > .workbench-panel { margin-bottom: 20px; }
+.admin-config-links { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+.admin-config-links a:not(.secondary-action) { color: #2857cb; font-weight: 700; text-decoration: none; }
+.admin-config-links a:hover { text-decoration: underline; }
+.admin-config-tabs { display: flex; gap: 4px; border-bottom: 1px solid #dce4f0; margin-bottom: 14px; overflow-x: auto; }
+.admin-config-tabs button { flex: none; padding: 13px 18px; border: 0; border-bottom: 3px solid transparent; background: transparent; color: #64748b; font-weight: 700; }
+.admin-config-tabs button:hover { color: #2857cb; background: #eaf0ff; }
+.admin-config-tabs button.is-active { color: #2857cb; border-bottom-color: #3569e8; }
+.admin-config-version { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 0 0 16px; color: #64748b; font-size: .87rem; }
+.admin-config-version strong { color: #13233d; }
+.admin-category-list, .admin-mapping-list { display: grid; gap: 12px; margin-top: 18px; }
+.admin-category-card { min-width: 0; margin: 0; padding: 16px; border: 1px solid #dce4f0; border-radius: 12px; background: #f7f9fc; }
+.admin-category-card legend { padding: 0 6px; font-weight: 700; }
+.admin-config-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.admin-category-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 13px; }
+.admin-category-footer label { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; }
+.admin-category-card input[readonly] { background: #edf2f9; color: #475569; }
+.admin-mapping-row { display: grid; grid-template-columns: 110px minmax(190px, 1fr) minmax(240px, 1.4fr); gap: 12px; align-items: end; padding: 14px; border: 1px solid #dce4f0; border-radius: 12px; }
+.admin-mapping-row strong { align-self: center; }
+.admin-config-publish { max-width: 900px; }
+.admin-config-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+.admin-config-preview { margin-top: 20px; padding: 16px; border-left: 3px solid #3569e8; border-radius: 0 10px 10px 0; background: #f4f7ff; }
+.admin-config-preview h3 { margin: 0 0 8px; }
+.admin-config-preview p { margin: 0; line-height: 1.6; }
+.admin-config-preview ul { margin-bottom: 0; padding-left: 1.3em; line-height: 1.7; }
+.admin-history-list { display: grid; gap: 8px; list-style: none; margin: 18px 0 0; padding: 0; }
+.admin-history-list li { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 16px; border: 1px solid #dce4f0; border-radius: 10px; }
+.admin-history-list li div { display: grid; gap: 3px; }
+.admin-history-list li span { color: #64748b; font-size: .84rem; }
+@media (max-width: 760px) {
+  .admin-config-grid, .admin-mapping-row { grid-template-columns: 1fr; }
+  .admin-config-actions > button { width: 100%; }
+  .admin-history-list li { align-items: stretch; flex-direction: column; }
+}

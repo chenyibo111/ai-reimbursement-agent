@@ -27,7 +27,7 @@ func NewHTTPReceiptClassifier(baseURL, model, apiKey string, timeout time.Durati
 	return &HTTPReceiptClassifier{endpoint: strings.TrimRight(baseURL, "/") + "/chat/completions", model: model, apiKey: apiKey, client: &http.Client{Timeout: timeout}}
 }
 
-func (classifier *HTTPReceiptClassifier) Classify(ctx context.Context, facts application.OCRResult, allowedCategories []string) (application.ClassificationSuggestion, error) {
+func (classifier *HTTPReceiptClassifier) Classify(ctx context.Context, facts application.OCRResult, catalog application.ExpenseCatalog) (application.ClassificationSuggestion, error) {
 	if strings.TrimSpace(facts.Text) == "" {
 		return application.ClassificationSuggestion{ReceiptType: application.ReceiptTypeUnknown}, nil
 	}
@@ -85,5 +85,5 @@ func (classifier *HTTPReceiptClassifier) Classify(ctx context.Context, facts app
 	if err := decoder.Decode(new(any)); err != io.EOF {
 		return application.ClassificationSuggestion{}, fmt.Errorf("classifier JSON contains extra data")
 	}
-	return application.ResolveClassification(output.ReceiptType, output.Evidence, output.Confidence, text, allowedCategories), nil
+	return application.ResolveClassification(output.ReceiptType, output.Evidence, output.Confidence, text, catalog), nil
 }

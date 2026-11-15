@@ -26,16 +26,17 @@ type CreateClaimCommand struct {
 }
 
 type PatchClaimCommand struct {
-	Purpose                   *string
-	ExpenseCategory           *string
-	SelectedExpenseCategories *[]string
-	Participants              *[]string
-	ProjectCode               *string
-	RequestedAmountCent       *int64
-	Currency                  *string
-	Remark                    *string
-	UseOCRSuggestedAmount     bool
-	UnknownFields             []string
+	Purpose                      *string
+	ExpenseCategory              *string
+	SelectedExpenseCategories    *[]string
+	SelectedExpenseCategoryCodes *[]string
+	Participants                 *[]string
+	ProjectCode                  *string
+	RequestedAmountCent          *int64
+	Currency                     *string
+	Remark                       *string
+	UseOCRSuggestedAmount        bool
+	UnknownFields                []string
 }
 
 type ClaimView = domain.Claim
@@ -95,10 +96,15 @@ type IDGenerator interface {
 type ClaimService struct {
 	repository        ClaimRepository
 	suggestions       ClaimOCRSuggestionRefresher
+	catalog           *CachedExpenseCatalogReader
 	itemizedEmployees map[string]struct{}
 	ids               IDGenerator
 	numbers           ClaimNumberGenerator
 	now               func() time.Time
+}
+
+func (service *ClaimService) SetExpenseCatalogReader(reader *CachedExpenseCatalogReader) {
+	service.catalog = reader
 }
 
 func (service *ClaimService) SetItemizedEmployeeIDs(ids []string) {
@@ -164,16 +170,42 @@ func (service *ClaimService) UpdateClaim(ctx context.Context, actorID string, cl
 	if claim.ItemizationMode == domain.ClaimItemizationModeItemized && command.ExpenseCategory != nil {
 		return ClaimView{}, ErrItemizedFieldsRequireItem
 	}
+	if command.SelectedExpenseCategoryCodes != nil {
+		if command.SelectedExpenseCategories != nil || service.catalog == nil {
+			return ClaimView{}, ErrValidationBlocked
+		}
+		catalog, version, err := service.catalog.LoadCurrent(ctx)
+		if err != nil {
+			return ClaimView{}, fmt.Errorf("load expense catalog for selection: %w", err)
+		}
+		labels := make([]string, 0, len(*command.SelectedExpenseCategoryCodes))
+		for _, code := range *command.SelectedExpenseCategoryCodes {
+			found := false
+			for _, category := range catalog.Categories {
+				if category.Code == code && category.Enabled {
+					labels = append(labels, category.Label)
+					found = true
+					break
+				}
+			}
+			if !found {
+				return ClaimView{}, ErrValidationBlocked
+			}
+		}
+		command.SelectedExpenseCategories = &labels
+		claim.ExpenseCatalogVersion = version
+	}
 	patch := domain.ClaimPatch{
-		Purpose:                   command.Purpose,
-		ExpenseCategory:           command.ExpenseCategory,
-		SelectedExpenseCategories: command.SelectedExpenseCategories,
-		Participants:              command.Participants,
-		ProjectCode:               command.ProjectCode,
-		RequestedAmountCent:       command.RequestedAmountCent,
-		Currency:                  command.Currency,
-		Remark:                    command.Remark,
-		UseOCRSuggestedAmount:     command.UseOCRSuggestedAmount,
+		Purpose:                      command.Purpose,
+		ExpenseCategory:              command.ExpenseCategory,
+		SelectedExpenseCategories:    command.SelectedExpenseCategories,
+		SelectedExpenseCategoryCodes: command.SelectedExpenseCategoryCodes,
+		Participants:                 command.Participants,
+		ProjectCode:                  command.ProjectCode,
+		RequestedAmountCent:          command.RequestedAmountCent,
+		Currency:                     command.Currency,
+		Remark:                       command.Remark,
+		UseOCRSuggestedAmount:        command.UseOCRSuggestedAmount,
 	}
 	if err := claim.Patch(expectedVersion, patch); err != nil {
 		if errors.Is(err, domain.ErrClaimVersionConflict) {

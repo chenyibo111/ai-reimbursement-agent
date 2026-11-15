@@ -36,6 +36,7 @@ func TestPostgresPolicyVersionInvalidatesSubmissionAndBlocksNewRequest(t *testin
 		_, _ = pool.Exec(ctx, `DELETE FROM reimbursement.outbox_events WHERE aggregate_id=$1`, claimID)
 		_, _ = pool.Exec(ctx, `DELETE FROM reimbursement.claim_audits WHERE claim_id=$1`, claimID)
 		_, _ = pool.Exec(ctx, `DELETE FROM reimbursement.policy_versions WHERE id IN ($1,$2,$3,$4)`, policy1, policy2, policy3, futurePolicy)
+		_, _ = pool.Exec(ctx, `DELETE FROM reimbursement.expense_items WHERE receipt_id=$1`, receiptID)
 		_, _ = pool.Exec(ctx, `DELETE FROM reimbursement.receipts WHERE id=$1`, receiptID)
 		_, _ = pool.Exec(ctx, `DELETE FROM reimbursement.claims WHERE id=$1`, claimID)
 		_, _ = pool.Exec(ctx, `DELETE FROM reimbursement.employees WHERE id=$1`, actor)
@@ -43,10 +44,13 @@ func TestPostgresPolicyVersionInvalidatesSubmissionAndBlocksNewRequest(t *testin
 	if _, err := pool.Exec(ctx, `INSERT INTO reimbursement.employees (id,display_name,role) VALUES ($1,'Policy test','ADMIN')`, actor); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO reimbursement.claims (id,owner_id,purpose,requested_amount_cent,requested_amount_source) VALUES ($1,$2,'Policy test claim',12000,'MANUAL')`, claimID, actor); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO reimbursement.claims (id,owner_id,purpose,requested_amount_cent,requested_amount_source,itemization_mode,selected_expense_categories,selected_expense_category_codes,expense_catalog_version) VALUES ($1,$2,'Policy test claim',12000,'MANUAL','ITEMIZED',ARRAY['旧交通费'],ARRAY['LOCAL_TRANSPORT'],7)`, claimID, actor); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO reimbursement.receipts (id,claim_id,owner_id,filename,content_type,expected_size,object_key,status,ocr_confidence) VALUES ($1,$2,$3,'invoice.png','image/png',1,$4,'EXTRACTED',0.99)`, receiptID, claimID, actor, "test/"+receiptID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO reimbursement.expense_items(id,claim_id,receipt_id,expense_category,category_code,expense_catalog_version,amount_cent) VALUES ($1,$2,$1,'旧交通费','LOCAL_TRANSPORT',7,12000)`, receiptID, claimID); err != nil {
 		t.Fatal(err)
 	}
 	rules := func(limit int64) []application.PolicyRule {
@@ -104,6 +108,11 @@ func TestPostgresPolicyVersionInvalidatesSubmissionAndBlocksNewRequest(t *testin
 	var recordedIssues int
 	if err := pool.QueryRow(ctx, `SELECT jsonb_array_length(snapshot->'policyIssues') FROM reimbursement.submission_snapshots WHERE claim_id=$1`, claimID).Scan(&recordedIssues); err != nil || recordedIssues != 1 {
 		t.Fatalf("recorded issues=%d err=%v", recordedIssues, err)
+	}
+	var historicalName, historicalCode string
+	var catalogVersion int64
+	if err := pool.QueryRow(ctx, `SELECT snapshot->'claim'->'SelectedExpenseCategories'->>0,snapshot->'claim'->'SelectedExpenseCategoryCodes'->>0,(snapshot->'claim'->>'ExpenseCatalogVersion')::bigint FROM reimbursement.submission_snapshots WHERE claim_id=$1`, claimID).Scan(&historicalName, &historicalCode, &catalogVersion); err != nil || historicalName != "旧交通费" || historicalCode != "LOCAL_TRANSPORT" || catalogVersion != 7 {
+		t.Fatalf("historical snapshot name=%q code=%q version=%d err=%v", historicalName, historicalCode, catalogVersion, err)
 	}
 	owned, err := NewPostgresClaimRepository(pool).FindOwned(ctx, claimID, actor)
 	if err != nil || len(owned.SubmissionWarnings) != 1 || owned.SubmissionWarnings[0].Code != "POLICY_TOTAL" {

@@ -26,6 +26,7 @@ type SessionRepository interface {
 
 type SIDStatus interface {
 	IsActive(context.Context, string) (bool, error)
+	RecordActivity(context.Context, string) (bool, error)
 }
 
 type ActiveSession struct {
@@ -95,6 +96,21 @@ func (service *SessionService) Active(ctx context.Context, cookie string) (Activ
 		return ActiveSession{}, ErrUnauthenticated
 	}
 	return ActiveSession{EmployeeID: record.EmployeeID, SID: record.SID, IDToken: idToken}, nil
+}
+
+func (service *SessionService) RecordActivity(ctx context.Context, cookie string) error {
+	session, err := service.Active(ctx, cookie)
+	if err != nil {
+		return err
+	}
+	active, err := service.status.RecordActivity(ctx, session.SID)
+	if err != nil {
+		return ErrUnavailable
+	}
+	if !active {
+		return ErrUnauthenticated
+	}
+	return nil
 }
 
 func (service *SessionService) DeleteBySID(ctx context.Context, sid string) error {

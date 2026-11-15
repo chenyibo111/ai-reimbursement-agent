@@ -5,6 +5,37 @@ import { createAuthSessionManager } from "./session";
 const employee = { id: "employee-1", displayName: "测试员工", role: "EMPLOYEE" as const };
 
 describe("createAuthSessionManager", () => {
+  it("throttles failed activity reports during an SSO rollout", async () => {
+    let current = new Date("2026-11-14T01:00:00.000Z");
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(tokenResponse("token-1", "2026-11-14T01:15:00.000Z"))
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const manager = createAuthSessionManager({ fetcher, now: () => current });
+    await manager.initialize();
+    await manager.recordActivity();
+    await manager.recordActivity();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    current = new Date("2026-11-14T01:01:01.000Z");
+    await manager.recordActivity();
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+  it("reports real input at most once a minute and treats an expired SSO session as logged out", async () => {
+    let current = new Date("2026-11-14T01:00:00.000Z");
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(tokenResponse("token-1", "2026-11-14T01:15:00.000Z"))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(null, { status: 401 }));
+    const manager = createAuthSessionManager({ fetcher, now: () => current });
+    await manager.initialize();
+    await manager.recordActivity();
+    await manager.recordActivity();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenNthCalledWith(2, "/api/auth/activity", { method: "POST", credentials: "same-origin", headers: { "X-SSO-Activity": "1" } });
+    current = new Date("2026-11-14T01:01:01.000Z");
+    await manager.recordActivity();
+    expect(manager.snapshot()).toEqual({ status: "unauthenticated" });
+  });
   it("keeps the access token only in memory after startup", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(tokenResponse("token-1", "2026-10-08T01:00:00.000Z"));
     const manager = createAuthSessionManager({ fetcher, now: () => new Date("2026-10-08T00:00:00.000Z") });
