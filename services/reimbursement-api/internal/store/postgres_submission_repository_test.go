@@ -143,6 +143,19 @@ func TestBlockingSubmissionInputRequiresItemAmount(t *testing.T) {
 	}
 }
 
+func TestBlockingSubmissionInputUsesPersistedReceiptStatus(t *testing.T) {
+	amount := int64(1000)
+	claim := domain.Claim{Status: domain.ClaimStatusDraft, Purpose: "客户拜访", RequestedAmountCent: &amount}
+	receipts := []domain.Receipt{{Status: domain.ReceiptStatusExtracted, OCRConfidence: 0.65}}
+	if blockingSubmissionInput(claim, receipts, nil) {
+		t.Fatal("extracted receipt was reclassified using its old OCR confidence")
+	}
+	receipts[0].Status = domain.ReceiptStatusReview
+	if !blockingSubmissionInput(claim, receipts, nil) {
+		t.Fatal("review-required receipt was allowed")
+	}
+}
+
 type fixedSubmissionClock struct{ now time.Time }
 
 func (clock fixedSubmissionClock) Now() time.Time { return clock.now }

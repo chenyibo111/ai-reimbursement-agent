@@ -196,9 +196,6 @@ func validateSubmissionInput(input SubmissionInput) []domain.ValidationIssue {
 		if receipt.Status != domain.ReceiptStatusExtracted {
 			issues = append(issues, domain.ValidationIssue{Code: "RECEIPT_NOT_EXTRACTED", Message: "票据尚未完成识别", Blocking: true})
 		}
-		if receipt.OCRConfidence > 0 && receipt.OCRConfidence < 0.7 {
-			issues = append(issues, domain.ValidationIssue{Code: "LOW_OCR_CONFIDENCE", Message: "票据识别置信度过低", Blocking: true})
-		}
 	}
 	return issues
 }

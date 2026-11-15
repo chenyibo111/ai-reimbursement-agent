@@ -2,11 +2,53 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/domain"
 )
+
+type receiptReviewConfigReader struct {
+	snapshot domain.ConfigSnapshot
+	err      error
+}
+
+func (reader *receiptReviewConfigReader) GetActive(context.Context, string) (domain.ConfigSnapshot, error) {
+	return reader.snapshot, reader.err
+}
+
+func TestReviewThresholdChangeOnlyAffectsLaterOCR(t *testing.T) {
+	service := newReceiptServiceForTest(t)
+	reader := &receiptReviewConfigReader{snapshot: domain.ConfigSnapshot{Version: 2, Payload: json.RawMessage(`{"lowOcrConfidenceThreshold":0.7}`)}}
+	service.SetReceiptReviewConfigReader(reader)
+	for index, expectedReview := range []bool{false, true} {
+		receipt, err := service.CreateUploadSession(context.Background(), "employee-1", "claim-1", CreateUploadSessionCommand{Filename: "invoice.pdf", ContentType: "application/pdf", SizeBytes: 1024})
+		if err != nil {
+			t.Fatal(err)
+		}
+		service.objects.Put(receipt.ObjectKey, "application/pdf", append(validPDF(), byte('0'+index)))
+		if err := service.FinalizeReceiptUpload(context.Background(), "employee-1", "claim-1", receipt.ReceiptID); err != nil {
+			t.Fatal(err)
+		}
+		service.ocr.result = OCRResult{Confidence: 0.75}
+		if expectedReview {
+			reader.snapshot = domain.ConfigSnapshot{Version: 3, Payload: json.RawMessage(`{"lowOcrConfidenceThreshold":0.8}`)}
+		}
+		err = service.ExtractReceipt(context.Background(), "employee-1", "claim-1", receipt.ReceiptID)
+		stored, readErr := service.repository.FindOwned(context.Background(), receipt.ReceiptID, "claim-1", "employee-1")
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if expectedReview {
+			if !errors.Is(err, ErrLowOCRConfidence) || stored.Status != domain.ReceiptStatusReview {
+				t.Fatalf("new threshold did not flag later receipt: status=%s err=%v", stored.Status, err)
+			}
+		} else if err != nil || stored.Status != domain.ReceiptStatusExtracted {
+			t.Fatalf("original threshold flagged old receipt: status=%s err=%v", stored.Status, err)
+		}
+	}
+}
 
 func TestExtractReceiptFlagsDuplicateSubmittedInvoice(t *testing.T) {
 	service := newReceiptServiceForTest(t)

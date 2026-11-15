@@ -18,6 +18,7 @@ type configReadRepository struct{ application.ConfigRepository }
 type employeeCatalogRepository struct{ application.ConfigRepository }
 
 type employeeFormOptionsRepository struct{ application.ConfigRepository }
+type employeeReviewLabelsRepository struct{ application.ConfigRepository }
 
 type configPopulationStub struct{}
 
@@ -43,6 +44,23 @@ func TestConfigHandlerRolloutAudienceRequiresAdminAndReturnsCount(t *testing.T) 
 
 func (employeeFormOptionsRepository) GetActive(context.Context, string) (domain.ConfigSnapshot, error) {
 	return domain.ConfigSnapshot{Domain: "form_options", Version: 4, Payload: []byte(`{"categoryHelpText":"请核对最终类别","projectCodeMode":"FREE_TEXT","projectCodes":[],"fieldOrder":["purpose","expenseCategory","projectCode","participants","requestedAmountCent","currency","remark"]}`)}, nil
+}
+
+func (employeeReviewLabelsRepository) GetActive(context.Context, string) (domain.ConfigSnapshot, error) {
+	return domain.ConfigSnapshot{Domain: "receipt_review", Version: 5, Payload: []byte(`{"lowOcrConfidenceThreshold":0.8,"reasonLabels":{"OCR_LOW_CONFIDENCE":"请核对票据内容"}}`)}, nil
+}
+
+func TestConfigHandlerEmployeeReadsReviewLabelsWithoutThreshold(t *testing.T) {
+	service := application.NewConfigService(employeeReviewLabelsRepository{})
+	service.RegisterValidator("receipt_review", application.ValidateReceiptReviewConfigPayload)
+	handler := &configHandler{service: service}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/config/receipt_review_labels", nil)
+	request.SetPathValue("domain", "receipt_review_labels")
+	response := httptest.NewRecorder()
+	handler.getPublic(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "请核对票据内容") || strings.Contains(response.Body.String(), "lowOcrConfidenceThreshold") {
+		t.Fatalf("employee review labels=%d %s", response.Code, response.Body.String())
+	}
 }
 
 func (employeeCatalogRepository) GetActive(context.Context, string) (domain.ConfigSnapshot, error) {

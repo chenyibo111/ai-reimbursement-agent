@@ -312,7 +312,7 @@ func blockingSubmissionInput(claim domain.Claim, receipts []domain.Receipt, item
 		}
 	}
 	for _, receipt := range receipts {
-		if receipt.Status != domain.ReceiptStatusExtracted || (receipt.OCRConfidence > 0 && receipt.OCRConfidence < 0.7) {
+		if receipt.Status != domain.ReceiptStatusExtracted {
 			return true
 		}
 	}

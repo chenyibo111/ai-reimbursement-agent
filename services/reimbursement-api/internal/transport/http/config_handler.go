@@ -94,6 +94,15 @@ func (handler *configHandler) preview(response http.ResponseWriter, request *htt
 		writeConfigError(response, err)
 		return
 	}
+	if request.PathValue("domain") == "receipt_review" {
+		impact, err := handler.service.PreviewReceiptReviewImpact(request.Context(), body.Revision)
+		if err != nil {
+			writeConfigError(response, err)
+			return
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"draft": preview.Draft, "active": preview.Active, "impact": impact})
+		return
+	}
 	writeJSON(response, http.StatusOK, preview)
 }
 
@@ -187,6 +196,27 @@ func (handler *configHandler) rolloutAudience(response http.ResponseWriter, requ
 
 func (handler *configHandler) getPublic(response http.ResponseWriter, request *http.Request) {
 	configDomain := request.PathValue("domain")
+	if configDomain == "receipt_review_labels" {
+		snapshot, err := handler.service.GetActive(request.Context(), "receipt_review")
+		if errors.Is(err, application.ErrConfigNotFound) {
+			writeJSON(response, http.StatusOK, map[string]any{"version": 0, "reasonLabels": map[string]string{}})
+			return
+		}
+		if err != nil {
+			writeConfigError(response, err)
+			return
+		}
+		var payload application.ReceiptReviewConfig
+		if err := json.Unmarshal(snapshot.Payload, &payload); err != nil {
+			writeConfigError(response, err)
+			return
+		}
+		if payload.ReasonLabels == nil {
+			payload.ReasonLabels = map[string]string{}
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"version": snapshot.Version, "reasonLabels": payload.ReasonLabels})
+		return
+	}
 	if configDomain != "expense_catalog" && configDomain != "form_options" {
 		configForbidden(response)
 		return

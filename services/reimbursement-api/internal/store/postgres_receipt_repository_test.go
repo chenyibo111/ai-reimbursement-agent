@@ -12,6 +12,54 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+func TestPostgresReceiptPersistsReviewConfigVersionForRecognitionAndCase(t *testing.T) {
+	databaseURL := os.Getenv("TEST_REIMBURSEMENT_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_REIMBURSEMENT_DATABASE_URL is not configured")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	suffix := time.Now().UTC().Format("20060102150405.000000000")
+	ownerID, claimID := "review-config-owner-"+suffix, "review-config-claim-"+suffix
+	if _, err := pool.Exec(ctx, `INSERT INTO reimbursement.employees(id,display_name) VALUES ($1,'Review Config Test')`, ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO reimbursement.claims(id,owner_id,purpose) VALUES ($1,$2,'Review Config Test')`, claimID, ownerID); err != nil {
+		t.Fatal(err)
+	}
+	repository := NewPostgresReceiptRepository(pool)
+	for index, version := range []int64{4, 5} {
+		receiptID := "review-config-receipt-" + suffix + string(rune('a'+index))
+		now := time.Now().UTC()
+		if err := repository.Create(ctx, domain.Receipt{ID: receiptID, ClaimID: claimID, OwnerID: ownerID, Filename: "invoice.pdf", ContentType: "application/pdf", ExpectedSize: 100, ObjectKey: "test/" + receiptID, Status: domain.ReceiptStatusReadyForOCR, CreatedAt: now, UpdatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+		result := application.OCRResult{Confidence: 0.75, ReviewConfigVersion: version}
+		if index == 0 {
+			err = repository.MarkExtracted(ctx, receiptID, result)
+		} else {
+			err = repository.TransitionToReview(ctx, receiptID, "OCR_LOW_CONFIDENCE", &result)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		var storedVersion int64
+		if err := pool.QueryRow(ctx, `SELECT review_config_version FROM reimbursement.receipts WHERE id=$1`, receiptID).Scan(&storedVersion); err != nil || storedVersion != version {
+			t.Fatalf("receipt version=%d err=%v", storedVersion, err)
+		}
+		if index == 1 {
+			var caseVersion int64
+			if err := pool.QueryRow(ctx, `SELECT review_config_version FROM reimbursement.review_cases WHERE receipt_id=$1`, receiptID).Scan(&caseVersion); err != nil || caseVersion != version {
+				t.Fatalf("case version=%d err=%v", caseVersion, err)
+			}
+		}
+	}
+}
+
 func TestPostgresReceiptCreateRequiresDraftAndAdvancesClaimVersion(t *testing.T) {
 	databaseURL := os.Getenv("TEST_REIMBURSEMENT_DATABASE_URL")
 	if databaseURL == "" {

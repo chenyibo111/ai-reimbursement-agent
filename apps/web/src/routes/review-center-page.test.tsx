@@ -12,6 +12,7 @@ const api = vi.hoisted(() => ({
   getReviewReceiptPreview: vi.fn(),
   claimReview: vi.fn(),
   resolveReview: vi.fn(),
+  getReceiptReviewLabels: vi.fn(),
 }));
 const ApiError = vi.hoisted(() => class extends Error {
   code: string;
@@ -34,6 +35,7 @@ function renderReviewCenter() {
 describe("ReviewCenterPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    api.getReceiptReviewLabels.mockResolvedValue({ version: 0, reasonLabels: {} });
   });
 
   afterEach(() => {
@@ -55,6 +57,15 @@ describe("ReviewCenterPage", () => {
     expect(screen.queryByText("review-1")).toBeNull();
     await user.click(await screen.findByRole("button", { name: "领取案件" }));
     await waitFor(() => expect(api.claimReview).toHaveBeenCalledWith("review-1", 2));
+  });
+
+  it("uses the published review reason label without changing the reason code", async () => {
+    api.listReviews.mockResolvedValue({ items: [openCase] });
+    api.getReview.mockResolvedValue(openCase);
+    api.getReceiptReviewLabels.mockResolvedValue({ version: 5, reasonLabels: { OCR_LOW_CONFIDENCE: "请核对票据内容" } });
+    renderReviewCenter();
+    expect((await screen.findAllByText("请核对票据内容")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("OCR_LOW_CONFIDENCE")).toBeNull();
   });
 
   it("shows an empty state when the queue has no cases", async () => {

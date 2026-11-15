@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/domain"
@@ -86,12 +87,13 @@ type FileScanner interface {
 }
 
 type OCRResult struct {
-	Text            string
-	InvoiceNumber   string
-	InvoiceDate     *time.Time
-	TotalAmountCent *int64
-	SellerName      *string
-	Confidence      float64
+	Text                string
+	InvoiceNumber       string
+	InvoiceDate         *time.Time
+	TotalAmountCent     *int64
+	SellerName          *string
+	Confidence          float64
+	ReviewConfigVersion int64
 }
 
 type OCRClient interface {
@@ -136,8 +138,48 @@ type ReceiptService struct {
 	expenseItems                             ExpenseItemSuggester
 	classifier                               ReceiptClassifier
 	classificationCatalog                    *CachedExpenseCatalogReader
+	reviewConfigReader                       ReceiptReviewConfigReader
+	reviewConfigMu                           sync.RWMutex
+	lastReviewConfig                         *publishedReceiptReviewConfig
 	allowDuplicateContentForTesting          bool
 	allowDuplicateSubmittedInvoiceForTesting bool
+}
+
+type publishedReceiptReviewConfig struct {
+	config  ReceiptReviewConfig
+	version int64
+}
+
+func (service *ReceiptService) SetReceiptReviewConfigReader(reader ReceiptReviewConfigReader) {
+	service.reviewConfigReader = reader
+}
+
+func (service *ReceiptService) currentReviewConfig(ctx context.Context) (ReceiptReviewConfig, int64, error) {
+	defaultConfig := ReceiptReviewConfig{LowOCRConfidenceThreshold: DefaultLowOCRConfidenceThreshold}
+	if service.reviewConfigReader == nil {
+		return defaultConfig, 0, nil
+	}
+	snapshot, err := service.reviewConfigReader.GetActive(ctx, "receipt_review")
+	if err == nil {
+		config, decodeErr := decodeReceiptReviewConfig(snapshot.Payload)
+		if decodeErr == nil {
+			service.reviewConfigMu.Lock()
+			service.lastReviewConfig = &publishedReceiptReviewConfig{config: config, version: snapshot.Version}
+			service.reviewConfigMu.Unlock()
+			return config, snapshot.Version, nil
+		}
+		err = decodeErr
+	}
+	service.reviewConfigMu.RLock()
+	last := service.lastReviewConfig
+	service.reviewConfigMu.RUnlock()
+	if last != nil {
+		return last.config, last.version, nil
+	}
+	if errors.Is(err, ErrConfigNotFound) {
+		return defaultConfig, 0, nil
+	}
+	return ReceiptReviewConfig{}, 0, fmt.Errorf("read active receipt review config: %w", err)
 }
 
 func (service *ReceiptService) SetExpenseItemSuggester(items ExpenseItemSuggester) {
@@ -370,6 +412,11 @@ func (service *ReceiptService) ExtractReceipt(ctx context.Context, actorID strin
 	if err != nil {
 		return fmt.Errorf("extract receipt: %w", err)
 	}
+	reviewConfig, reviewConfigVersion, err := service.currentReviewConfig(ctx)
+	if err != nil {
+		return err
+	}
+	result.ReviewConfigVersion = reviewConfigVersion
 	if result.InvoiceNumber != "" {
 		exists, err := service.repository.HasSubmittedInvoice(ctx, result.InvoiceNumber)
 		if err != nil {
@@ -387,7 +434,7 @@ func (service *ReceiptService) ExtractReceipt(ctx context.Context, actorID strin
 			return ErrDuplicateSubmittedInvoice
 		}
 	}
-	if result.Confidence > 0 && result.Confidence < 0.7 {
+	if result.Confidence > 0 && result.Confidence < reviewConfig.LowOCRConfidenceThreshold {
 		if err := service.repository.TransitionToReview(ctx, receipt.ID, "OCR_LOW_CONFIDENCE", &result); err != nil {
 			return fmt.Errorf("flag low-confidence receipt: %w", err)
 		}

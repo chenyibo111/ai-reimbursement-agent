@@ -41,6 +41,58 @@ type ConfigService struct {
 	saveValidators    map[string]func(context.Context, json.RawMessage) error
 	publishValidators map[string]func(context.Context, json.RawMessage) error
 	rolloutPopulation FeatureRolloutPopulationReader
+	reviewSamples     ReceiptReviewSampleReader
+}
+
+type ReceiptReviewSampleReader interface {
+	RecentOCRConfidences(context.Context, int) ([]float64, error)
+}
+
+type ReceiptReviewImpact struct {
+	RecentSampleCount  int `json:"recentSampleCount"`
+	NewReviewCount     int `json:"newReviewCount"`
+	ReducedReviewCount int `json:"reducedReviewCount"`
+}
+
+func (service *ConfigService) SetReceiptReviewSampleReader(reader ReceiptReviewSampleReader) {
+	service.reviewSamples = reader
+}
+
+func (service *ConfigService) PreviewReceiptReviewImpact(ctx context.Context, revision int64) (ReceiptReviewImpact, error) {
+	preview, err := service.PreviewDraft(ctx, "receipt_review", revision)
+	if err != nil {
+		return ReceiptReviewImpact{}, err
+	}
+	if service.reviewSamples == nil {
+		return ReceiptReviewImpact{}, ErrConfigValidatorUnavailable
+	}
+	next, err := decodeReceiptReviewConfig(preview.Draft.Payload)
+	if err != nil {
+		return ReceiptReviewImpact{}, err
+	}
+	previous := ReceiptReviewConfig{LowOCRConfidenceThreshold: DefaultLowOCRConfidenceThreshold}
+	if preview.Active != nil {
+		previous, err = decodeReceiptReviewConfig(preview.Active.Payload)
+		if err != nil {
+			return ReceiptReviewImpact{}, err
+		}
+	}
+	confidences, err := service.reviewSamples.RecentOCRConfidences(ctx, 500)
+	if err != nil {
+		return ReceiptReviewImpact{}, err
+	}
+	impact := ReceiptReviewImpact{RecentSampleCount: len(confidences)}
+	for _, confidence := range confidences {
+		before := confidence > 0 && confidence < previous.LowOCRConfidenceThreshold
+		after := confidence > 0 && confidence < next.LowOCRConfidenceThreshold
+		if after && !before {
+			impact.NewReviewCount++
+		}
+		if before && !after {
+			impact.ReducedReviewCount++
+		}
+	}
+	return impact, nil
 }
 
 type FeatureRolloutPopulationReader interface {
