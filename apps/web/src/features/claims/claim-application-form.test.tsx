@@ -12,6 +12,7 @@ vi.mock("../../api/client", () => ({
     updateClaim: vi.fn(),
 		updateExpenseItem: vi.fn(),
     getExpenseCatalog: vi.fn(),
+    getFormOptions: vi.fn(),
     requestSubmission: vi.fn(),
     submit: vi.fn(),
   },
@@ -37,6 +38,17 @@ function renderForm(claim: Claim = manualClaim) {
 }
 
 describe("ClaimApplicationForm", () => {
+  it("shows published category guidance and form field order without changing an existing draft value", async () => {
+    vi.mocked(reimbursementApi.getFormOptions).mockResolvedValue({ domain: "form_options", version: 2, publishedAt: "2026-11-15T00:00:00Z", payload: { categoryHelpText: "选择实际报销类别", projectCodeMode: "FREE_TEXT", projectCodes: [], fieldOrder: ["projectCode", "purpose", "expenseCategory", "participants", "requestedAmountCent", "currency", "remark"] } });
+    const claim: Claim = { ...manualClaim, itemizationMode: "ITEMIZED", projectCode: "OLD-42", expenseItems: [] };
+    const { container } = renderForm(claim);
+    const form = within(container);
+    expect(await form.findByText("选择实际报销类别")).toBeVisible();
+    expect(form.getByLabelText("项目编码")).toHaveValue("OLD-42");
+    const project = form.getByLabelText("项目编码");
+    const purpose = form.getByLabelText(/报销事由/);
+    expect(project.compareDocumentPosition(purpose) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
   it("submits an itemized claim in one action when its requested amount differs from receipt totals", async () => {
     const user = userEvent.setup();
     const claim: Claim = { ...manualClaim, itemizationMode: "ITEMIZED", expenseItems: [{ id: "item-1", receiptId: "receipt-1", claimId: "claim-1", receiptType: "TAXI", expenseCategory: "交通费", categorySource: "MANUAL", purpose: "市内出行打车费", purposeSource: "MODEL", amountCent: 10155, amountSource: "OCR", projectCode: "", participants: [] }] };
@@ -120,7 +132,10 @@ describe("ClaimApplicationForm", () => {
 		expect(reimbursementApi.updateClaim).toHaveBeenCalledWith("claim-1", expect.objectContaining({ projectCode: "PROJ-42", participants: ["张三", "李四"] }));
 	});
 	afterEach(cleanup);
-	beforeEach(() => vi.clearAllMocks());
+	beforeEach(() => {
+		vi.clearAllMocks();
+		vi.mocked(reimbursementApi.getFormOptions).mockResolvedValue({ domain: "form_options", version: 1, publishedAt: "2026-11-01T00:00:00Z", payload: { categoryHelpText: "", projectCodeMode: "FREE_TEXT", projectCodes: [], fieldOrder: [] } });
+	});
 
   it("converts decimal CNY text to exact cents without floating point", () => {
     expect(parseCNYAmountToCent("101.55")).toEqual({ cents: 10155 });

@@ -49,6 +49,7 @@ func main() {
 	claimRepository := store.NewPostgresClaimRepository(pool)
 	configService := application.NewConfigService(store.NewPostgresConfigRepository(pool))
 	configService.RegisterValidator("expense_catalog", application.ValidateExpenseCatalogPayload)
+	configService.RegisterValidator("form_options", application.ValidateFormOptionsPayload)
 	configService.RegisterPublishValidator("expense_catalog", func(ctx context.Context, payload json.RawMessage) error {
 		return application.ValidateExpenseCatalogPolicyReferences(ctx, payload, store.NewPostgresSubmissionRepository(pool))
 	})

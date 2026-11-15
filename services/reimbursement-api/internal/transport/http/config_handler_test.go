@@ -17,6 +17,12 @@ type configReadRepository struct{ application.ConfigRepository }
 
 type employeeCatalogRepository struct{ application.ConfigRepository }
 
+type employeeFormOptionsRepository struct{ application.ConfigRepository }
+
+func (employeeFormOptionsRepository) GetActive(context.Context, string) (domain.ConfigSnapshot, error) {
+	return domain.ConfigSnapshot{Domain: "form_options", Version: 4, Payload: []byte(`{"categoryHelpText":"请核对最终类别","projectCodeMode":"FREE_TEXT","projectCodes":[],"fieldOrder":["purpose","expenseCategory","projectCode","participants","requestedAmountCent","currency","remark"]}`)}, nil
+}
+
 func (employeeCatalogRepository) GetActive(context.Context, string) (domain.ConfigSnapshot, error) {
 	return domain.ConfigSnapshot{Domain: "expense_catalog", Version: 2, Payload: []byte(`{"categories":[{"code":"DINING","label":"餐饮费","enabled":true},{"code":"OLD","label":"旧类别","enabled":false}],"mappings":[{"receiptType":"DINING","categoryCode":"DINING","purposeTemplate":"餐饮费用"}]}`)}, nil
 }
@@ -101,6 +107,19 @@ func TestConfigHandlerEmployeeReadHidesDisabledCategoriesAndMappings(t *testing.
 	handler.getPublic(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "餐饮费") || strings.Contains(response.Body.String(), "旧类别") || strings.Contains(response.Body.String(), "mappings") {
 		t.Fatalf("employee catalog response=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestConfigHandlerEmployeeReadsPublishedFormOptions(t *testing.T) {
+	service := application.NewConfigService(employeeFormOptionsRepository{})
+	service.RegisterValidator("form_options", application.ValidateFormOptionsPayload)
+	handler := &configHandler{service: service}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/config/form_options", nil)
+	request.SetPathValue("domain", "form_options")
+	response := httptest.NewRecorder()
+	handler.getPublic(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"version":4`) || !strings.Contains(response.Body.String(), "请核对最终类别") {
+		t.Fatalf("employee form options response=%d %s", response.Code, response.Body.String())
 	}
 }
 

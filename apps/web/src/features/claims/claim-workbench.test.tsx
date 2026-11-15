@@ -10,6 +10,7 @@ import { shouldRefreshClaimAfterReceiptTransition } from "./use-claim";
 vi.mock("../../api/client", () => ({
   reimbursementApi: {
     getExpenseCatalog: vi.fn().mockResolvedValue({ domain: "expense_catalog", version: 1, payload: { categories: [] }, publishedAt: "2026-11-01T00:00:00Z" }),
+    getFormOptions: vi.fn().mockResolvedValue({ domain: "form_options", version: 1, payload: { categoryHelpText: "", projectCodeMode: "FREE_TEXT", projectCodes: [], fieldOrder: [] }, publishedAt: "2026-11-01T00:00:00Z" }),
     getClaim: vi.fn().mockResolvedValue({
       id: "claim-1",
 		claimNumber: "BX20261007-0001",

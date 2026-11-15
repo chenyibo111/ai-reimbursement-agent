@@ -3,6 +3,7 @@ import { Link, Navigate, Route, Routes, useParams } from "react-router-dom";
 
 import { ClaimWorkbenchPage } from "./routes/claim-workbench-page";
 import { AdminConfigPage } from "./routes/admin-config-page";
+import { AdminFormOptionsPage } from "./routes/admin-form-options-page";
 import { ClaimListPage } from "./routes/claims-list-page";
 import { NewClaimPage } from "./routes/new-claim-page";
 import { PolicyRulesPage } from "./routes/policy-rules-page";
@@ -58,6 +59,7 @@ export function App() {
       <Route path="/claims/:claimId" element={<ClaimWorkbenchPage />} />
       <Route path="/admin/policies" element={<PolicyRulesPage />} />
       <Route path="/admin/config" element={<AdminConfigPage isAdmin={session.employee.role === "ADMIN"} />} />
+      <Route path="/admin/config/form-options" element={<AdminFormOptionsPage isAdmin={session.employee.role === "ADMIN"} />} />
       <Route path="/admin/policy-sources" element={<PolicySourcesPage />} />
       <Route path="/admin/reviews" element={<ReviewCenterPage />} />
       <Route path="/policies" element={<RetiredPage title="旧政策页面已停用" description="政策问答已转到飞书机器人。报销单和政策规则仍可在当前工作台查看。" />} />

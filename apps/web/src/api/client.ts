@@ -19,6 +19,7 @@ export type ExpenseCatalog = { categories: ExpenseCategoryOption[]; mappings: { 
 export type ConfigSnapshot<T> = { domain: string; version: number; payload: T; publishedAt: string };
 export type ConfigDraft<T> = { domain: string; revision: number; payload: T; authorId: string; note: string; approvedBy: string; publishedRevision?: number };
 export type ConfigHistory = { action: string; actorId: string; version: number; previousVersion: number; draftRevision: number; note: string; at: string };
+export type FormOptions = { categoryHelpText: string; projectCodeMode: "FREE_TEXT" | "CATALOG"; projectCodes: { code: string; label: string; enabled: boolean }[]; fieldOrder: string[] };
 type RequestOptions = Omit<RequestInit, "body"> & { body?: unknown; idempotent?: boolean };
 type ApiClientDeps = { fetcher?: typeof fetch; randomId?: () => string };
 
@@ -75,6 +76,11 @@ export function createReimbursementApi(tokenProvider: TokenProvider, deps: ApiCl
     submit: (claimId: string, confirmationToken: string) => request<SubmissionSnapshot>(`/api/v1/claims/${encodeURIComponent(claimId)}/submit`, { method: "POST", body: { confirmationToken }, idempotent: true }),
     publishPolicy: (id: string, effectiveDate: string, rules: PublishedPolicyRule[]) => request<{ id: string; status: string }>("/api/v1/admin/policies/publish", { method: "POST", body: { id, effectiveDate, rules }, idempotent: true }),
     getExpenseCatalog: () => request<ConfigSnapshot<{ categories: ExpenseCategoryOption[] }>>("/api/v1/config/expense_catalog"),
+    getFormOptions: () => request<ConfigSnapshot<FormOptions>>("/api/v1/config/form_options"),
+    getAdminConfigDomain: <T>(domain: string) => request<{ active?: ConfigSnapshot<T>; draft?: ConfigDraft<T> }>(`/api/v1/admin/config/${encodeURIComponent(domain)}`),
+    saveConfigDomainDraft: <T>(domain: string, input: { expectedRevision: number; payload: T; note: string }) => request<ConfigDraft<T>>(`/api/v1/admin/config/${encodeURIComponent(domain)}/draft`, { method: "POST", body: input }),
+    previewConfigDomainDraft: <T>(domain: string, revision: number) => request<{ draft: ConfigDraft<T>; active?: ConfigSnapshot<T> }>(`/api/v1/admin/config/${encodeURIComponent(domain)}/preview`, { method: "POST", body: { revision } }),
+    publishConfigDomainDraft: <T>(domain: string, revision: number) => request<ConfigSnapshot<T>>(`/api/v1/admin/config/${encodeURIComponent(domain)}/publish`, { method: "POST", body: { revision } }),
     getAdminConfig: () => request<{ active?: ConfigSnapshot<ExpenseCatalog>; draft?: ConfigDraft<ExpenseCatalog> }>("/api/v1/admin/config/expense_catalog"),
     saveConfigDraft: (domain: string, input: { expectedRevision: number; payload: ExpenseCatalog; note: string }) => request<ConfigDraft<ExpenseCatalog>>(`/api/v1/admin/config/${encodeURIComponent(domain)}/draft`, { method: "POST", body: input }),
     previewConfigDraft: (domain: string, revision: number) => request<{ draft: ConfigDraft<ExpenseCatalog>; active?: ConfigSnapshot<ExpenseCatalog> }>(`/api/v1/admin/config/${encodeURIComponent(domain)}/preview`, { method: "POST", body: { revision } }),

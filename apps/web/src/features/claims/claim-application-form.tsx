@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { reimbursementApi, ReimbursementApiError } from "../../api/client";
@@ -49,6 +49,7 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 	const isDraft = claim.status === "DRAFT";
 	const isItemized = claim.itemizationMode === "ITEMIZED";
 	const catalog = useQuery({ queryKey: ["expense-catalog"], queryFn: reimbursementApi.getExpenseCatalog, enabled: isDraft && isItemized, retry: false });
+	const formOptions = useQuery({ queryKey: ["form-options"], queryFn: reimbursementApi.getFormOptions, enabled: isDraft, retry: false });
 	const difference = useMemo(() => claim.requestedAmountCent === null || recognizedAmountCent === null ? null : claim.requestedAmountCent - recognizedAmountCent, [claim.requestedAmountCent, recognizedAmountCent]);
 	useEffect(() => {
 		if (isEditing) return;
@@ -156,6 +157,19 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 		});
 	}
 
+	const defaultFieldOrder = ["purpose", "expenseCategory", "projectCode", "participants", "requestedAmountCent", "currency", "remark"];
+	const configuredOrder = formOptions.data?.payload.fieldOrder;
+	const fieldOrder = configuredOrder?.length === defaultFieldOrder.length && defaultFieldOrder.every((id) => configuredOrder.includes(id)) ? configuredOrder : defaultFieldOrder;
+	const fields: Record<string, ReactNode> = {
+		purpose: <div className="field-stack"><label htmlFor="claim-purpose">报销事由 <span className="required-label">（提交必填）</span></label><input id="claim-purpose" name="purpose" value={purpose} onChange={(event) => { markEdited(); setPurpose(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} placeholder="例如：杭州客户拜访" /><p className="field-hint">简要说明这笔报销对应的业务事项。</p></div>,
+		expenseCategory: isItemized ? <fieldset className="field-stack category-selector" aria-describedby="claim-selected-categories-help"><legend>费用类别</legend><p id="claim-selected-categories-help" className="field-hint">{formOptions.data?.payload.categoryHelpText || "整单最终提交类别，可多选；票据识别只提供初始建议。"}</p>{claim.categoryReviewRequired && <p className="field-hint category-review-note">历史类别未能确定编码，请核对后选择当前类别。</p>}{isDraft ? catalog.isPending ? <p role="status" className="field-hint">正在读取可选类别…</p> : catalog.isError ? <div className="field-error" role="alert">可选类别暂时无法读取。<button className="text-action" type="button" onClick={() => void catalog.refetch()}>重试</button></div> : catalog.data?.payload.categories.length || selectedCodes.length ? <div className="category-choice-list">{(catalog.data?.payload.categories ?? []).map((option) => <label className="category-choice" key={option.code}><input type="checkbox" checked={selectedCodes.includes(option.code)} disabled={mutation.isPending || isSubmitting} onChange={(event) => { markEdited(); setCategoryEdited(true); setSelectedCodes((current) => event.target.checked ? [...current, option.code] : current.filter((code) => code !== option.code)); }} /><span>{option.label}</span></label>)}{selectedCodes.filter((code) => !catalog.data?.payload.categories.some((option) => option.code === code)).map((code) => <label className="category-choice" key={code}><input type="checkbox" checked disabled={mutation.isPending || isSubmitting} onChange={() => { markEdited(); setCategoryEdited(true); setSelectedCodes((current) => current.filter((item) => item !== code)); }} /><span>{claim.selectedExpenseCategories?.[(claim.selectedExpenseCategoryCodes ?? []).indexOf(code)] || code}（已停用，取消选择）</span></label>)}</div> : <p className="field-hint">当前没有启用的费用类别，请联系管理员配置。</p> : <p className="category-readonly">{(claim.selectedExpenseCategories ?? []).join("、") || "未填写"}</p>}</fieldset> : <div className="field-stack"><label htmlFor="claim-expense-category">费用类别</label><input id="claim-expense-category" name="expenseCategory" value={expenseCategory} onChange={(event) => { markEdited(); setExpenseCategory(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} placeholder="例如：住宿费" /><p className="field-hint">{formOptions.data?.payload.categoryHelpText || "若公司政策设置了类别范围，提交前需填写允许的类别。"}</p></div>,
+		projectCode: <div className="field-stack"><label htmlFor="claim-project-code">项目编码</label><input id="claim-project-code" name="projectCode" value={projectCode} onChange={(event) => { markEdited(); setProjectCode(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} placeholder="有对应项目时填写" /><p className="field-hint">适用的费用类别可能要求填写项目编码。</p></div>,
+		participants: <div className="field-stack"><label htmlFor="claim-participants">同行人</label><input id="claim-participants" name="participants" value={participantsText} onChange={(event) => { markEdited(); setParticipantsText(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} placeholder="例如：张三，李四" /><p className="field-hint">多人之间用逗号分隔；适用类别可能要求填写。</p></div>,
+		requestedAmountCent: <div className="field-stack"><label htmlFor="requested-amount">申请报销总额</label><div className="amount-input-wrap"><span aria-hidden="true">￥</span><input id="requested-amount" name="requestedAmount" inputMode="decimal" autoComplete="off" value={amountText} onChange={(event) => { markEdited(); setAmountText(event.target.value); setAmountError(""); }} aria-invalid={Boolean(amountError)} aria-describedby={amountError ? "requested-amount-help requested-amount-error" : "requested-amount-help"} disabled={!isDraft || mutation.isPending || isSubmitting} placeholder="请输入金额" /></div><p id="requested-amount-help" className="field-hint">最多两位小数，按人民币元填写。</p>{amountError && <p id="requested-amount-error" className="field-error" role="alert">{amountError}</p>}</div>,
+		currency: <div className="field-stack"><label htmlFor="claim-currency">币种</label><input id="claim-currency" value="CNY · 人民币" readOnly aria-readonly="true" /><p className="field-hint">当前仅支持人民币；多币种报销将在后续版本单独支持。</p></div>,
+		remark: <div className="field-stack"><label htmlFor="claim-remark">备注 <span className="optional-label">（选填）</span></label><textarea className="resize-none" id="claim-remark" name="remark" maxLength={1000} value={remark} onChange={(event) => { markEdited(); setRemark(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} aria-describedby="claim-remark-help" placeholder="例如：客户拜访交通费" /><p id="claim-remark-help" className="field-hint">{remark.length}/1000</p></div>,
+	};
+
 	return (
 		<section className="workbench-panel claim-application-panel" aria-labelledby="claim-application-heading">
 			<div className="section-heading">
@@ -164,43 +178,7 @@ export function ClaimApplicationForm({ claim, recognizedAmountCent, onSaved, onS
 			</div>
 			<p className="panel-copy">保存草稿时可暂不填写完整；提交时系统会自动核验报销事由、金额、票据和政策。</p>
 			<form className="claim-application-form" noValidate onSubmit={handleSubmit}>
-				<div className="field-stack">
-					<label htmlFor="claim-purpose">报销事由 <span className="required-label">（提交必填）</span></label>
-					<input id="claim-purpose" name="purpose" value={purpose} onChange={(event) => { markEdited(); setPurpose(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} placeholder="例如：杭州客户拜访" />
-					<p className="field-hint">简要说明这笔报销对应的业务事项。</p>
-				</div>
-				{isItemized && <fieldset className="field-stack category-selector" aria-describedby="claim-selected-categories-help"><legend>费用类别</legend>
-					<p id="claim-selected-categories-help" className="field-hint">整单最终提交类别，可多选；票据识别只提供初始建议。</p>
-					{claim.categoryReviewRequired && <p className="field-hint category-review-note">历史类别未能确定编码，请核对后选择当前类别。</p>}
-					{isDraft ? catalog.isPending ? <p role="status" className="field-hint">正在读取可选类别…</p> : catalog.isError ? <div className="field-error" role="alert">可选类别暂时无法读取。<button className="text-action" type="button" onClick={() => void catalog.refetch()}>重试</button></div> : catalog.data?.payload.categories.length || selectedCodes.length ? <div className="category-choice-list">{(catalog.data?.payload.categories ?? []).map((option) => <label className="category-choice" key={option.code}><input type="checkbox" checked={selectedCodes.includes(option.code)} disabled={mutation.isPending || isSubmitting} onChange={(event) => { markEdited(); setCategoryEdited(true); setSelectedCodes((current) => event.target.checked ? [...current, option.code] : current.filter((code) => code !== option.code)); }} /><span>{option.label}</span></label>)}{selectedCodes.filter((code) => !catalog.data?.payload.categories.some((option) => option.code === code)).map((code) => <label className="category-choice" key={code}><input type="checkbox" checked disabled={mutation.isPending || isSubmitting} onChange={() => { markEdited(); setCategoryEdited(true); setSelectedCodes((current) => current.filter((item) => item !== code)); }} /><span>{claim.selectedExpenseCategories?.[(claim.selectedExpenseCategoryCodes ?? []).indexOf(code)] || code}（已停用，取消选择）</span></label>)}</div> : <p className="field-hint">当前没有启用的费用类别，请联系管理员配置。</p> : <p className="category-readonly">{(claim.selectedExpenseCategories ?? []).join("、") || "未填写"}</p>}
-				</fieldset>}
-				{!isItemized && <div className="field-stack">
-					<label htmlFor="claim-expense-category">费用类别</label>
-					<input id="claim-expense-category" name="expenseCategory" value={expenseCategory} onChange={(event) => { markEdited(); setExpenseCategory(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} placeholder="例如：住宿费" />
-					<p className="field-hint">若公司政策设置了类别范围，提交前需填写允许的类别。</p>
-				</div>}
-				<div className="application-form-grid">
-					<div className="field-stack"><label htmlFor="claim-project-code">项目编码</label><input id="claim-project-code" name="projectCode" value={projectCode} onChange={(event) => { markEdited(); setProjectCode(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} placeholder="有对应项目时填写" /><p className="field-hint">适用的费用类别可能要求填写项目编码。</p></div>
-					<div className="field-stack"><label htmlFor="claim-participants">同行人</label><input id="claim-participants" name="participants" value={participantsText} onChange={(event) => { markEdited(); setParticipantsText(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} placeholder="例如：张三，李四" /><p className="field-hint">多人之间用逗号分隔；适用类别可能要求填写。</p></div>
-				</div>
-				<div className="application-form-grid">
-					<div className="field-stack">
-						<label htmlFor="requested-amount">申请报销总额</label>
-						<div className="amount-input-wrap"><span aria-hidden="true">￥</span><input id="requested-amount" name="requestedAmount" inputMode="decimal" autoComplete="off" value={amountText} onChange={(event) => { markEdited(); setAmountText(event.target.value); setAmountError(""); }} aria-invalid={Boolean(amountError)} aria-describedby={amountError ? "requested-amount-help requested-amount-error" : "requested-amount-help"} disabled={!isDraft || mutation.isPending || isSubmitting} placeholder="请输入金额" /></div>
-						<p id="requested-amount-help" className="field-hint">最多两位小数，按人民币元填写。</p>
-						{amountError && <p id="requested-amount-error" className="field-error" role="alert">{amountError}</p>}
-					</div>
-					<div className="field-stack">
-						<label htmlFor="claim-currency">币种</label>
-						<input id="claim-currency" value="CNY · 人民币" readOnly aria-readonly="true" />
-						<p className="field-hint">当前仅支持人民币；多币种报销将在后续版本单独支持。</p>
-					</div>
-				</div>
-				<div className="field-stack">
-					<label htmlFor="claim-remark">备注 <span className="optional-label">（选填）</span></label>
-					<textarea className="resize-none" id="claim-remark" name="remark" maxLength={1000} value={remark} onChange={(event) => { markEdited(); setRemark(event.target.value); }} disabled={!isDraft || mutation.isPending || isSubmitting} aria-describedby="claim-remark-help" placeholder="例如：客户拜访交通费" />
-					<p id="claim-remark-help" className="field-hint">{remark.length}/1000</p>
-				</div>
+				{fieldOrder.map((id) => <div key={id}>{fields[id]}</div>)}
 				<div className="ocr-amount-context" aria-live="polite">
 					<div><span>识别票据合计</span><strong>{recognizedAmountCent === null ? "尚无可用 OCR 金额" : formatCNYFromCent(recognizedAmountCent)}</strong></div>
 					{recognizedAmountCent === null && claim.recognizedReceiptCount > 0 && <p>已识别票据尚未提取金额，请手工补充申请报销总额。</p>}
