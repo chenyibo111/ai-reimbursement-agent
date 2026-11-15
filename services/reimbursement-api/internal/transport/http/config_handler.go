@@ -172,6 +172,19 @@ func (handler *configHandler) history(response http.ResponseWriter, request *htt
 	writeJSON(response, http.StatusOK, map[string]any{"items": items})
 }
 
+func (handler *configHandler) rolloutAudience(response http.ResponseWriter, request *http.Request) {
+	if _, ok := handler.authorize(request); !ok {
+		configForbidden(response)
+		return
+	}
+	count, err := handler.service.CountFeatureRolloutAudience(request.Context())
+	if err != nil {
+		writeConfigError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]int{"activeEmployeeCount": count})
+}
+
 func (handler *configHandler) getPublic(response http.ResponseWriter, request *http.Request) {
 	configDomain := request.PathValue("domain")
 	if configDomain != "expense_catalog" && configDomain != "form_options" {

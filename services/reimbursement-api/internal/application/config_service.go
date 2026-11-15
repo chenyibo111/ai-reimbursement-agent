@@ -38,11 +38,34 @@ type ConfigRepository interface {
 type ConfigService struct {
 	repository        ConfigRepository
 	validators        map[string]func(json.RawMessage) error
+	saveValidators    map[string]func(context.Context, json.RawMessage) error
 	publishValidators map[string]func(context.Context, json.RawMessage) error
+	rolloutPopulation FeatureRolloutPopulationReader
+}
+
+type FeatureRolloutPopulationReader interface {
+	CountActiveEmployees(context.Context) (int, error)
+}
+
+func (service *ConfigService) SetFeatureRolloutPopulationReader(reader FeatureRolloutPopulationReader) {
+	service.rolloutPopulation = reader
+}
+
+func (service *ConfigService) CountFeatureRolloutAudience(ctx context.Context) (int, error) {
+	if service.rolloutPopulation == nil {
+		return 0, ErrConfigValidatorUnavailable
+	}
+	return service.rolloutPopulation.CountActiveEmployees(ctx)
 }
 
 func NewConfigService(repository ConfigRepository) *ConfigService {
-	return &ConfigService{repository: repository, validators: map[string]func(json.RawMessage) error{}, publishValidators: map[string]func(context.Context, json.RawMessage) error{}}
+	return &ConfigService{repository: repository, validators: map[string]func(json.RawMessage) error{}, saveValidators: map[string]func(context.Context, json.RawMessage) error{}, publishValidators: map[string]func(context.Context, json.RawMessage) error{}}
+}
+
+func (service *ConfigService) RegisterSaveValidator(domain string, validate func(context.Context, json.RawMessage) error) {
+	if configDomains[domain] && validate != nil {
+		service.saveValidators[domain] = validate
+	}
 }
 
 func (service *ConfigService) RegisterValidator(domain string, validate func(json.RawMessage) error) {
@@ -76,6 +99,11 @@ func (service *ConfigService) SaveDraft(ctx context.Context, actorID, configDoma
 	}
 	if err := service.validators[configDomain](payload); err != nil {
 		return domain.ConfigDraft{}, errors.Join(ErrConfigInvalid, err)
+	}
+	if validate := service.saveValidators[configDomain]; validate != nil {
+		if err := validate(ctx, payload); err != nil {
+			return domain.ConfigDraft{}, errors.Join(ErrConfigInvalid, err)
+		}
 	}
 	return service.repository.SaveDraft(ctx, actorID, configDomain, expectedRevision, payload, note)
 }

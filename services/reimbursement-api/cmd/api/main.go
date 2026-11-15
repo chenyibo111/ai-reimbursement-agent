@@ -50,6 +50,14 @@ func main() {
 	configService := application.NewConfigService(store.NewPostgresConfigRepository(pool))
 	configService.RegisterValidator("expense_catalog", application.ValidateExpenseCatalogPayload)
 	configService.RegisterValidator("form_options", application.ValidateFormOptionsPayload)
+	configService.RegisterValidator("feature_rollout", application.ValidateFeatureRolloutPayload)
+	configService.RegisterPublishValidator("feature_rollout", func(ctx context.Context, payload json.RawMessage) error {
+		return application.ValidateFeatureRolloutEmployees(ctx, payload, store.NewPostgresEmployeeIdentityRepository(pool))
+	})
+	configService.RegisterSaveValidator("feature_rollout", func(ctx context.Context, payload json.RawMessage) error {
+		return application.ValidateFeatureRolloutEmployees(ctx, payload, store.NewPostgresEmployeeIdentityRepository(pool))
+	})
+	configService.SetFeatureRolloutPopulationReader(store.NewPostgresEmployeeIdentityRepository(pool))
 	configService.RegisterPublishValidator("expense_catalog", func(ctx context.Context, payload json.RawMessage) error {
 		return application.ValidateExpenseCatalogPolicyReferences(ctx, payload, store.NewPostgresSubmissionRepository(pool))
 	})
@@ -132,6 +140,7 @@ func main() {
 	policyRuleService := application.NewPolicyRuleService(store.NewPostgresPolicyRuleRepository(pool))
 	policyRuleService.SetExpenseCatalogReader(application.NewCachedExpenseCatalogReader(configService))
 	claimService.SetItemizedEmployeeIDs(strings.Split(os.Getenv("REIMBURSEMENT_ITEMIZED_EMPLOYEE_IDS"), ","))
+	claimService.SetFeatureRolloutReader(configService)
 	router := transport.NewRouter(transport.Dependencies{
 		Claims:             claimService,
 		Submissions:        submissionService,

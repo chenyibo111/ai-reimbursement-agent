@@ -15,6 +15,27 @@ type configDraftPublisherStub struct {
 	published bool
 }
 
+type configDraftSaverStub struct {
+	ConfigRepository
+	saved bool
+}
+
+func (stub *configDraftSaverStub) SaveDraft(context.Context, string, string, int64, json.RawMessage, string) (domain.ConfigDraft, error) {
+	stub.saved = true
+	return domain.ConfigDraft{}, nil
+}
+
+func TestConfigServiceChecksEmployeeTargetsBeforeSavingRollout(t *testing.T) {
+	stub := &configDraftSaverStub{}
+	service := NewConfigService(stub)
+	service.RegisterValidator("feature_rollout", ValidateFeatureRolloutPayload)
+	service.RegisterSaveValidator("feature_rollout", func(context.Context, json.RawMessage) error { return ErrConfigInvalid })
+	_, err := service.SaveDraft(context.Background(), "admin-1", "feature_rollout", 0, json.RawMessage(`{"mode":"EMPLOYEES","employeeIds":["missing"]}`), "test")
+	if !errors.Is(err, ErrConfigInvalid) || stub.saved {
+		t.Fatalf("invalid rollout saved=%v, err=%v", stub.saved, err)
+	}
+}
+
 type configVersionActivatorStub struct {
 	ConfigRepository
 	payload   json.RawMessage

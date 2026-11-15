@@ -48,9 +48,9 @@ func (repository *PostgresClaimRepository) Create(ctx context.Context, claim dom
 		claim.SelectedExpenseCategoryCodes = []string{}
 	}
 	if _, err = tx.Exec(ctx, `
-		INSERT INTO reimbursement.claims (id, claim_number, owner_id, status, purpose, expense_category, participants, project_code, requested_amount_cent, currency, requested_amount_source, remark, version, created_at, updated_at, itemization_mode, purpose_source, selected_expense_categories, expense_categories_source, selected_expense_category_codes, expense_catalog_version)
-		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7::jsonb, NULLIF($8, ''), $9, $10, $11, NULLIF($12, ''), $13, $14, $15, $16, $17, $18, $19, $20, $21)
-	`, claim.ID, claim.ClaimNumber, claim.OwnerID, claim.Status, claim.Purpose, claim.ExpenseCategory, participants, claim.ProjectCode, claim.RequestedAmountCent, claim.Currency, claim.RequestedAmountSource, claim.Remark, claim.Version, claim.CreatedAt, claim.UpdatedAt, claim.ItemizationMode, claim.PurposeSource, claim.SelectedExpenseCategories, claim.ExpenseCategoriesSource, claim.SelectedExpenseCategoryCodes, claim.ExpenseCatalogVersion); err != nil {
+		INSERT INTO reimbursement.claims (id, claim_number, owner_id, status, purpose, expense_category, participants, project_code, requested_amount_cent, currency, requested_amount_source, remark, version, created_at, updated_at, itemization_mode, purpose_source, selected_expense_categories, expense_categories_source, selected_expense_category_codes, expense_catalog_version, itemization_rollout_version)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7::jsonb, NULLIF($8, ''), $9, $10, $11, NULLIF($12, ''), $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+	`, claim.ID, claim.ClaimNumber, claim.OwnerID, claim.Status, claim.Purpose, claim.ExpenseCategory, participants, claim.ProjectCode, claim.RequestedAmountCent, claim.Currency, claim.RequestedAmountSource, claim.Remark, claim.Version, claim.CreatedAt, claim.UpdatedAt, claim.ItemizationMode, claim.PurposeSource, claim.SelectedExpenseCategories, claim.ExpenseCategoriesSource, claim.SelectedExpenseCategoryCodes, claim.ExpenseCatalogVersion, claim.ItemizationRolloutVersion); err != nil {
 		return fmt.Errorf("insert claim: %w", err)
 	}
 	if err = writeClaimAuditAndEvent(ctx, tx, audit, event); err != nil {
@@ -66,7 +66,7 @@ func (repository *PostgresClaimRepository) FindOwned(ctx context.Context, claimI
 	claim, err := scanClaim(repository.pool.QueryRow(ctx, `
 		SELECT claim.id, claim.claim_number, claim.owner_id, claim.status, claim.purpose, claim.expense_category, claim.participants, claim.project_code,
 		       claim.requested_amount_cent, claim.currency, claim.requested_amount_source, claim.remark,
-		       claim.version, claim.created_at, claim.updated_at, claim.itemization_mode, claim.purpose_source, claim.selected_expense_categories, claim.expense_categories_source, claim.selected_expense_category_codes, claim.expense_catalog_version, claim.category_review_required,
+		       claim.version, claim.created_at, claim.updated_at, claim.itemization_mode, claim.purpose_source, claim.selected_expense_categories, claim.expense_categories_source, claim.selected_expense_category_codes, claim.expense_catalog_version, claim.itemization_rollout_version, claim.category_review_required,
 		       summary.receipt_count, summary.recognized_receipt_count, summary.total_amount_cent, summary.missing_amount_receipt_count
 		FROM reimbursement.claims AS claim
 		LEFT JOIN LATERAL (
@@ -135,7 +135,7 @@ func scanClaim(row claimRow) (domain.Claim, error) {
 	var remark *string
 	err := row.Scan(
 		&claim.ID, &claim.ClaimNumber, &claim.OwnerID, &claim.Status, &claim.Purpose, &expenseCategory, &participants,
-		&projectCode, &claim.RequestedAmountCent, &claim.Currency, &claim.RequestedAmountSource, &remark, &claim.Version, &claim.CreatedAt, &claim.UpdatedAt, &claim.ItemizationMode, &claim.PurposeSource, &claim.SelectedExpenseCategories, &claim.ExpenseCategoriesSource, &claim.SelectedExpenseCategoryCodes, &claim.ExpenseCatalogVersion, &claim.CategoryReviewRequired,
+		&projectCode, &claim.RequestedAmountCent, &claim.Currency, &claim.RequestedAmountSource, &remark, &claim.Version, &claim.CreatedAt, &claim.UpdatedAt, &claim.ItemizationMode, &claim.PurposeSource, &claim.SelectedExpenseCategories, &claim.ExpenseCategoriesSource, &claim.SelectedExpenseCategoryCodes, &claim.ExpenseCatalogVersion, &claim.ItemizationRolloutVersion, &claim.CategoryReviewRequired,
 		&claim.ReceiptCount, &claim.RecognizedReceiptCount, &claim.TotalAmountCent, &claim.MissingAmountReceiptCount,
 	)
 	if err != nil {
@@ -160,7 +160,7 @@ func (repository *PostgresClaimRepository) ListOwned(ctx context.Context, actorI
 	rows, err := repository.pool.Query(ctx, `
 		SELECT claim.id, claim.claim_number, claim.owner_id, claim.status, claim.purpose, claim.expense_category, claim.participants, claim.project_code,
 		       claim.requested_amount_cent, claim.currency, claim.requested_amount_source, claim.remark,
-		       claim.version, claim.created_at, claim.updated_at, claim.itemization_mode, claim.purpose_source, claim.selected_expense_categories, claim.expense_categories_source, claim.selected_expense_category_codes, claim.expense_catalog_version, claim.category_review_required,
+		       claim.version, claim.created_at, claim.updated_at, claim.itemization_mode, claim.purpose_source, claim.selected_expense_categories, claim.expense_categories_source, claim.selected_expense_category_codes, claim.expense_catalog_version, claim.itemization_rollout_version, claim.category_review_required,
 		       summary.receipt_count, summary.recognized_receipt_count, summary.total_amount_cent, summary.missing_amount_receipt_count
 		FROM reimbursement.claims AS claim
 		LEFT JOIN LATERAL (

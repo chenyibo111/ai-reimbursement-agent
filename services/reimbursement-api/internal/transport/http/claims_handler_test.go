@@ -268,9 +268,9 @@ func TestAdminAuthorizationRequiresMatchingTokenAndStoredRole(t *testing.T) {
 }
 
 func TestCategoryCodeResponsesKeepRecognitionAndFinalSelectionSeparate(t *testing.T) {
-	claim := claimResponse(domain.Claim{SelectedExpenseCategories: []string{"餐饮费"}, SelectedExpenseCategoryCodes: []string{"DINING"}, ExpenseCatalogVersion: 7})
+	claim := claimResponse(domain.Claim{SelectedExpenseCategories: []string{"餐饮费"}, SelectedExpenseCategoryCodes: []string{"DINING"}, ExpenseCatalogVersion: 7, ItemizationRolloutVersion: 3})
 	item := expenseItemResponse(domain.ExpenseItem{ExpenseCategory: "市内交通费", CategoryCode: "LOCAL_TRANSPORT", ExpenseCatalogVersion: 6})
-	if claim["expenseCatalogVersion"] != int64(7) || claim["selectedExpenseCategoryCodes"].([]string)[0] != "DINING" || item["categoryCode"] != "LOCAL_TRANSPORT" || item["expenseCatalogVersion"] != int64(6) {
+	if claim["expenseCatalogVersion"] != int64(7) || claim["itemizationRolloutVersion"] != int64(3) || claim["selectedExpenseCategoryCodes"].([]string)[0] != "DINING" || item["categoryCode"] != "LOCAL_TRANSPORT" || item["expenseCatalogVersion"] != int64(6) {
 		t.Fatalf("claim=%v item=%v", claim, item)
 	}
 }

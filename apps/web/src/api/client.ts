@@ -20,6 +20,7 @@ export type ConfigSnapshot<T> = { domain: string; version: number; payload: T; p
 export type ConfigDraft<T> = { domain: string; revision: number; payload: T; authorId: string; note: string; approvedBy: string; publishedRevision?: number };
 export type ConfigHistory = { action: string; actorId: string; version: number; previousVersion: number; draftRevision: number; note: string; at: string };
 export type FormOptions = { categoryHelpText: string; projectCodeMode: "FREE_TEXT" | "CATALOG"; projectCodes: { code: string; label: string; enabled: boolean }[]; fieldOrder: string[] };
+export type FeatureRollout = { mode: "OFF" | "EMPLOYEES" | "DEPARTMENTS" | "PERCENT" | "ALL"; employeeIds?: string[]; departmentIds?: string[]; percent?: number; salt?: string };
 type RequestOptions = Omit<RequestInit, "body"> & { body?: unknown; idempotent?: boolean };
 type ApiClientDeps = { fetcher?: typeof fetch; randomId?: () => string };
 
@@ -77,6 +78,7 @@ export function createReimbursementApi(tokenProvider: TokenProvider, deps: ApiCl
     publishPolicy: (id: string, effectiveDate: string, rules: PublishedPolicyRule[]) => request<{ id: string; status: string }>("/api/v1/admin/policies/publish", { method: "POST", body: { id, effectiveDate, rules }, idempotent: true }),
     getExpenseCatalog: () => request<ConfigSnapshot<{ categories: ExpenseCategoryOption[] }>>("/api/v1/config/expense_catalog"),
     getFormOptions: () => request<ConfigSnapshot<FormOptions>>("/api/v1/config/form_options"),
+    getFeatureRolloutAudience: () => request<{ activeEmployeeCount: number }>("/api/v1/admin/config/feature_rollout/audience"),
     getAdminConfigDomain: <T>(domain: string) => request<{ active?: ConfigSnapshot<T>; draft?: ConfigDraft<T> }>(`/api/v1/admin/config/${encodeURIComponent(domain)}`),
     saveConfigDomainDraft: <T>(domain: string, input: { expectedRevision: number; payload: T; note: string }) => request<ConfigDraft<T>>(`/api/v1/admin/config/${encodeURIComponent(domain)}/draft`, { method: "POST", body: input }),
     previewConfigDomainDraft: <T>(domain: string, revision: number) => request<{ draft: ConfigDraft<T>; active?: ConfigSnapshot<T> }>(`/api/v1/admin/config/${encodeURIComponent(domain)}/preview`, { method: "POST", body: { revision } }),

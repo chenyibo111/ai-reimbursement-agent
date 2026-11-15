@@ -13,6 +13,7 @@ export interface Claim {
 	selectedExpenseCategories?: string[];
 	selectedExpenseCategoryCodes?: string[];
 	expenseCatalogVersion?: number;
+	itemizationRolloutVersion?: number;
 	categoryReviewRequired?: boolean;
 	expenseCategoriesSource?: "AUTO" | "MANUAL";
 	expenseItemTotalAmountCent?: number | null;

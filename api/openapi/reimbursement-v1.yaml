@@ -757,6 +757,7 @@ components:
           items: { type: string }
         expenseCategoriesSource: { type: string, enum: [AUTO, MANUAL] }
         expenseCatalogVersion: { type: integer, format: int64, minimum: 0 }
+        itemizationRolloutVersion: { type: integer, format: int64, minimum: 0 }
         categoryReviewRequired: { type: boolean }
         expenseItems:
           type: array

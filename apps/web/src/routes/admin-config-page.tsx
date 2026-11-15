@@ -126,7 +126,7 @@ export function AdminConfigPage({ isAdmin }: { isAdmin: boolean }) {
   const changes = preview ? catalogDifferences(preview.active?.payload, preview.draft.payload) : [];
   return <main className="page-shell admin-config-page" aria-labelledby="admin-config-title">
     <header className="page-header"><div><p className="eyebrow">财务管理 · 配置中心</p><h1 id="admin-config-title">报销配置</h1><p className="page-summary">维护费用类别与票据默认值；已发布版本供新票据识别使用。</p></div><Link className="secondary-action" to="/admin/policies">可执行规则</Link></header>
-    <nav className="admin-config-links" aria-label="相关管理"><Link to="/admin/config/form-options">表单选项</Link><Link to="/admin/policies">政策规则</Link><Link to="/admin/policy-sources">政策知识来源</Link></nav>
+    <nav className="admin-config-links" aria-label="相关管理"><Link to="/admin/config/form-options">表单选项</Link><Link to="/admin/config/feature-rollout">功能灰度</Link><Link to="/admin/policies">政策规则</Link><Link to="/admin/policy-sources">政策知识来源</Link></nav>
     <div className="admin-config-tabs" role="tablist" aria-label="配置中心栏目">
       {tabs.map(([value, label], index) => <button key={value} id={`config-tab-${value}`} type="button" role="tab" aria-controls={`config-panel-${value}`} aria-selected={tab === value} tabIndex={tab === value ? 0 : -1} className={tab === value ? "is-active" : ""} onClick={() => setTab(value)} onKeyDown={(event) => {
         const next = event.key === "ArrowRight" ? (index + 1) % tabs.length : event.key === "ArrowLeft" ? (index - 1 + tabs.length) % tabs.length : event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : -1;

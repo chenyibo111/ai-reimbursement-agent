@@ -19,6 +19,28 @@ type employeeCatalogRepository struct{ application.ConfigRepository }
 
 type employeeFormOptionsRepository struct{ application.ConfigRepository }
 
+type configPopulationStub struct{}
+
+func (configPopulationStub) CountActiveEmployees(context.Context) (int, error) { return 42, nil }
+
+func TestConfigHandlerRolloutAudienceRequiresAdminAndReturnsCount(t *testing.T) {
+	service := application.NewConfigService(configReadRepository{})
+	service.SetFeatureRolloutPopulationReader(configPopulationStub{})
+	handler := &configHandler{service: service, role: func(context.Context, string) (string, error) { return "ADMIN", nil }}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/config/feature_rollout/audience", nil)
+	response := httptest.NewRecorder()
+	handler.rolloutAudience(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("anonymous audience=%d", response.Code)
+	}
+	request = request.WithContext(context.WithValue(request.Context(), actorContextKey{}, Actor{ID: "admin-1", Role: "ADMIN"}))
+	response = httptest.NewRecorder()
+	handler.rolloutAudience(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"activeEmployeeCount":42`) {
+		t.Fatalf("admin audience=%d %s", response.Code, response.Body.String())
+	}
+}
+
 func (employeeFormOptionsRepository) GetActive(context.Context, string) (domain.ConfigSnapshot, error) {
 	return domain.ConfigSnapshot{Domain: "form_options", Version: 4, Payload: []byte(`{"categoryHelpText":"请核对最终类别","projectCodeMode":"FREE_TEXT","projectCodes":[],"fieldOrder":["purpose","expenseCategory","projectCode","participants","requestedAmountCent","currency","remark"]}`)}, nil
 }

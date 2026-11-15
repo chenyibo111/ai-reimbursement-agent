@@ -35,7 +35,7 @@ func TestExpenseItemUpsertPreservesManualCategoryAndOneRowPerReceipt(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	applyMigrationsThrough(t, ctx, conn, filepath.Join("..", "..", "db", "migrations"), "000026")
+	applyMigrationsThrough(t, ctx, conn, filepath.Join("..", "..", "db", "migrations"), "000027")
 	_ = conn.Close(ctx)
 	pool, err := pgxpool.New(ctx, testURL)
 	if err != nil {
