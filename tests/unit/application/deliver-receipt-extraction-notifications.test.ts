@@ -2,35 +2,41 @@ import { expect, it, vi } from "vitest";
 
 import { deliverReceiptExtractionNotificationOnce } from "@/src/application/deliver-receipt-extraction-notifications";
 import { FeishuBotClientError } from "@/src/infrastructure/feishu/feishu-bot-client";
+import type { ClaimedReceiptExtractionNotification } from "@/src/infrastructure/prisma/receipt-extraction-notification-repository";
 
-const notification = {
+const notification: ClaimedReceiptExtractionNotification = {
   id: "notification-1",
   jobId: "job-1",
   receiptId: "receipt-1",
   claimId: "claim-1",
   conversationId: "conversation-1",
   chatId: "oc-1",
-  status: "PROCESSING" as const,
+  status: "PROCESSING",
   attemptCount: 1,
   maxAttempts: 3,
+  templateVersion: null,
+  templateEnabled: null,
+  templateText: null,
+  renderedText: null,
   job: {
-    status: "REVIEW_REQUIRED" as const,
+    status: "REVIEW_REQUIRED",
     failureCode: "OCR_LOW_CONFIDENCE",
     receipt: { extractionPayload: { invoiceNumber: { value: "INV-1", confidence: 0.98, source: "EXTRACTED" }, issuedOn: { value: null, confidence: 0, source: "EXTRACTED" }, totalAmountCents: { value: null, confidence: 0, source: "EXTRACTED" } } },
   },
 };
 
-function createDeps(overrides: { claimed?: typeof notification | null; send?: () => Promise<void> } = {}) {
+function createDeps(overrides: { claimed?: ClaimedReceiptExtractionNotification | null; send?: () => Promise<void> } = {}) {
   const recoverExpiredLeases = vi.fn(async () => 0);
   const claimNextDeliverable = vi.fn(async () => overrides.claimed === undefined ? notification : overrides.claimed);
   const markSent = vi.fn(async () => undefined);
   const markRetryWait = vi.fn(async () => undefined);
   const close = vi.fn(async () => undefined);
+  const saveRenderedTextIfAbsent = vi.fn(async (_id: string, text: string) => text);
   const sendText = vi.fn(async () => overrides.send?.());
   const appendMessage = vi.fn(async () => undefined);
   return {
     deps: {
-      notifications: { recoverExpiredLeases, claimNextDeliverable, markSent, markRetryWait, close },
+      notifications: { recoverExpiredLeases, claimNextDeliverable, markSent, markRetryWait, close, saveRenderedTextIfAbsent },
       client: { sendText },
       conversations: { appendMessage },
       publicAppUrl: "https://reimbursement.example.test",
@@ -80,4 +86,11 @@ it("closes a notification when Feishu rejects an otherwise successful HTTP reque
 
   expect(rejected.close).toHaveBeenCalledWith("notification-1", "FEISHU_DELIVERY_REJECTED");
   expect(rejected.markRetryWait).not.toHaveBeenCalled();
+});
+
+it("sends the persisted configured text after a retry", async () => {
+  const configured = { ...notification, templateVersion: 7, templateEnabled: true, templateText: "通知：{{body}}", renderedText: "通知：首次生成的文案" };
+  const { deps, sendText } = createDeps({ claimed: configured });
+  await deliverReceiptExtractionNotificationOnce(deps);
+  expect(sendText).toHaveBeenCalledWith("oc-1", "通知：首次生成的文案", "notification-1");
 });

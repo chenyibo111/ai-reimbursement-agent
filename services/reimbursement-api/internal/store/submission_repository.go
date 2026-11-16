@@ -202,6 +202,10 @@ func (repository *PostgresSubmissionRepository) Submit(ctx context.Context, inpu
 	if _, err = tx.Exec(ctx, `INSERT INTO reimbursement.outbox_events (event_id, event_type, aggregate_id, payload) VALUES ($1::uuid, 'claim.submitted.v1', $2, $3::jsonb)`, randomUUID(), claim.ID, payload); err != nil {
 		return application.SubmissionSnapshot{}, fmt.Errorf("write submitted event: %w", err)
 	}
+	if _, err = tx.Exec(ctx, `INSERT INTO reimbursement.outbox_events (event_id, event_type, aggregate_id, payload)
+		VALUES ($1::uuid, 'ClaimSubmitted', $2, jsonb_build_object('claimId', $2::text, 'notificationConfigVersion', COALESCE((SELECT version FROM reimbursement.config_active_versions WHERE domain = 'notification_templates'), 0)))`, randomUUID(), claim.ID); err != nil {
+		return application.SubmissionSnapshot{}, fmt.Errorf("write claim notification event: %w", err)
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return application.SubmissionSnapshot{}, fmt.Errorf("commit submission: %w", err)
 	}

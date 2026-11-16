@@ -2,7 +2,7 @@ export type ReceiptExtractionEvent = {
   event_id: string;
   event_type: string;
   aggregate_id: string;
-  payload: { claimId?: string };
+  payload: { claimId?: string; notificationConfigVersion?: number };
 };
 
 type JetStreamMessage = {
@@ -45,10 +45,11 @@ function parseReceiptExtractionEvent(data: Uint8Array): ReceiptExtractionEvent {
     throw new Error("invalid reimbursement event");
   }
   const claimId = (event.payload as Record<string, unknown>).claimId;
+  const notificationConfigVersion = (event.payload as Record<string, unknown>).notificationConfigVersion;
   return {
     event_id: event.event_id,
     event_type: event.event_type,
     aggregate_id: event.aggregate_id,
-    payload: typeof claimId === "string" ? { claimId } : {},
+    payload: { ...(typeof claimId === "string" ? { claimId } : {}), ...(typeof notificationConfigVersion === "number" && Number.isSafeInteger(notificationConfigVersion) && notificationConfigVersion >= 0 ? { notificationConfigVersion } : {}) },
   };
 }

@@ -395,7 +395,7 @@ func writeReceiptAuditAndEvent(ctx context.Context, tx pgx.Tx, receiptID string,
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO reimbursement.outbox_events (event_id, event_type, aggregate_id, payload)
-		VALUES ($1::uuid, $2, $3::text, jsonb_build_object('receiptId', $3::text, 'claimId', $4::text))
+		VALUES ($1::uuid, $2, $3::text, jsonb_build_object('receiptId', $3::text, 'claimId', $4::text, 'notificationConfigVersion', COALESCE((SELECT version FROM reimbursement.config_active_versions WHERE domain = 'notification_templates'), 0)))
 	`, randomUUID(), eventType, receiptID, claimID); err != nil {
 		return fmt.Errorf("insert receipt outbox event: %w", err)
 	}

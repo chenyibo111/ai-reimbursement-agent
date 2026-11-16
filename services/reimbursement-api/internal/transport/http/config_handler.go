@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/application"
 )
@@ -256,6 +257,24 @@ func (handler *configHandler) getInternal(response http.ResponseWriter, request 
 		return
 	}
 	snapshot, err := handler.service.GetActive(request.Context(), request.PathValue("domain"))
+	if err != nil {
+		writeConfigError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, snapshot)
+}
+
+func (handler *configHandler) getInternalVersion(response http.ResponseWriter, request *http.Request) {
+	if len(handler.serviceKey) == 0 || subtle.ConstantTimeCompare([]byte(request.Header.Get("X-Auth-Provisioning-Key")), handler.serviceKey) != 1 {
+		writeError(response, http.StatusUnauthorized, "UNAUTHENTICATED", "内部配置读取未获授权")
+		return
+	}
+	version, err := strconv.ParseInt(request.PathValue("version"), 10, 64)
+	if err != nil || version <= 0 {
+		writeConfigError(response, application.ErrConfigInvalid)
+		return
+	}
+	snapshot, err := handler.service.GetVersion(request.Context(), request.PathValue("domain"), version)
 	if err != nil {
 		writeConfigError(response, err)
 		return

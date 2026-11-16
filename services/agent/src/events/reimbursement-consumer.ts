@@ -1,6 +1,6 @@
 import type { ClaimProgressSnapshot, ReimbursementPort } from "../ports/reimbursement-port";
 
-type ReceiptEvent = { event_id: string; event_type: string; aggregate_id: string; payload: { claimId?: string } };
+type ReceiptEvent = { event_id: string; event_type: string; aggregate_id: string; payload: { claimId?: string; notificationConfigVersion?: number } };
 
 export function createReimbursementEventConsumer(deps: {
   port: ReimbursementPort;
@@ -8,7 +8,7 @@ export function createReimbursementEventConsumer(deps: {
   wasProcessed(eventId: string): Promise<boolean>;
   markProcessed(eventId: string): Promise<void>;
   findNotificationTarget(claimId: string): Promise<{ employeeId: string; conversationId: string; chatId: string } | null>;
-  notify(input: { eventId: string; eventType: string; claimId: string; receiptId?: string; conversationId: string; chatId: string; workbench?: unknown; progress?: ClaimProgressSnapshot }): Promise<void>;
+  notify(input: { eventId: string; eventType: string; claimId: string; receiptId?: string; conversationId: string; chatId: string; notificationConfigVersion?: number; workbench?: unknown; progress?: ClaimProgressSnapshot }): Promise<void>;
 }) {
   return {
     async handle(event: ReceiptEvent) {
@@ -37,7 +37,7 @@ export function createReimbursementEventConsumer(deps: {
       } else {
         current = { progress: await deps.port.getOwnedClaimProgress(context) };
       }
-      await deps.notify({ eventId: event.event_id, eventType: event.event_type, claimId, ...(isReceipt ? { receiptId: event.aggregate_id } : {}), conversationId: target.conversationId, chatId: target.chatId, ...current });
+      await deps.notify({ eventId: event.event_id, eventType: event.event_type, claimId, notificationConfigVersion: event.payload.notificationConfigVersion, ...(isReceipt ? { receiptId: event.aggregate_id } : {}), conversationId: target.conversationId, chatId: target.chatId, ...current });
       await deps.markProcessed(event.event_id);
     },
   };

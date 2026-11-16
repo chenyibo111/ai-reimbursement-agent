@@ -110,6 +110,10 @@ func TestPostgresSubmissionRepositoryCreatesImmutableSnapshotAndReplays(t *testi
 	if err = pool.QueryRow(ctx, `SELECT count(*) FROM reimbursement.outbox_events WHERE aggregate_id = $1 AND event_type = 'claim.submitted.v1'`, claimID).Scan(&events); err != nil {
 		t.Fatalf("count submission events: %v", err)
 	}
+	var notificationEvents int
+	if err = pool.QueryRow(ctx, `SELECT count(*) FROM reimbursement.outbox_events WHERE aggregate_id = $1 AND event_type = 'ClaimSubmitted' AND payload ? 'notificationConfigVersion'`, claimID).Scan(&notificationEvents); err != nil || notificationEvents != 1 {
+		t.Fatalf("submission notification events=%d err=%v", notificationEvents, err)
+	}
 	var snapshotAmount int64
 	var snapshotCurrency string
 	var snapshotSource string

@@ -52,6 +52,7 @@ func main() {
 	configService.RegisterValidator("form_options", application.ValidateFormOptionsPayload)
 	configService.RegisterValidator("feature_rollout", application.ValidateFeatureRolloutPayload)
 	configService.RegisterValidator("receipt_review", application.ValidateReceiptReviewConfigPayload)
+	configService.RegisterValidator("notification_templates", application.ValidateNotificationConfigPayload)
 	configService.SetReceiptReviewSampleReader(store.NewPostgresReceiptReviewSamples(pool))
 	configService.RegisterPublishValidator("feature_rollout", func(ctx context.Context, payload json.RawMessage) error {
 		return application.ValidateFeatureRolloutEmployees(ctx, payload, store.NewPostgresEmployeeIdentityRepository(pool))

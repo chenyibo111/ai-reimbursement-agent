@@ -167,6 +167,16 @@ func (service *ConfigService) GetActive(ctx context.Context, configDomain string
 	return service.repository.GetActive(ctx, configDomain)
 }
 
+func (service *ConfigService) GetVersion(ctx context.Context, configDomain string, version int64) (domain.ConfigSnapshot, error) {
+	if err := service.checkDomain(configDomain); err != nil {
+		return domain.ConfigSnapshot{}, err
+	}
+	if version <= 0 {
+		return domain.ConfigSnapshot{}, ErrConfigInvalid
+	}
+	return service.repository.GetVersion(ctx, configDomain, version)
+}
+
 func (service *ConfigService) GetDraft(ctx context.Context, configDomain string) (domain.ConfigDraft, error) {
 	if err := service.checkDomain(configDomain); err != nil {
 		return domain.ConfigDraft{}, err

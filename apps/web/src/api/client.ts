@@ -23,6 +23,7 @@ export type FormOptions = { categoryHelpText: string; projectCodeMode: "FREE_TEX
 export type FeatureRollout = { mode: "OFF" | "EMPLOYEES" | "DEPARTMENTS" | "PERCENT" | "ALL"; employeeIds?: string[]; departmentIds?: string[]; percent?: number; salt?: string };
 export type ReceiptReviewConfig = { lowOcrConfidenceThreshold: number; reasonLabels?: Record<string, string> };
 export type ReceiptReviewImpact = { recentSampleCount: number; newReviewCount: number; reducedReviewCount: number };
+export type NotificationConfig = { events: Array<{ eventCode: "ReceiptExtractionCompleted" | "ReceiptReviewRequired" | "ReceiptReviewResolved" | "ClaimSubmitted"; channel: "FEISHU"; enabled: boolean; template: string }> };
 type RequestOptions = Omit<RequestInit, "body"> & { body?: unknown; idempotent?: boolean };
 type ApiClientDeps = { fetcher?: typeof fetch; randomId?: () => string };
 

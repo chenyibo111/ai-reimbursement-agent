@@ -71,6 +71,30 @@ func (configReadRepository) GetActive(_ context.Context, configDomain string) (d
 	return domain.ConfigSnapshot{Domain: configDomain, Version: 3, Payload: []byte(`{"categories":[]}`), PublishedAt: time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC)}, nil
 }
 
+func (configReadRepository) GetVersion(_ context.Context, configDomain string, version int64) (domain.ConfigSnapshot, error) {
+	return domain.ConfigSnapshot{Domain: configDomain, Version: version, Payload: []byte(`{"events":[{"eventCode":"ClaimSubmitted","channel":"FEISHU","enabled":true,"template":"{{body}}"}]}`)}, nil
+}
+
+func TestConfigHandlerInternalVersionRequiresServiceIdentity(t *testing.T) {
+	service := application.NewConfigService(configReadRepository{})
+	service.RegisterValidator("notification_templates", application.ValidateNotificationConfigPayload)
+	handler := &configHandler{service: service, serviceKey: []byte("service-secret")}
+	request := httptest.NewRequest(http.MethodGet, "/internal/v1/config/notification_templates/versions/3", nil)
+	request.SetPathValue("domain", "notification_templates")
+	request.SetPathValue("version", "3")
+	response := httptest.NewRecorder()
+	handler.getInternalVersion(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized version read=%d", response.Code)
+	}
+	request.Header.Set("X-Auth-Provisioning-Key", "service-secret")
+	response = httptest.NewRecorder()
+	handler.getInternalVersion(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"version":3`) {
+		t.Fatalf("authorized version read=%d %s", response.Code, response.Body.String())
+	}
+}
+
 func (configReadRepository) GetDraft(context.Context, string) (domain.ConfigDraft, error) {
 	return domain.ConfigDraft{}, application.ErrConfigNotFound
 }

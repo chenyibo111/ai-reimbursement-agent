@@ -212,7 +212,7 @@ func (repository *PostgresReviewCaseRepository) ResolveReceiptCase(ctx context.C
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO reimbursement.outbox_events (event_id, event_type, aggregate_id, payload)
-		VALUES ($1::uuid, 'ReceiptReviewResolved', $2::text, jsonb_build_object('receiptId', $2::text, 'claimId', $3::text))
+		VALUES ($1::uuid, 'ReceiptReviewResolved', $2::text, jsonb_build_object('receiptId', $2::text, 'claimId', $3::text, 'notificationConfigVersion', COALESCE((SELECT version FROM reimbursement.config_active_versions WHERE domain = 'notification_templates'), 0)))
 	`, randomUUID(), receiptID, claimID); err != nil {
 		return application.ReviewCase{}, fmt.Errorf("insert receipt review resolution event: %w", err)
 	}

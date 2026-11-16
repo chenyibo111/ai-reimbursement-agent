@@ -1,6 +1,7 @@
 import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 
 import { nextRetryAt } from "@/src/domain/async-job";
+import { selectNotificationTemplate, type NotificationConfigSnapshot } from "@/src/application/render-configured-notification";
 
 const deliverableJobStatuses = ["SUCCEEDED", "REVIEW_REQUIRED", "CLOSED"] as const;
 const claimableStatuses = ["PENDING", "RETRY_WAIT"] as const;
@@ -15,6 +16,10 @@ export type ClaimedReceiptExtractionNotification = {
   status: "PROCESSING";
   attemptCount: number;
   maxAttempts: number;
+  templateVersion: number | null;
+  templateEnabled: boolean | null;
+  templateText: string | null;
+  renderedText: string | null;
   job: {
     status: "SUCCEEDED" | "REVIEW_REQUIRED" | "CLOSED";
     failureCode: string | null;
@@ -23,9 +28,10 @@ export type ClaimedReceiptExtractionNotification = {
 };
 
 export class ReceiptExtractionNotificationRepository {
-  constructor(private readonly prisma: PrismaClient) {}
+  constructor(private readonly prisma: PrismaClient, private readonly configs?: { getActive(): Promise<NotificationConfigSnapshot | null> }) {}
 
   async enqueueForFeishuUpload(input: { claimId: string; receiptId: string; conversationId: string; chatId: string }): Promise<{ id: string }> {
+    const selected = selectNotificationTemplate(this.configs ? await this.configs.getActive() : null, "ReceiptExtractionCompleted");
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         return await this.prisma.$transaction(async (tx) => {
@@ -36,9 +42,9 @@ export class ReceiptExtractionNotificationRepository {
           const job = existing ?? await tx.asyncJob.create({
             data: { kind: "RECEIPT_EXTRACTION", claimId: input.claimId, receiptId: input.receiptId },
           });
-          await tx.receiptExtractionNotification.upsert({
+          if (selected.enabled) await tx.receiptExtractionNotification.upsert({
             where: { jobId: job.id },
-            create: { jobId: job.id, receiptId: input.receiptId, claimId: input.claimId, conversationId: input.conversationId, chatId: input.chatId, channel: "FEISHU" },
+            create: { jobId: job.id, receiptId: input.receiptId, claimId: input.claimId, conversationId: input.conversationId, chatId: input.chatId, channel: "FEISHU", templateVersion: selected.version, templateEnabled: true, templateText: selected.template },
             update: {},
           });
           return { id: job.id };
@@ -50,7 +56,7 @@ export class ReceiptExtractionNotificationRepository {
     throw new Error("unable to enqueue Feishu receipt extraction notification");
   }
 
-  async createForFeishuUpload(input: { jobId: string; receiptId: string; claimId: string; conversationId: string; chatId: string }) {
+  async createForFeishuUpload(input: { jobId: string; receiptId: string; claimId: string; conversationId: string; chatId: string; templateVersion?: number; templateEnabled?: boolean; templateText?: string }) {
     try {
       return await this.prisma.receiptExtractionNotification.create({
         data: { ...input, channel: "FEISHU" },
@@ -103,6 +109,10 @@ export class ReceiptExtractionNotificationRepository {
         status: "PROCESSING",
         attemptCount: notification.attemptCount,
         maxAttempts: notification.maxAttempts,
+        templateVersion: notification.templateVersion,
+        templateEnabled: notification.templateEnabled,
+        templateText: notification.templateText,
+        renderedText: notification.renderedText,
         job: {
           status: notification.job.status as ClaimedReceiptExtractionNotification["job"]["status"],
           failureCode: notification.job.failureCode,
@@ -110,6 +120,13 @@ export class ReceiptExtractionNotificationRepository {
         },
       };
     });
+  }
+
+  async saveRenderedTextIfAbsent(id: string, text: string): Promise<string> {
+    await this.prisma.receiptExtractionNotification.updateMany({ where: { id, status: "PROCESSING", renderedText: null }, data: { renderedText: text } });
+    const snapshot = await this.prisma.receiptExtractionNotification.findUniqueOrThrow({ where: { id }, select: { renderedText: true } });
+    if (snapshot.renderedText === null) throw new Error("notification text was not persisted");
+    return snapshot.renderedText;
   }
 
   async markSent(id: string, now: Date): Promise<void> {

@@ -49,3 +49,28 @@ it("notifies submission from the owner's fresh Go progress, without event-payloa
   expect(sendText).toHaveBeenCalledWith("oc-private", expect.stringContaining("BX-9：已提交"), "event-submitted");
   expect(sendText.mock.calls[0][1]).toContain("当前系统未接入审批/付款进度");
 });
+
+it("reuses the first persisted notification when delivery retries after a template update", async () => {
+  const progress = { claimId: "claim-1", claimNumber: "BX-9", status: "SUBMITTED", version: 3, receipts: [], issues: [], approval: "NOT_CONNECTED", payment: "NOT_CONNECTED" };
+  let activeVersion = 2;
+  let snapshot: { eventId: string; version: number; enabled: boolean; text: string | null } | null = null;
+  const sendText = vi.fn().mockRejectedValueOnce(new Error("network")).mockResolvedValue(undefined);
+  const handler = createAgentEventNotificationHandler({
+    port: { getOwnedClaimProgress: async () => progress } as never,
+    processedEvents: { wasProcessed: async () => false, markProcessed: vi.fn() },
+    conversations: { findNotificationTargetByClaimId: async () => ({ employeeId: "employee-1", conversationId: "conversation-1", chatId: "oc-1" }), appendMessage: vi.fn() },
+    client: { sendText }, publicAppUrl: "https://reimbursement.example.test", acceptedEventTypes: ["ClaimSubmitted"],
+    notificationConfigs: {
+      getActive: async () => ({ version: activeVersion, payload: { events: [{ eventCode: "ClaimSubmitted", channel: "FEISHU", enabled: true, template: `版本${activeVersion}：{{body}}` }] } }),
+      getVersion: async (version) => ({ version, payload: { events: [{ eventCode: "ClaimSubmitted", channel: "FEISHU", enabled: true, template: `版本${version}：{{body}}` }] } }),
+    },
+    notificationSnapshots: { find: async () => snapshot, getOrCreate: async (candidate) => { snapshot ??= candidate; return snapshot; } },
+  });
+  const event = { event_id: "event-retry", event_type: "ClaimSubmitted", aggregate_id: "claim-1", payload: { claimId: "claim-1", notificationConfigVersion: 1 } };
+  await expect(handler.handle(event)).rejects.toThrow("network");
+  activeVersion = 3;
+  await handler.handle(event);
+  expect(sendText.mock.calls[0]?.[1]).toEqual(sendText.mock.calls[1]?.[1]);
+  expect(sendText.mock.calls[1]?.[1]).toContain("版本1：");
+  expect(snapshot).toMatchObject({ version: 1 });
+});
