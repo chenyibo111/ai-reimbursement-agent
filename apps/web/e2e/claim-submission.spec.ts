@@ -1,5 +1,22 @@
 import { expect, test } from "@playwright/test";
 
+test("administrator can inspect stage-two notification and OCR review controls on a narrow screen", async ({ page }) => {
+  const expiresAt = new Date(Date.now() + 5 * 60_000).toISOString();
+  await page.route("**/api/auth/access-token", (route) => route.fulfill({ json: { accessToken: "admin-token", expiresAt, employee: { id: "admin-e2e", displayName: "测试管理员", role: "ADMIN" } } }));
+  await page.route("**/api/v1/admin/config/notification_templates", (route) => route.fulfill({ status: 404, json: { code: "CONFIG_NOT_FOUND" } }));
+  await page.route("**/api/v1/admin/config/notification_templates/history", (route) => route.fulfill({ json: { items: [] } }));
+  await page.route("**/api/v1/admin/config/receipt_review", (route) => route.fulfill({ status: 404, json: { code: "CONFIG_NOT_FOUND" } }));
+  await page.route("**/api/v1/admin/config/receipt_review/history", (route) => route.fulfill({ json: { items: [] } }));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/admin/config/notifications");
+  await expect(page.getByRole("heading", { name: "通知模板与事件开关" })).toBeVisible();
+  await expect(page.getByLabel("启用飞书通知")).toBeChecked();
+  await page.getByRole("link", { name: "← 配置中心" }).click();
+  await page.getByRole("link", { name: "票据复核" }).click();
+  await expect(page.getByLabel("OCR 低置信度复核阈值")).toHaveValue("0.7");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
 test("employee creates a claim and reaches its Go API-backed workbench", async ({ page }) => {
   const expiresAt = new Date(Date.now() + 5 * 60_000).toISOString();
   await page.route("**/api/auth/access-token", (route) => route.fulfill({

@@ -103,21 +103,27 @@ func TestConfigHandlerRejectsNonAdminOnDraftAndHistory(t *testing.T) {
 	for _, role := range []string{"EMPLOYEE", "FINANCE_REVIEWER"} {
 		t.Run(role, func(t *testing.T) {
 			handler := &configHandler{role: func(context.Context, string) (string, error) { return role, nil }}
-			for _, route := range []struct {
-				method, path string
-				handle       http.HandlerFunc
-			}{
-				{http.MethodGet, "/api/v1/admin/config/expense_catalog", handler.getAdmin},
-				{http.MethodPost, "/api/v1/admin/config/expense_catalog/draft", handler.saveDraft},
-				{http.MethodGet, "/api/v1/admin/config/expense_catalog/history", handler.history},
-			} {
-				request := httptest.NewRequest(route.method, route.path, nil)
-				request.SetPathValue("domain", "expense_catalog")
-				request = request.WithContext(context.WithValue(request.Context(), actorContextKey{}, Actor{ID: "employee-1", Role: role}))
-				response := httptest.NewRecorder()
-				route.handle(response, request)
-				if response.Code != http.StatusForbidden {
-					t.Fatalf("%s %s: got %d", route.method, route.path, response.Code)
+			for _, configDomain := range []string{"expense_catalog", "form_options", "feature_rollout", "receipt_review", "notification_templates"} {
+				for _, route := range []struct {
+					method, path string
+					handle       http.HandlerFunc
+				}{
+					{http.MethodGet, "/api/v1/admin/config/expense_catalog", handler.getAdmin},
+					{http.MethodPost, "/api/v1/admin/config/expense_catalog/draft", handler.saveDraft},
+					{http.MethodPost, "/api/v1/admin/config/expense_catalog/preview", handler.preview},
+					{http.MethodPost, "/api/v1/admin/config/expense_catalog/approve", handler.approve},
+					{http.MethodPost, "/api/v1/admin/config/expense_catalog/publish", handler.publish},
+					{http.MethodPost, "/api/v1/admin/config/expense_catalog/activate", handler.activate},
+					{http.MethodGet, "/api/v1/admin/config/expense_catalog/history", handler.history},
+				} {
+					request := httptest.NewRequest(route.method, route.path, nil)
+					request.SetPathValue("domain", configDomain)
+					request = request.WithContext(context.WithValue(request.Context(), actorContextKey{}, Actor{ID: "employee-1", Role: role}))
+					response := httptest.NewRecorder()
+					route.handle(response, request)
+					if response.Code != http.StatusForbidden {
+						t.Fatalf("%s %s: got %d", route.method, route.path, response.Code)
+					}
 				}
 			}
 		})

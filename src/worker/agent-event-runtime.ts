@@ -40,7 +40,7 @@ export function createAgentEventNotificationHandler(deps: {
         delivery = await deps.notificationSnapshots.find(eventId);
         if (!delivery) {
           if (notificationConfigVersion && !deps.notificationConfigs.getVersion) throw new Error("notification config version reader unavailable");
-          const config = notificationConfigVersion === 0 ? null : notificationConfigVersion ? await deps.notificationConfigs.getVersion!(notificationConfigVersion) : await deps.notificationConfigs.getActive();
+          const config = notificationConfigVersion ? await deps.notificationConfigs.getVersion!(notificationConfigVersion) : null;
           const selected = selectNotificationTemplate(config, eventType);
           delivery = await deps.notificationSnapshots.getOrCreate({ eventId, version: selected.version, enabled: selected.enabled, text: selected.enabled ? renderConfiguredNotification(selected.template, { body: text }) : null });
         }

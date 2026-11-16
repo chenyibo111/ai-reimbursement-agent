@@ -74,3 +74,23 @@ it("reuses the first persisted notification when delivery retries after a templa
   expect(sendText.mock.calls[1]?.[1]).toContain("版本1：");
   expect(snapshot).toMatchObject({ version: 1 });
 });
+
+it("records a disabled event without sending and keeps old unversioned events on legacy text", async () => {
+  const progress = { claimId: "claim-1", claimNumber: "BX-9", status: "SUBMITTED", version: 3, receipts: [], issues: [], approval: "NOT_CONNECTED", payment: "NOT_CONNECTED" };
+  const sendText = vi.fn();
+  const snapshots = new Map<string, { eventId: string; version: number; enabled: boolean; text: string | null }>();
+  const handler = createAgentEventNotificationHandler({
+    port: { getOwnedClaimProgress: async () => progress } as never,
+    processedEvents: { wasProcessed: async () => false, markProcessed: vi.fn() },
+    conversations: { findNotificationTargetByClaimId: async () => ({ employeeId: "employee-1", conversationId: "conversation-1", chatId: "oc-1" }), appendMessage: vi.fn() },
+    client: { sendText }, publicAppUrl: "https://reimbursement.example.test", acceptedEventTypes: ["ClaimSubmitted"],
+    notificationConfigs: { getActive: async () => { throw new Error("old event must not read current config"); }, getVersion: async (version) => ({ version, payload: { events: [{ eventCode: "ClaimSubmitted", channel: "FEISHU", enabled: false, template: "{{body}}" }] } }) },
+    notificationSnapshots: { find: async (id) => snapshots.get(id) ?? null, getOrCreate: async (candidate) => { snapshots.set(candidate.eventId, candidate); return candidate; } },
+  });
+  await handler.handle({ event_id: "disabled", event_type: "ClaimSubmitted", aggregate_id: "claim-1", payload: { claimId: "claim-1", notificationConfigVersion: 2 } });
+  expect(sendText).not.toHaveBeenCalled();
+  expect(snapshots.get("disabled")).toMatchObject({ version: 2, enabled: false, text: null });
+  await handler.handle({ event_id: "legacy", event_type: "ClaimSubmitted", aggregate_id: "claim-1", payload: { claimId: "claim-1" } });
+  expect(sendText).toHaveBeenCalledWith("oc-1", expect.stringContaining("BX-9：已提交"), "legacy");
+  expect(snapshots.get("legacy")).toMatchObject({ version: 0, enabled: true });
+});
