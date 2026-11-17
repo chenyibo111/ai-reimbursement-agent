@@ -4,12 +4,13 @@ import { consumeReceiptExtractionEvents } from "./jetstream-consumer";
 
 it("acks only after the receipt event handler succeeds", async () => {
   const ack = vi.fn();
-  const consumer = { next: vi.fn().mockResolvedValue({ data: new TextEncoder().encode(JSON.stringify({ event_id: "event-1", event_type: "ReceiptExtractionCompleted", aggregate_id: "receipt-1", payload: { claimId: "claim-1" } })), ack, nak: vi.fn() }) };
+  const consumer = { next: vi.fn().mockResolvedValue({ data: new TextEncoder().encode(JSON.stringify({ event_id: "event-1", event_type: "ReceiptExtractionCompleted", aggregate_id: "receipt-1", payload: { claimId: "claim-1", notificationConfigVersion: 3 } })), ack, nak: vi.fn() }) };
   const handled = vi.fn();
 
   await consumeReceiptExtractionEvents({ consumer, handle: handled, shouldContinue: () => consumer.next.mock.calls.length === 0 });
 
   expect(handled).toHaveBeenCalledWith(expect.objectContaining({ event_id: "event-1" }));
+  expect(handled).toHaveBeenCalledWith(expect.objectContaining({ payload: { claimId: "claim-1", notificationConfigVersion: 3 } }));
   expect(ack).toHaveBeenCalledOnce();
 });
 

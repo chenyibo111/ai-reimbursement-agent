@@ -49,6 +49,18 @@ func main() {
 	claimRepository := store.NewPostgresClaimRepository(pool)
 	configService := application.NewConfigService(store.NewPostgresConfigRepository(pool))
 	configService.RegisterValidator("expense_catalog", application.ValidateExpenseCatalogPayload)
+	configService.RegisterValidator("form_options", application.ValidateFormOptionsPayload)
+	configService.RegisterValidator("feature_rollout", application.ValidateFeatureRolloutPayload)
+	configService.RegisterValidator("receipt_review", application.ValidateReceiptReviewConfigPayload)
+	configService.RegisterValidator("notification_templates", application.ValidateNotificationConfigPayload)
+	configService.SetReceiptReviewSampleReader(store.NewPostgresReceiptReviewSamples(pool))
+	configService.RegisterPublishValidator("feature_rollout", func(ctx context.Context, payload json.RawMessage) error {
+		return application.ValidateFeatureRolloutEmployees(ctx, payload, store.NewPostgresEmployeeIdentityRepository(pool))
+	})
+	configService.RegisterSaveValidator("feature_rollout", func(ctx context.Context, payload json.RawMessage) error {
+		return application.ValidateFeatureRolloutEmployees(ctx, payload, store.NewPostgresEmployeeIdentityRepository(pool))
+	})
+	configService.SetFeatureRolloutPopulationReader(store.NewPostgresEmployeeIdentityRepository(pool))
 	configService.RegisterPublishValidator("expense_catalog", func(ctx context.Context, payload json.RawMessage) error {
 		return application.ValidateExpenseCatalogPolicyReferences(ctx, payload, store.NewPostgresSubmissionRepository(pool))
 	})
@@ -131,11 +143,14 @@ func main() {
 	policyRuleService := application.NewPolicyRuleService(store.NewPostgresPolicyRuleRepository(pool))
 	policyRuleService.SetExpenseCatalogReader(application.NewCachedExpenseCatalogReader(configService))
 	claimService.SetItemizedEmployeeIDs(strings.Split(os.Getenv("REIMBURSEMENT_ITEMIZED_EMPLOYEE_IDS"), ","))
+	claimService.SetFeatureRolloutReader(configService)
+	receiptService := application.NewReceiptServiceWithOptions(claimRepository, receiptRepository, objects, infrastructure.NewClamAVScanner(clamAddress), infrastructure.NewHTTPReceiptOCRClient(ocrURL), application.SecureIDGenerator{}, application.ReceiptServiceOptions{AllowDuplicateContentForTesting: allowDuplicateContentForTesting, AllowDuplicateSubmittedInvoiceForTesting: allowDuplicateSubmittedInvoiceForTesting}, ocrSuggestionRefresher)
+	receiptService.SetReceiptReviewConfigReader(configService)
 	router := transport.NewRouter(transport.Dependencies{
 		Claims:             claimService,
 		Submissions:        submissionService,
 		Progress:           application.NewClaimProgressService(store.NewPostgresClaimProgressRepository(pool), submissionService),
-		Receipts:           application.NewReceiptServiceWithOptions(claimRepository, receiptRepository, objects, infrastructure.NewClamAVScanner(clamAddress), infrastructure.NewHTTPReceiptOCRClient(ocrURL), application.SecureIDGenerator{}, application.ReceiptServiceOptions{AllowDuplicateContentForTesting: allowDuplicateContentForTesting, AllowDuplicateSubmittedInvoiceForTesting: allowDuplicateSubmittedInvoiceForTesting}, ocrSuggestionRefresher),
+		Receipts:           receiptService,
 		ExpenseItems:       store.NewPostgresExpenseItemRepository(pool),
 		Admin:              transport.AdminServices{Policies: policyRuleService, Reviews: application.NewReviewCaseService(reviewCaseRepository), Previews: application.NewReceiptPreviewService(reviewCaseRepository, receiptRepository, objects), Role: store.EmployeeRole(pool)},
 		Configs:            configService,

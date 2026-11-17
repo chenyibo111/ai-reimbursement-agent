@@ -570,6 +570,7 @@ func claimResponse(claim application.ClaimView) map[string]any {
 		"ownerId":                      claim.OwnerID,
 		"status":                       claim.Status,
 		"itemizationMode":              claim.ItemizationMode,
+		"itemizationRolloutVersion":    claim.ItemizationRolloutVersion,
 		"version":                      claim.Version,
 		"purpose":                      claim.Purpose,
 		"expenseCategory":              claim.ExpenseCategory,

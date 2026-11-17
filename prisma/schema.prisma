@@ -420,6 +420,14 @@ model AgentProcessedEvent {
   @@index([processedAt])
 }
 
+model AgentEventNotificationSnapshot {
+  eventId    String   @id
+  version    Int
+  enabled    Boolean
+  text       String?
+  createdAt  DateTime @default(now())
+}
+
 model ReimbursementIntake {
   id                     String                    @id @default(cuid())
   employeeId             String
@@ -594,6 +602,10 @@ model ReceiptExtractionNotification {
   leaseUntil   DateTime?
   failureCode  String?
   sentAt       DateTime?
+  templateVersion Int?
+  templateEnabled Boolean?
+  templateText String?
+  renderedText String?
   createdAt    DateTime                          @default(now())
   updatedAt    DateTime                          @updatedAt
 

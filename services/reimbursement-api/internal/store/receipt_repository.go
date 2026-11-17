@@ -233,9 +233,9 @@ func (repository *PostgresReceiptRepository) TransitionToReview(ctx context.Cont
 	} else if _, err := tx.Exec(ctx, `
 		UPDATE reimbursement.receipts
 		SET invoice_number = NULLIF($2, ''), invoice_date = $3, total_amount_cent = $4,
-		    seller_name = NULLIF($5::text, ''), ocr_confidence = $6, ocr_text = $7, status = 'REVIEW_REQUIRED', updated_at = now()
+		    seller_name = NULLIF($5::text, ''), ocr_confidence = $6, ocr_text = $7, review_config_version = $8, status = 'REVIEW_REQUIRED', updated_at = now()
 		WHERE id = $1
-	`, receiptID, ocrResult.InvoiceNumber, ocrResult.InvoiceDate, ocrResult.TotalAmountCent, ocrResult.SellerName, ocrResult.Confidence, ocrResult.Text); err != nil {
+	`, receiptID, ocrResult.InvoiceNumber, ocrResult.InvoiceDate, ocrResult.TotalAmountCent, ocrResult.SellerName, ocrResult.Confidence, ocrResult.Text, ocrResult.ReviewConfigVersion); err != nil {
 		return fmt.Errorf("persist reviewable OCR candidate: %w", err)
 	}
 
@@ -248,12 +248,16 @@ func (repository *PostgresReceiptRepository) TransitionToReview(ctx context.Cont
 	}
 
 	var reviewCaseID string
+	var reviewConfigVersion int64
+	if ocrResult != nil {
+		reviewConfigVersion = ocrResult.ReviewConfigVersion
+	}
 	err = tx.QueryRow(ctx, `
-		INSERT INTO reimbursement.review_cases (id, claim_id, receipt_id, kind, reason_code, status)
-		VALUES ($1, $2, $3, 'RECEIPT_OCR', $4, 'OPEN')
+		INSERT INTO reimbursement.review_cases (id, claim_id, receipt_id, kind, reason_code, status, review_config_version)
+		VALUES ($1, $2, $3, 'RECEIPT_OCR', $4, 'OPEN', $5)
 		ON CONFLICT (receipt_id) WHERE receipt_id IS NOT NULL AND status IN ('OPEN', 'CLAIMED') DO NOTHING
 		RETURNING id
-	`, "receipt-review-"+randomUUID(), claimID, receiptID, reason).Scan(&reviewCaseID)
+	`, "receipt-review-"+randomUUID(), claimID, receiptID, reason, reviewConfigVersion).Scan(&reviewCaseID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("create receipt review case: %w", err)
 	}
@@ -292,9 +296,9 @@ func (repository *PostgresReceiptRepository) MarkExtracted(ctx context.Context, 
 		update, err := tx.Exec(ctx, `
 			UPDATE reimbursement.receipts
 			SET invoice_number = NULLIF($2, ''), invoice_date = $3, total_amount_cent = $4,
-			    seller_name = NULLIF($5::text, ''), ocr_confidence = $6, ocr_text = $7, status = 'EXTRACTED', updated_at = now()
+			    seller_name = NULLIF($5::text, ''), ocr_confidence = $6, ocr_text = $7, review_config_version = $8, status = 'EXTRACTED', updated_at = now()
 			WHERE id = $1
-		`, receiptID, result.InvoiceNumber, result.InvoiceDate, result.TotalAmountCent, result.SellerName, result.Confidence, result.Text)
+		`, receiptID, result.InvoiceNumber, result.InvoiceDate, result.TotalAmountCent, result.SellerName, result.Confidence, result.Text, result.ReviewConfigVersion)
 		if err != nil {
 			return "", "", err
 		}
@@ -391,7 +395,7 @@ func writeReceiptAuditAndEvent(ctx context.Context, tx pgx.Tx, receiptID string,
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO reimbursement.outbox_events (event_id, event_type, aggregate_id, payload)
-		VALUES ($1::uuid, $2, $3::text, jsonb_build_object('receiptId', $3::text, 'claimId', $4::text))
+		VALUES ($1::uuid, $2, $3::text, jsonb_build_object('receiptId', $3::text, 'claimId', $4::text, 'notificationConfigVersion', COALESCE((SELECT version FROM reimbursement.config_active_versions WHERE domain = 'notification_templates'), 0)))
 	`, randomUUID(), eventType, receiptID, claimID); err != nil {
 		return fmt.Errorf("insert receipt outbox event: %w", err)
 	}

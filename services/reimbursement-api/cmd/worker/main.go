@@ -69,6 +69,9 @@ func main() {
 		application.SecureIDGenerator{}, application.ReceiptServiceOptions{AllowDuplicateContentForTesting: allowDuplicateContentForTesting, AllowDuplicateSubmittedInvoiceForTesting: allowDuplicateSubmittedInvoiceForTesting}, claimRepository,
 	)
 	receiptService.SetExpenseItemSuggester(store.NewPostgresExpenseItemRepository(pool))
+	reviewConfigService := application.NewConfigService(store.NewPostgresConfigRepository(pool))
+	reviewConfigService.RegisterValidator("receipt_review", application.ValidateReceiptReviewConfigPayload)
+	receiptService.SetReceiptReviewConfigReader(reviewConfigService)
 	if os.Getenv("MODEL_PROVIDER") == "openai-compatible" {
 		configService := application.NewConfigService(store.NewPostgresConfigRepository(pool))
 		configService.RegisterValidator("expense_catalog", application.ValidateExpenseCatalogPayload)

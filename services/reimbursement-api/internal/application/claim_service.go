@@ -94,17 +94,29 @@ type IDGenerator interface {
 }
 
 type ClaimService struct {
-	repository        ClaimRepository
-	suggestions       ClaimOCRSuggestionRefresher
-	catalog           *CachedExpenseCatalogReader
-	itemizedEmployees map[string]struct{}
-	ids               IDGenerator
-	numbers           ClaimNumberGenerator
-	now               func() time.Time
+	repository         ClaimRepository
+	suggestions        ClaimOCRSuggestionRefresher
+	catalog            *CachedExpenseCatalogReader
+	featureRollout     FeatureRolloutSnapshotReader
+	featureRolloutMu   sync.RWMutex
+	lastFeatureRollout *publishedFeatureRollout
+	itemizedEmployees  map[string]struct{}
+	ids                IDGenerator
+	numbers            ClaimNumberGenerator
+	now                func() time.Time
+}
+
+type publishedFeatureRollout struct {
+	config  FeatureRollout
+	version int64
 }
 
 func (service *ClaimService) SetExpenseCatalogReader(reader *CachedExpenseCatalogReader) {
 	service.catalog = reader
+}
+
+func (service *ClaimService) SetFeatureRolloutReader(reader FeatureRolloutSnapshotReader) {
+	service.featureRollout = reader
 }
 
 func (service *ClaimService) SetItemizedEmployeeIDs(ids []string) {
@@ -133,7 +145,32 @@ func (service *ClaimService) CreateClaim(ctx context.Context, actorID string, co
 	if err != nil {
 		return ClaimView{}, err
 	}
-	if _, enabled := service.itemizedEmployees[actorID]; enabled {
+	_, enabled := service.itemizedEmployees[actorID]
+	if service.featureRollout != nil {
+		snapshot, readErr := service.featureRollout.GetActive(ctx, "feature_rollout")
+		var published *publishedFeatureRollout
+		if readErr == nil {
+			config, decodeErr := decodeFeatureRollout(snapshot.Payload)
+			if decodeErr != nil {
+				return ClaimView{}, fmt.Errorf("read active feature rollout: %w", decodeErr)
+			}
+			published = &publishedFeatureRollout{config: config, version: snapshot.Version}
+			service.featureRolloutMu.Lock()
+			service.lastFeatureRollout = published
+			service.featureRolloutMu.Unlock()
+		} else {
+			service.featureRolloutMu.RLock()
+			published = service.lastFeatureRollout
+			service.featureRolloutMu.RUnlock()
+		}
+		if published != nil {
+			enabled = IsEnabledForEmployee(published.config, actorID, "")
+			claim.ItemizationRolloutVersion = published.version
+		} else if readErr != nil && !errors.Is(readErr, ErrConfigNotFound) {
+			return ClaimView{}, fmt.Errorf("read active feature rollout: %w", readErr)
+		}
+	}
+	if enabled {
 		claim.ItemizationMode = domain.ClaimItemizationModeItemized
 		if claim.Purpose == "" {
 			claim.PurposeSource = "AUTO"

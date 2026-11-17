@@ -11,6 +11,8 @@ import { createFeishuBotClient } from "@/src/infrastructure/feishu/feishu-bot-cl
 import { createLogger } from "@/src/observability/logger";
 import { validateFeishuWorkerEnvironment } from "@/src/server/config";
 import { createAgentEventNotificationHandler } from "@/src/worker/agent-event-runtime";
+import { createNotificationConfigClient } from "@/src/infrastructure/reimbursement/config-client";
+import { AgentEventNotificationSnapshotRepository } from "@/src/infrastructure/prisma/agent-event-notification-snapshot-repository";
 
 const logger = createLogger("agent-event-worker");
 
@@ -48,7 +50,9 @@ async function main() {
     const processedEvents = new PrismaAgentProcessedEventRepository(prisma, AGENT_RECEIPT_EVENT_CONSUMER);
     const conversations = new AgentConversationRepository(prisma);
     const client = createFeishuBotClient({ appId: bot.appId, appSecret: bot.appSecret });
-    const common = { port, processedEvents, conversations, client, publicAppUrl: bot.publicAppUrl };
+    const notificationConfigs = createNotificationConfigClient({ baseUrl: requiredEnv("REIMBURSEMENT_API_URL"), serviceKey: requiredEnv("REIMBURSEMENT_AUTH_PROVISIONING_KEY") });
+    const notificationSnapshots = new AgentEventNotificationSnapshotRepository(prisma);
+    const common = { port, processedEvents, conversations, client, publicAppUrl: bot.publicAppUrl, notificationConfigs, notificationSnapshots };
     const receiptHandler = createAgentEventNotificationHandler({ ...common, acceptedEventTypes: ["ReceiptExtractionCompleted"] });
     const progressHandler = createAgentEventNotificationHandler({ ...common, acceptedEventTypes: ["ReceiptReviewRequired", "ReceiptReviewResolved", "ClaimSubmitted"] });
     logger.info("worker.started", "Agent 事件 Worker 已启动", { status: "ready" });

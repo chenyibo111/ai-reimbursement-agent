@@ -95,6 +95,7 @@ func NewRouter(dependencies Dependencies) http.Handler {
 	if dependencies.Configs != nil {
 		config := &configHandler{service: dependencies.Configs, role: dependencies.Admin.Role, serviceKey: []byte(dependencies.ProvisioningKey)}
 		mux.HandleFunc("GET /api/v1/admin/config/{domain}", config.getAdmin)
+		mux.HandleFunc("GET /api/v1/admin/config/feature_rollout/audience", config.rolloutAudience)
 		mux.HandleFunc("POST /api/v1/admin/config/{domain}/draft", config.saveDraft)
 		mux.HandleFunc("POST /api/v1/admin/config/{domain}/preview", config.preview)
 		mux.HandleFunc("POST /api/v1/admin/config/{domain}/approve", config.approve)
@@ -120,6 +121,7 @@ func NewRouter(dependencies Dependencies) http.Handler {
 	if dependencies.Configs != nil && strings.TrimSpace(dependencies.ProvisioningKey) != "" {
 		config := &configHandler{service: dependencies.Configs, serviceKey: []byte(dependencies.ProvisioningKey)}
 		internal.HandleFunc("GET /internal/v1/config/{domain}/active", config.getInternal)
+		internal.HandleFunc("GET /internal/v1/config/{domain}/versions/{version}", config.getInternalVersion)
 	}
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if strings.HasPrefix(request.URL.Path, "/api/auth/") && dependencies.AuthBFF != nil {

@@ -110,6 +110,10 @@ func TestPostgresSubmissionRepositoryCreatesImmutableSnapshotAndReplays(t *testi
 	if err = pool.QueryRow(ctx, `SELECT count(*) FROM reimbursement.outbox_events WHERE aggregate_id = $1 AND event_type = 'claim.submitted.v1'`, claimID).Scan(&events); err != nil {
 		t.Fatalf("count submission events: %v", err)
 	}
+	var notificationEvents int
+	if err = pool.QueryRow(ctx, `SELECT count(*) FROM reimbursement.outbox_events WHERE aggregate_id = $1 AND event_type = 'ClaimSubmitted' AND payload ? 'notificationConfigVersion'`, claimID).Scan(&notificationEvents); err != nil || notificationEvents != 1 {
+		t.Fatalf("submission notification events=%d err=%v", notificationEvents, err)
+	}
 	var snapshotAmount int64
 	var snapshotCurrency string
 	var snapshotSource string
@@ -140,6 +144,19 @@ func TestBlockingSubmissionInputRequiresItemAmount(t *testing.T) {
 	items := []domain.ExpenseItem{{ID: "taxi", ReceiptID: "taxi"}}
 	if !blockingSubmissionInput(claim, receipts, items) {
 		t.Fatal("missing item amount must block the transaction")
+	}
+}
+
+func TestBlockingSubmissionInputUsesPersistedReceiptStatus(t *testing.T) {
+	amount := int64(1000)
+	claim := domain.Claim{Status: domain.ClaimStatusDraft, Purpose: "客户拜访", RequestedAmountCent: &amount}
+	receipts := []domain.Receipt{{Status: domain.ReceiptStatusExtracted, OCRConfidence: 0.65}}
+	if blockingSubmissionInput(claim, receipts, nil) {
+		t.Fatal("extracted receipt was reclassified using its old OCR confidence")
+	}
+	receipts[0].Status = domain.ReceiptStatusReview
+	if !blockingSubmissionInput(claim, receipts, nil) {
+		t.Fatal("review-required receipt was allowed")
 	}
 }
 

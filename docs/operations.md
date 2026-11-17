@@ -108,6 +108,8 @@ Go Auth BFF 根据 `FEISHU_ADMIN_OPEN_IDS` 和企业成员身份签发管理员�
 
 ## 异步任务与人工复核运行
 
+第二阶段的管理员操作、双员工灰度、OCR 阈值双人复核和通知模板验收步骤见 [票据驱动明细灰度验收](operations/receipt-driven-itemized-rollout.md#配置中心第二阶段验收)。部署顺序是先执行 Go `000027`、`000028` 与 Prisma `20261116090000_notification_template_snapshot` 迁移，再更新 Go API、Go Worker、Web 与 Agent 事件 Worker。通知事件在 Go outbox 创建时记录模板版本，Worker 使用服务身份读取该历史版本，并在首次发送前保存最终文案；失败重试不重新渲染。`REIMBURSEMENT_ITEMIZED_EMPLOYEE_IDS` 只在该域尚未发布时作为回退，生产回退使用配置版本激活。当前 Web 页面没有独立消息投递渠道，通知开关只覆盖飞书事件。
+
 Agent 报销办理仅调用 Go API。部署前确认 Go API、NATS、MinIO 与 `REIMBURSEMENT_API_URL`、`REIMBURSEMENT_AGENT_SERVICE_KEY`、`REIMBURSEMENT_AUTH_HS256_SECRET` 已就绪；容器内预签名上传通过 `REIMBURSEMENT_AGENT_STORAGE_ENDPOINT` 访问 MinIO。Go 服务故障时先恢复服务，不能让 Agent 切换到旧 Prisma 报销写入路径；需要回滚时应整体回滚 Web、飞书 Worker 与 Go API 的兼容镜像版本。
 
 部署前先执行 Prisma 迁移，再启动 `reimbursement-web`、`reimbursement-api`、`agent-admin`、`feishu-bot-worker` 与 `job-worker`。Node Worker 使用单独的运行依赖锁文件和镜像；`job-worker` 领取历史 OCR 与政策来源同步任务，React 经 Go 创建和查询任务。

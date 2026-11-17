@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/application"
 )
@@ -94,6 +95,15 @@ func (handler *configHandler) preview(response http.ResponseWriter, request *htt
 		writeConfigError(response, err)
 		return
 	}
+	if request.PathValue("domain") == "receipt_review" {
+		impact, err := handler.service.PreviewReceiptReviewImpact(request.Context(), body.Revision)
+		if err != nil {
+			writeConfigError(response, err)
+			return
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"draft": preview.Draft, "active": preview.Active, "impact": impact})
+		return
+	}
 	writeJSON(response, http.StatusOK, preview)
 }
 
@@ -172,8 +182,42 @@ func (handler *configHandler) history(response http.ResponseWriter, request *htt
 	writeJSON(response, http.StatusOK, map[string]any{"items": items})
 }
 
+func (handler *configHandler) rolloutAudience(response http.ResponseWriter, request *http.Request) {
+	if _, ok := handler.authorize(request); !ok {
+		configForbidden(response)
+		return
+	}
+	count, err := handler.service.CountFeatureRolloutAudience(request.Context())
+	if err != nil {
+		writeConfigError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]int{"activeEmployeeCount": count})
+}
+
 func (handler *configHandler) getPublic(response http.ResponseWriter, request *http.Request) {
 	configDomain := request.PathValue("domain")
+	if configDomain == "receipt_review_labels" {
+		snapshot, err := handler.service.GetActive(request.Context(), "receipt_review")
+		if errors.Is(err, application.ErrConfigNotFound) {
+			writeJSON(response, http.StatusOK, map[string]any{"version": 0, "reasonLabels": map[string]string{}})
+			return
+		}
+		if err != nil {
+			writeConfigError(response, err)
+			return
+		}
+		var payload application.ReceiptReviewConfig
+		if err := json.Unmarshal(snapshot.Payload, &payload); err != nil {
+			writeConfigError(response, err)
+			return
+		}
+		if payload.ReasonLabels == nil {
+			payload.ReasonLabels = map[string]string{}
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"version": snapshot.Version, "reasonLabels": payload.ReasonLabels})
+		return
+	}
 	if configDomain != "expense_catalog" && configDomain != "form_options" {
 		configForbidden(response)
 		return
@@ -213,6 +257,24 @@ func (handler *configHandler) getInternal(response http.ResponseWriter, request 
 		return
 	}
 	snapshot, err := handler.service.GetActive(request.Context(), request.PathValue("domain"))
+	if err != nil {
+		writeConfigError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, snapshot)
+}
+
+func (handler *configHandler) getInternalVersion(response http.ResponseWriter, request *http.Request) {
+	if len(handler.serviceKey) == 0 || subtle.ConstantTimeCompare([]byte(request.Header.Get("X-Auth-Provisioning-Key")), handler.serviceKey) != 1 {
+		writeError(response, http.StatusUnauthorized, "UNAUTHENTICATED", "内部配置读取未获授权")
+		return
+	}
+	version, err := strconv.ParseInt(request.PathValue("version"), 10, 64)
+	if err != nil || version <= 0 {
+		writeConfigError(response, application.ErrConfigInvalid)
+		return
+	}
+	snapshot, err := handler.service.GetVersion(request.Context(), request.PathValue("domain"), version)
 	if err != nil {
 		writeConfigError(response, err)
 		return

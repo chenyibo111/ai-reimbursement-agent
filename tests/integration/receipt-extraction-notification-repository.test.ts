@@ -61,6 +61,28 @@ it("creates the OCR job and its Feishu notification in one durable transaction",
   await expect(prisma.receiptExtractionNotification.findUniqueOrThrow({ where: { jobId: job.id } })).resolves.toMatchObject({ claimId: claim.id, receiptId: receipt.id, conversationId: conversation.id, chatId: "oc-atomic", status: "PENDING" });
 });
 
+it("fixes the template version at enqueue and preserves rendered text across retries", async () => {
+  const target = await createTarget("SUCCEEDED");
+  const repository = new ReceiptExtractionNotificationRepository(prisma);
+  const created = await repository.createForFeishuUpload({ ...target, conversationId: target.conversationId, chatId: "oc-snapshot", templateVersion: 7, templateEnabled: true, templateText: "通知：{{body}}" });
+  const now = new Date("2099-09-28T08:00:00.000Z");
+  const claimed = await repository.claimNextDeliverable(now, 60_000);
+  expect(claimed).toMatchObject({ id: created.id, templateVersion: 7, templateText: "通知：{{body}}" });
+  expect(await repository.saveRenderedTextIfAbsent(created.id, "通知：原文案")).toBe("通知：原文案");
+  expect(await repository.saveRenderedTextIfAbsent(created.id, "通知：新文案")).toBe("通知：原文案");
+});
+
+it("uses the published template at enqueue and skips a disabled event", async () => {
+  const target = await createTarget("PENDING");
+  let version = 3;
+  let enabled = true;
+  const repository = new ReceiptExtractionNotificationRepository(prisma, { getActive: async () => ({ version, payload: { events: [{ eventCode: "ReceiptExtractionCompleted", channel: "FEISHU", enabled, template: "{{body}}" }] } }) });
+  await repository.enqueueForFeishuUpload({ claimId: target.claimId, receiptId: target.receiptId, conversationId: target.conversationId, chatId: "oc-original" });
+  version = 4; enabled = false;
+  await repository.enqueueForFeishuUpload({ claimId: target.claimId, receiptId: target.receiptId, conversationId: target.conversationId, chatId: "oc-original" });
+  expect(await prisma.receiptExtractionNotification.findUniqueOrThrow({ where: { jobId: target.jobId } })).toMatchObject({ templateVersion: 3, templateEnabled: true, templateText: "{{body}}" });
+});
+
 async function createTarget(status: "PENDING" | "SUCCEEDED") {
   const employee = await prisma.employee.create({ data: { id: "notification-employee", displayName: "通知员工" } });
   const claim = await prisma.claimDraft.create({ data: { employeeId: employee.id } });

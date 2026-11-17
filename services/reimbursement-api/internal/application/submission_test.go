@@ -10,6 +10,20 @@ import (
 	"github.com/chenyibo111/ai-reimbursement-agent/services/reimbursement-api/internal/domain"
 )
 
+func TestSubmissionUsesReceiptReviewDecisionInsteadOfCurrentConfidenceThreshold(t *testing.T) {
+	amount := int64(1000)
+	input := SubmissionInput{Claim: domain.Claim{Status: domain.ClaimStatusDraft, Purpose: "客户拜访", RequestedAmountCent: &amount}, Receipts: []domain.Receipt{{Status: domain.ReceiptStatusExtracted, OCRConfidence: 0.65}}}
+	for _, issue := range validateSubmissionInput(input) {
+		if issue.Code == "LOW_OCR_CONFIDENCE" {
+			t.Fatalf("old extracted receipt was re-evaluated: %+v", issue)
+		}
+	}
+	input.Receipts[0].Status = domain.ReceiptStatusReview
+	if !hasBlockingIssue(validateSubmissionInput(input)) {
+		t.Fatal("receipt still awaiting review was allowed")
+	}
+}
+
 func TestPublishedPolicyBlocksAndInvalidatesOldConfirmation(t *testing.T) {
 	repository := newFakeSubmissionRepository()
 	amount := int64(12000)

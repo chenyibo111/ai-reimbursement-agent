@@ -35,6 +35,7 @@ type Claim struct {
 	OwnerID                      string
 	Status                       ClaimStatus
 	ItemizationMode              ClaimItemizationMode
+	ItemizationRolloutVersion    int64
 	Purpose                      string
 	PurposeSource                string
 	ExpenseCategory              string

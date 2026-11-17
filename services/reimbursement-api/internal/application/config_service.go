@@ -38,11 +38,86 @@ type ConfigRepository interface {
 type ConfigService struct {
 	repository        ConfigRepository
 	validators        map[string]func(json.RawMessage) error
+	saveValidators    map[string]func(context.Context, json.RawMessage) error
 	publishValidators map[string]func(context.Context, json.RawMessage) error
+	rolloutPopulation FeatureRolloutPopulationReader
+	reviewSamples     ReceiptReviewSampleReader
+}
+
+type ReceiptReviewSampleReader interface {
+	RecentOCRConfidences(context.Context, int) ([]float64, error)
+}
+
+type ReceiptReviewImpact struct {
+	RecentSampleCount  int `json:"recentSampleCount"`
+	NewReviewCount     int `json:"newReviewCount"`
+	ReducedReviewCount int `json:"reducedReviewCount"`
+}
+
+func (service *ConfigService) SetReceiptReviewSampleReader(reader ReceiptReviewSampleReader) {
+	service.reviewSamples = reader
+}
+
+func (service *ConfigService) PreviewReceiptReviewImpact(ctx context.Context, revision int64) (ReceiptReviewImpact, error) {
+	preview, err := service.PreviewDraft(ctx, "receipt_review", revision)
+	if err != nil {
+		return ReceiptReviewImpact{}, err
+	}
+	if service.reviewSamples == nil {
+		return ReceiptReviewImpact{}, ErrConfigValidatorUnavailable
+	}
+	next, err := decodeReceiptReviewConfig(preview.Draft.Payload)
+	if err != nil {
+		return ReceiptReviewImpact{}, err
+	}
+	previous := ReceiptReviewConfig{LowOCRConfidenceThreshold: DefaultLowOCRConfidenceThreshold}
+	if preview.Active != nil {
+		previous, err = decodeReceiptReviewConfig(preview.Active.Payload)
+		if err != nil {
+			return ReceiptReviewImpact{}, err
+		}
+	}
+	confidences, err := service.reviewSamples.RecentOCRConfidences(ctx, 500)
+	if err != nil {
+		return ReceiptReviewImpact{}, err
+	}
+	impact := ReceiptReviewImpact{RecentSampleCount: len(confidences)}
+	for _, confidence := range confidences {
+		before := confidence > 0 && confidence < previous.LowOCRConfidenceThreshold
+		after := confidence > 0 && confidence < next.LowOCRConfidenceThreshold
+		if after && !before {
+			impact.NewReviewCount++
+		}
+		if before && !after {
+			impact.ReducedReviewCount++
+		}
+	}
+	return impact, nil
+}
+
+type FeatureRolloutPopulationReader interface {
+	CountActiveEmployees(context.Context) (int, error)
+}
+
+func (service *ConfigService) SetFeatureRolloutPopulationReader(reader FeatureRolloutPopulationReader) {
+	service.rolloutPopulation = reader
+}
+
+func (service *ConfigService) CountFeatureRolloutAudience(ctx context.Context) (int, error) {
+	if service.rolloutPopulation == nil {
+		return 0, ErrConfigValidatorUnavailable
+	}
+	return service.rolloutPopulation.CountActiveEmployees(ctx)
 }
 
 func NewConfigService(repository ConfigRepository) *ConfigService {
-	return &ConfigService{repository: repository, validators: map[string]func(json.RawMessage) error{}, publishValidators: map[string]func(context.Context, json.RawMessage) error{}}
+	return &ConfigService{repository: repository, validators: map[string]func(json.RawMessage) error{}, saveValidators: map[string]func(context.Context, json.RawMessage) error{}, publishValidators: map[string]func(context.Context, json.RawMessage) error{}}
+}
+
+func (service *ConfigService) RegisterSaveValidator(domain string, validate func(context.Context, json.RawMessage) error) {
+	if configDomains[domain] && validate != nil {
+		service.saveValidators[domain] = validate
+	}
 }
 
 func (service *ConfigService) RegisterValidator(domain string, validate func(json.RawMessage) error) {
@@ -77,6 +152,11 @@ func (service *ConfigService) SaveDraft(ctx context.Context, actorID, configDoma
 	if err := service.validators[configDomain](payload); err != nil {
 		return domain.ConfigDraft{}, errors.Join(ErrConfigInvalid, err)
 	}
+	if validate := service.saveValidators[configDomain]; validate != nil {
+		if err := validate(ctx, payload); err != nil {
+			return domain.ConfigDraft{}, errors.Join(ErrConfigInvalid, err)
+		}
+	}
 	return service.repository.SaveDraft(ctx, actorID, configDomain, expectedRevision, payload, note)
 }
 
@@ -85,6 +165,16 @@ func (service *ConfigService) GetActive(ctx context.Context, configDomain string
 		return domain.ConfigSnapshot{}, err
 	}
 	return service.repository.GetActive(ctx, configDomain)
+}
+
+func (service *ConfigService) GetVersion(ctx context.Context, configDomain string, version int64) (domain.ConfigSnapshot, error) {
+	if err := service.checkDomain(configDomain); err != nil {
+		return domain.ConfigSnapshot{}, err
+	}
+	if version <= 0 {
+		return domain.ConfigSnapshot{}, ErrConfigInvalid
+	}
+	return service.repository.GetVersion(ctx, configDomain, version)
 }
 
 func (service *ConfigService) GetDraft(ctx context.Context, configDomain string) (domain.ConfigDraft, error) {

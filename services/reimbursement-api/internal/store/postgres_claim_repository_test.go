@@ -13,6 +13,38 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+func TestPostgresClaimPreservesRolloutVersionOnReload(t *testing.T) {
+	databaseURL := os.Getenv("TEST_REIMBURSEMENT_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_REIMBURSEMENT_DATABASE_URL is not configured")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	suffix := time.Now().UTC().Format("20060102150405.000000000")
+	ownerID, claimID := "rollout-owner-"+suffix, "rollout-claim-"+suffix
+	if _, err := pool.Exec(ctx, `INSERT INTO reimbursement.employees (id, display_name) VALUES ($1, 'Rollout Test')`, ownerID); err != nil {
+		t.Fatal(err)
+	}
+	claim, err := domain.NewDraftClaim(claimID, "BX20261115-"+suffix, ownerID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim.ItemizationMode = domain.ClaimItemizationModeItemized
+	claim.ItemizationRolloutVersion = 7
+	repository := NewPostgresClaimRepository(pool)
+	if err := repository.Create(ctx, claim, application.ClaimAudit{ClaimID: claimID, ActorID: ownerID, Action: "CLAIM_DRAFT_CREATED", Version: 1}, application.ClaimOutboxEvent{ClaimID: claimID, Type: "ClaimDraftCreated", Version: 1}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := repository.FindOwned(ctx, claimID, ownerID)
+	if err != nil || loaded.ItemizationRolloutVersion != 7 {
+		t.Fatalf("rollout version after reload=%d, err=%v", loaded.ItemizationRolloutVersion, err)
+	}
+}
+
 func TestPostgresClaimDeleteQueuesAttachmentsAndReplaysOneIdempotencyKey(t *testing.T) {
 	databaseURL := os.Getenv("TEST_REIMBURSEMENT_DATABASE_URL")
 	if databaseURL == "" {
